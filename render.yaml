@@ -9,9 +9,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.22.2
-      # No DATA_DIR set here on purpose: the free plan has no persistent disk,
-      # so the SQLite file lives in the container's own ephemeral storage and
-      # resets on every deploy/restart. Upgrade the plan above (e.g. "starter")
-      # and add a disk (see README's "Deploying this" section) to persist data,
-      # then set DATA_DIR to the disk's mount path here.
+      # SUPABASE_URL and SUPABASE_KEY are NOT set here on purpose — they're
+      # secrets, so set them in the Render dashboard (Environment tab)
+      # instead of committing them to this file. See README's "Deploying
+      # this" section for where to get them and supabase/schema.sql for the
+      # database setup they point at. The free plan's lack of a persistent
+      # disk is exactly why the database lives in Supabase instead of a
+      # local file — see README's "How the database works".
     healthCheckPath: /

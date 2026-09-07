@@ -26,10 +26,15 @@ coin flip, and a confetti burst on a win — rather than a business dashboard.
 
 ## Running it
 
-Requires **Node.js 22.5 or later** (uses the built-in `node:sqlite` module —
-no `npm install` needed, no external dependencies at all).
+Requires **Node.js 18 or later** (uses the built-in `fetch()` — no `npm
+install` needed, no external dependencies at all) and a free
+[Supabase](https://supabase.com) Postgres project for storage (see
+**Deploying this** below) — set two environment variables before starting
+it:
 
 ```
+SUPABASE_URL=https://<your-project-ref>.supabase.co
+SUPABASE_KEY=<your project's anon/publishable key>
 node server.js
 ```
 
@@ -37,21 +42,43 @@ Then open **http://localhost:3000** in a browser. Create a couple of
 accounts (one as a business, to try the payment portal) and try the
 features against each other.
 
-The database is a single SQLite file created automatically at
-`data/app.db` the first time you run it. Delete the `data/` folder to
-reset everything back to empty.
-
-## Deploying this (Render)
+## Deploying this (Render + Supabase)
 
 This repo includes a `render.yaml` blueprint for [Render](https://render.com), since it's a good fit for a plain, persistent Node.js server like this one (no build step, and Render will run `node server.js` directly):
 
 1. Push this repo to GitHub (or GitLab).
 2. In Render, create a new **Blueprint** and point it at the repo — it reads `render.yaml` and sets up the web service automatically, starting on the free plan.
-3. Render gives you a live `https://<something>.onrender.com` URL once the first deploy finishes.
+3. Create a free project at [supabase.com](https://supabase.com), run `supabase/schema.sql` against it (SQL Editor → paste → Run) to create the tables and the `exec_query` function the app talks to, then set `SUPABASE_URL` and `SUPABASE_KEY` (its Project URL and anon/publishable key, from Project Settings → API) as environment variables on the Render service.
+4. Render gives you a live `https://<something>.onrender.com` URL once the first deploy finishes.
 
-**Important limitation on the free plan**: Render's free web services don't get a persistent disk, so the SQLite database (`data/app.db`) lives in the container's own throwaway storage — every redeploy, or the free plan's auto-sleep-and-wake cycle, resets it back to empty. That's fine for letting people click around a live demo, but not for anything you want to keep accounts/balances in between deploys.
+**Why Supabase instead of a Render disk**: Render's free web services don't get a persistent disk, so anything written to the container's own filesystem resets on every redeploy or the free plan's auto-sleep-and-wake cycle. Rather than paying for a Render disk, the database lives in a separate free Supabase Postgres project instead — see **How the database works** below for how the app talks to it without adding any npm dependency.
 
-To make data persist: upgrade the web service to a paid instance type (the cheapest one that supports a disk), add a **Disk** in Render's dashboard (mount path `/var/data` is the usual convention), and set an environment variable `DATA_DIR=/var/data` on the service — `db.js` already reads that env var and will use it instead of the default local folder. No code changes needed beyond that.
+## How the database works
+
+The app used to store everything in a local SQLite file (via Node's
+built-in `node:sqlite` module) — simple, but Render's free plan has nowhere
+persistent to put that file (see above). It now stores everything in a
+Supabase Postgres project instead, reached with Node's built-in `fetch()`
+rather than a database driver package, so the project still has zero npm
+dependencies. `supabase/schema.sql` creates the tables plus one Postgres
+function, `exec_query(query, params)`, that takes a SQL string and a JSON
+array of parameters and returns the matching rows as JSON; `db.js` calls
+that function over Supabase's REST API for every query the app makes,
+converting the `?` placeholders used throughout `server.js` into Postgres's
+`$1, $2, ...` automatically. The `SUPABASE_KEY` this depends on should
+always be treated as a server-side secret — it's never sent to the
+browser — since `exec_query` can read and write every table regardless of
+that key's own row-level permissions (see the comments in `supabase/schema.sql`).
+
+Because every query is now a real network call instead of a synchronous
+local read, a few money-moving actions (send money, pay a request, buy an
+event ticket, and so on) that used to be safe by virtue of Node running
+everything for one request synchronously are now written as single
+Postgres statements that check-and-update balances atomically (see the
+comments around `db.atomicTransfer` in `db.js` and the `WITH ... RETURNING`
+queries in `server.js`) — this closes the same double-spend race a real
+payments backend has to worry about once more than one request can be in
+flight against the same account at once.
 
 ## What's actually implemented
 
@@ -308,20 +335,21 @@ to argue about.
 ## Project layout
 
 ```
-server.js       HTTP server + all API routes (plain Node http module, no framework)
-db.js           SQLite schema and connection (node:sqlite)
-auth.js         Password hashing + signed session tokens (node:crypto)
-ludo.js         Pure Ludo game rules (movement, capture, win detection) — no HTTP or DB in here
-public/         Frontend: index.html, styles.css, app.js (vanilla JS, no build step)
-data/           Created at runtime — the SQLite database file lives here
+server.js         HTTP server + all API routes (plain Node http module, no framework)
+db.js             Talks to the Supabase Postgres database over fetch() — see "How the database works"
+auth.js           Password hashing + signed session tokens (node:crypto)
+ludo.js           Pure Ludo game rules (movement, capture, win detection) — no HTTP or DB in here
+public/           Frontend: index.html, styles.css, app.js (vanilla JS, no build step)
+supabase/schema.sql   The Postgres tables + the exec_query function db.js calls — run this once against a new Supabase project
 ```
 
 ## Why no npm packages
 
-Everything here runs on Node's built-in modules (`http`, `crypto`,
-`node:sqlite`) on purpose, so there's nothing to install and nothing to
-audit for supply-chain risk in this early prototype. If you continue this
-build, reaching for Express, a real ORM, and a proper frontend framework
-(React/Vue) once the team and requirements grow is entirely reasonable —
-this version optimizes for "runs anywhere with zero setup" over
-production architecture.
+Everything here runs on Node's built-in modules (`http`, `crypto`, and
+`fetch()`) on purpose, so there's nothing to install and nothing to audit
+for supply-chain risk in this early prototype — including the database:
+see **How the database works** above for how it reaches Postgres without a
+driver package. If you continue this build, reaching for Express, a real
+ORM, and a proper frontend framework (React/Vue) once the team and
+requirements grow is entirely reasonable — this version optimizes for
+"runs anywhere with zero setup" over production architecture.
