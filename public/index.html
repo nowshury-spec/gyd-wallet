@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GYD Wallet — Phase 1 Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<div id="auth-screen">
+  <div class="auth-wrapper">
+    <div class="auth-hero">
+      <div class="auth-hero-inner">
+        <div class="hero-mark">🪙</div>
+        <h1 class="hero-title">GYD Wallet</h1>
+        <p class="hero-sub">Load up, send money, play for coins, and cash out. All in one place.</p>
+        <ul class="hero-features">
+          <li><span class="hero-icon">💸</span><div><strong>Wallet &amp; coins</strong><span>Load Guyana dollars, play with coins, cash out when you're ready.</span></div></li>
+          <li><span class="hero-icon">➤</span><div><strong>Send &amp; request, Cash App-style</strong><span>Pay or request money with a $cashtag, or send to anyone with a reference code — like a MoneyGram-style transfer.</span></div></li>
+          <li><span class="hero-icon">🎮</span><div><strong>Play for free</strong><span>Flip coins and spin the slots, no purchase or wager needed — just for fun.</span></div></li>
+        </ul>
+        <p class="hero-note">Phase 1 prototype — no real money is moved yet.</p>
+      </div>
+    </div>
+
+    <div class="auth-card">
+    <div class="auth-tabs">
+      <button id="tab-login" class="active">Log in</button>
+      <button id="tab-register">Sign up</button>
+    </div>
+
+    <form id="login-form">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="login-username" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="login-password" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn full">Log in</button>
+      <div class="error-msg" id="login-error"></div>
+    </form>
+
+    <form id="register-form" class="hidden">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="register-username" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="register-password" autocomplete="new-password" required />
+      </div>
+      <div class="checkbox-field">
+        <input type="checkbox" id="register-is-business" />
+        <label for="register-is-business" style="margin:0;">This is a business account</label>
+      </div>
+      <div class="field hidden" id="business-name-field">
+        <label>Business name</label>
+        <input type="text" id="register-business-name" />
+      </div>
+      <button type="submit" class="btn full">Create account</button>
+      <div class="error-msg" id="register-error"></div>
+    </form>
+    </div>
+  </div>
+</div>
+
+<div id="app-screen" class="hidden">
+  <div class="phone-frame">
+
+    <header class="app-header">
+      <div class="who">
+        <div class="avatar" id="who-avatar">?</div>
+        <div>
+          <div class="name" id="who-username">—</div>
+          <div class="tag" id="who-tag"></div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay">▦</button>
+        <button class="icon-btn" id="logout-btn" title="Log out">⏻</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <div class="banner">
+        <span class="banner-icon">ℹ</span>
+        <span>Phase 1 demo: deposits are simulated (no real payment processor is connected) and cash-out only records a
+        request rather than paying out. Real money movement needs the licensing steps in the business plan first.</span>
+      </div>
+
+      <div class="hero-balance">
+        <div class="hero-balance-label">Your balance</div>
+        <div class="hero-balance-value"><span id="balance-gyd">0.00</span><span class="hero-balance-unit">GYD</span></div>
+        <div class="hero-quick-actions">
+          <button class="quick-action" data-focus="deposit-amount">
+            <span class="quick-action-icon qa-green">＋</span>Add
+          </button>
+          <button class="quick-action" data-focus="cashout-amount">
+            <span class="quick-action-icon qa-blue">⇩</span>Cash Out
+          </button>
+          <button class="quick-action" data-tab-jump="games">
+            <span class="quick-action-icon qa-pink">🎮</span>Play
+          </button>
+          <button class="quick-action" data-tab-jump="send">
+            <span class="quick-action-icon qa-orange">➤</span>Send
+          </button>
+        </div>
+      </div>
+
+      <!-- WALLET TAB -->
+      <section id="panel-wallet" class="tab-panel">
+        <h2 class="section-title">Your $Cashtag</h2>
+        <div class="panel">
+          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Your $Cashtag is your unique payment handle — like on Cash App. Share it so people can pay or request money from you without needing your username.</p>
+          <div class="panel-row">
+            <div class="field">
+              <label>$Cashtag</label>
+              <input type="text" id="cashtag-input" placeholder="yourname" maxlength="20" />
+            </div>
+            <button class="btn secondary" id="cashtag-save-btn">Save</button>
+          </div>
+          <div class="error-msg" id="cashtag-error"></div>
+        </div>
+
+        <h2 class="section-title">Deposit real money (simulated)</h2>
+        <div class="panel">
+          <div class="panel-row">
+            <div class="field">
+              <label>Amount (GYD)</label>
+              <input type="number" id="deposit-amount" min="1" step="0.01" placeholder="5000.00" />
+            </div>
+            <button class="btn" id="deposit-btn">Deposit</button>
+          </div>
+          <div class="error-msg" id="deposit-error"></div>
+        </div>
+
+        <h2 class="section-title">Cash out GYD</h2>
+        <div class="panel">
+          <div class="panel-row">
+            <div class="field">
+              <label>Amount to cash out</label>
+              <input type="number" id="cashout-amount" min="0.01" step="0.01" placeholder="2000" />
+            </div>
+            <button class="btn secondary" id="cashout-btn">Request cash-out</button>
+          </div>
+          <p class="muted" style="font-size:12.5px; margin:10px 0 0;">
+            This deducts the GYD and files a pending request — it does not send real money in this prototype.
+          </p>
+          <div class="error-msg" id="cashout-error"></div>
+        </div>
+
+        <h2 class="section-title">Recent activity</h2>
+        <div class="panel">
+          <div class="table-scroll"><table>
+            <thead><tr><th>Type</th><th>Amount</th><th>Currency</th><th>Status</th><th>When</th></tr></thead>
+            <tbody id="transactions-body"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- SEND TAB -->
+      <section id="panel-send" class="tab-panel hidden">
+        <h2 class="section-title">Pay or request</h2>
+        <div class="panel pay-panel">
+          <div class="pay-amount-display" id="pay-amount-display">$0.00</div>
+          <div class="pay-keypad">
+            <button type="button" class="pay-key" data-key="1">1</button>
+            <button type="button" class="pay-key" data-key="2">2</button>
+            <button type="button" class="pay-key" data-key="3">3</button>
+            <button type="button" class="pay-key" data-key="4">4</button>
+            <button type="button" class="pay-key" data-key="5">5</button>
+            <button type="button" class="pay-key" data-key="6">6</button>
+            <button type="button" class="pay-key" data-key="7">7</button>
+            <button type="button" class="pay-key" data-key="8">8</button>
+            <button type="button" class="pay-key" data-key="9">9</button>
+            <span class="pay-key pay-key-blank" aria-hidden="true"></span>
+            <button type="button" class="pay-key" data-key="0">0</button>
+            <button type="button" class="pay-key pay-key-back" data-key="back" aria-label="Delete digit">⌫</button>
+          </div>
+          <div class="field">
+            <label>To</label>
+            <input type="text" id="pay-to" placeholder="$friend or friend_username" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>For (optional)</label>
+            <input type="text" id="pay-note" placeholder="What's this for?" />
+          </div>
+          <div class="pay-actions">
+            <button class="btn secondary" id="pay-request-btn" disabled>Request</button>
+            <button class="btn btn-play" id="pay-pay-btn" disabled>Pay</button>
+          </div>
+          <div class="error-msg" id="pay-error"></div>
+          <p class="muted" style="font-size:12.5px; margin:10px 0 0;">Instant, no fee — for friends who already have an account here. Tap the keypad to enter an amount.</p>
+        </div>
+
+        <h2 class="section-title">Requests waiting on you</h2>
+        <div class="panel" id="requests-incoming-list"><p class="muted">No requests right now.</p></div>
+
+        <h2 class="section-title">Requests you've sent</h2>
+        <div class="panel" id="requests-outgoing-list"><p class="muted">No requests sent yet.</p></div>
+
+        <div class="panel arcade-panel arcade-panel-remit">
+          <div class="arcade-header">
+            <h2 class="section-title" style="margin:0;">Send Money</h2>
+            <span class="arcade-tag arcade-tag-remit">Like MoneyGram</span>
+          </div>
+          <p class="remit-blurb">Send money to anyone by name and phone number — no account needed on their end. You get a reference code to share with them; they use it to pick up the money.</p>
+          <button class="btn btn-play btn-remit" id="remit-open-btn">Send Money</button>
+        </div>
+
+        <h2 class="section-title">Other users</h2>
+        <div class="panel">
+          <input type="text" id="user-search" placeholder="Search usernames or $cashtags…" />
+          <p class="muted" style="font-size:11.5px; margin:10px 0 0;">Tap a row to fill in "To" above.</p>
+          <div class="table-scroll"><table>
+            <thead><tr><th>$Cashtag</th><th>Username</th><th>Type</th></tr></thead>
+            <tbody id="users-body"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- SEND MONEY TAB (MoneyGram-style remittance, reached from the Send tab) -->
+      <section id="panel-remit" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="remit-back-btn">← Send</button>
+          <h2 class="section-title" style="margin:0;">Send Money</h2>
+        </div>
+
+        <div id="remit-main-view">
+          <div class="panel">
+            <h2 class="section-title">Send to someone new</h2>
+            <div class="panel-row">
+              <div class="field">
+                <label>Recipient full name</label>
+                <input type="text" id="remit-name" placeholder="As shown on their ID" />
+              </div>
+              <div class="field">
+                <label>Recipient phone number</label>
+                <input type="text" id="remit-phone" placeholder="+592 600 0000" />
+              </div>
+            </div>
+            <div class="panel-row">
+              <div class="field">
+                <label>Amount to send (GYD)</label>
+                <input type="number" id="remit-amount" min="0.01" step="0.01" placeholder="10000" />
+              </div>
+            </div>
+            <p class="muted" id="remit-fee-preview" style="font-size:12.5px; margin:2px 0 14px;"></p>
+            <button class="btn btn-play btn-remit" id="remit-send-btn">Send Money</button>
+            <div class="error-msg" id="remit-send-error"></div>
+          </div>
+
+          <div class="panel" id="remit-receipt-panel" hidden>
+            <h2 class="section-title" style="margin-top:0;">Transfer sent</h2>
+            <p class="muted" style="font-size:12.5px;">Share this reference code with the recipient — they'll enter it (along with their name, exactly as you typed it) under "Receive money" to pick it up.</p>
+            <div class="remit-reference-code" id="remit-receipt-code"></div>
+            <div class="muted" id="remit-receipt-detail" style="font-size:12.5px; text-align:center;"></div>
+            <button class="btn secondary full" id="remit-receipt-done-btn" style="margin-top:14px;">Done</button>
+          </div>
+
+          <div class="panel">
+            <h2 class="section-title" style="margin-top:0;">Receive money</h2>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Got a reference code from someone? Enter it here, with your name exactly as they typed it, to collect the money into your balance.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label>Reference code</label>
+                <input type="text" id="remit-claim-code" placeholder="48210936" />
+              </div>
+              <div class="field">
+                <label>Your name (as the sender typed it)</label>
+                <input type="text" id="remit-claim-name" placeholder="Full name" />
+              </div>
+              <button class="btn" id="remit-claim-btn">Receive money</button>
+            </div>
+            <div class="error-msg" id="remit-claim-error"></div>
+            <div id="remit-claim-success"></div>
+          </div>
+
+          <h2 class="section-title">Transfers you've sent</h2>
+          <div class="panel" id="remit-sent-list"><p class="muted">No transfers sent yet.</p></div>
+        </div>
+      </section>
+
+      <!-- SCAN & PAY TAB -->
+      <section id="panel-qr" class="tab-panel hidden">
+        <h2 class="section-title">Your code</h2>
+        <div class="panel">
+          <p class="muted" style="font-size:12.5px; margin:0 0 16px;">
+            Show this to someone so they can scan it and send you money. Leave the amount blank to let them choose how much to send —
+            or set a fixed amount to use it as a charge/checkout code.
+          </p>
+          <div class="panel-row" style="margin-bottom:16px;">
+            <div class="field">
+              <label>Fixed amount (optional)</label>
+              <input type="number" id="qr-fixed-amount" min="0.01" step="0.01" placeholder="Any amount" />
+            </div>
+            <div class="field">
+              <label>Memo (optional)</label>
+              <input type="text" id="qr-memo" placeholder="What's this for?" />
+            </div>
+          </div>
+          <div class="qr-display">
+            <div class="qr-code-card">
+              <img id="qr-image" alt="Your payment QR code" width="220" height="220" />
+            </div>
+            <div class="qr-code-text">
+              <div class="muted" style="font-size:11.5px; margin-bottom:6px;">Can't scan? Share this code instead:</div>
+              <code id="qr-payload-text"></code>
+              <button class="btn secondary small" id="qr-copy-btn" style="margin-top:10px;">Copy code</button>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Scan a code</h2>
+        <div class="panel">
+          <div id="qr-scan-idle">
+            <button class="btn" id="qr-start-scan-btn">📷 Start camera</button>
+            <label class="btn secondary" for="qr-upload-input" style="margin-left:8px;">Upload QR image</label>
+            <input type="file" id="qr-upload-input" accept="image/*" class="hidden" />
+            <p class="muted" id="qr-support-note" style="font-size:12px; margin-top:12px;"></p>
+          </div>
+
+          <div id="qr-scan-active" class="hidden">
+            <video id="qr-video" autoplay playsinline muted></video>
+            <button class="btn secondary small" id="qr-stop-scan-btn" style="margin-top:10px;">Cancel</button>
+          </div>
+
+          <div class="qr-manual">
+            <label>Or paste a code / type a username</label>
+            <div class="panel-row">
+              <input type="text" id="qr-manual-input" placeholder="gydpay:pay?to=$cashtag" style="flex:2;" />
+              <button class="btn secondary" id="qr-manual-btn">Use this</button>
+            </div>
+          </div>
+
+          <div class="error-msg" id="qr-scan-error"></div>
+        </div>
+
+        <div id="qr-pay-confirm" class="panel hidden">
+          <h2 class="section-title" style="margin-bottom:6px;">Confirm payment</h2>
+          <p style="margin:0 0 16px;">
+            Paying <strong id="qr-confirm-username">—</strong>
+            <span class="pill completed" id="qr-confirm-type"></span>
+          </p>
+          <div class="panel-row">
+            <div class="field">
+              <label>Amount (GYD)</label>
+              <input type="number" id="qr-confirm-amount" min="0.01" step="0.01" />
+            </div>
+            <div class="field">
+              <label>Memo</label>
+              <input type="text" id="qr-confirm-memo" />
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:16px;">
+            <button class="btn" id="qr-confirm-send-btn">Send payment</button>
+            <button class="btn secondary" id="qr-confirm-cancel-btn">Cancel</button>
+          </div>
+          <div class="error-msg" id="qr-confirm-error"></div>
+        </div>
+      </section>
+
+      <!-- GAMES TAB -->
+      <section id="panel-games" class="tab-panel hidden">
+        <div class="panel arcade-panel">
+          <div class="arcade-header">
+            <h2 class="section-title" style="margin:0;">Coin Flip</h2>
+            <span class="arcade-tag">Free to play</span>
+          </div>
+          <div class="coin-stage">
+            <div class="flip-coin" id="flip-coin">
+              <div class="coin-face coin-face-heads">H</div>
+              <div class="coin-face coin-face-tails">T</div>
+            </div>
+            <div class="coin-shadow" id="coin-shadow"></div>
+          </div>
+          <div class="game-choices">
+            <button class="game-choice" data-choice="heads">Heads</button>
+            <button class="game-choice" data-choice="tails">Tails</button>
+          </div>
+          <div style="text-align:center;">
+            <button class="btn btn-play" id="play-btn">Flip!</button>
+          </div>
+          <div class="error-msg" id="game-error"></div>
+          <div id="game-result-box"></div>
+        </div>
+
+        <h2 class="section-title">Coin flip history</h2>
+        <div class="panel">
+          <div class="table-scroll"><table>
+            <thead><tr><th>Choice</th><th>Result</th><th>Outcome</th><th>When</th></tr></thead>
+            <tbody id="rounds-body"></tbody>
+          </table></div>
+        </div>
+
+        <div class="panel arcade-panel arcade-panel-slots">
+          <div class="arcade-header">
+            <h2 class="section-title" style="margin:0;">Slot Machine</h2>
+            <span class="arcade-tag arcade-tag-gold">Free to play</span>
+          </div>
+          <div class="slot-machine">
+            <div class="slot-reel" id="slot-reel-0"><div class="slot-strip" id="slot-strip-0"><span class="slot-cell"><span class="slot-symbol">🍒</span></span></div></div>
+            <div class="slot-reel" id="slot-reel-1"><div class="slot-strip" id="slot-strip-1"><span class="slot-cell"><span class="slot-symbol">🍋</span></span></div></div>
+            <div class="slot-reel" id="slot-reel-2"><div class="slot-strip" id="slot-strip-2"><span class="slot-cell"><span class="slot-symbol">🔔</span></span></div></div>
+          </div>
+          <div class="slot-paytable">
+            <span>🍒🍒🍒 Nice!</span>
+            <span>🍋🍋🍋 Great!</span>
+            <span>🔔🔔🔔 Awesome!</span>
+            <span>💎💎💎 JACKPOT!</span>
+          </div>
+          <div style="text-align:center;">
+            <button class="btn btn-play btn-slots" id="slot-play-btn">Spin!</button>
+          </div>
+          <div class="error-msg" id="slot-error"></div>
+          <div id="slot-result-box"></div>
+        </div>
+
+        <h2 class="section-title">Slot machine history</h2>
+        <div class="panel">
+          <div class="table-scroll"><table>
+            <thead><tr><th>Reels</th><th>Outcome</th><th>When</th></tr></thead>
+            <tbody id="slot-rounds-body"></tbody>
+          </table></div>
+        </div>
+
+        <div class="panel arcade-panel arcade-panel-ludo">
+          <div class="arcade-header">
+            <h2 class="section-title" style="margin:0;">Ludo</h2>
+            <span class="arcade-tag arcade-tag-ludo">Free to play · 2 or 4 players</span>
+          </div>
+          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Race your pieces around the board head-to-head against other players — no wager, just for fun.</p>
+          <button class="btn btn-play full" id="ludo-open-btn">Play Ludo</button>
+        </div>
+
+      </section>
+
+      <!-- LUDO TAB (reached from the Games tab) -->
+      <section id="panel-ludo" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="ludo-back-btn">← Games</button>
+          <h2 class="section-title" style="margin:0;">Ludo</h2>
+        </div>
+
+        <!-- LOBBY: create/join a table -->
+        <div id="ludo-lobby-view">
+          <div class="panel">
+            <h2 class="section-title">Start a table</h2>
+            <div class="panel-row">
+              <div class="field">
+                <label>Players</label>
+                <select id="ludo-players-select">
+                  <option value="2">2</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              <button class="btn" id="ludo-create-btn">Create table</button>
+            </div>
+            <div class="error-msg" id="ludo-create-error"></div>
+          </div>
+
+          <h2 class="section-title">Your tables</h2>
+          <div class="panel" id="ludo-your-tables"><p class="muted">No Ludo tables yet.</p></div>
+
+          <h2 class="section-title">Open tables to join</h2>
+          <div class="panel" id="ludo-open-tables"><p class="muted">No open tables right now.</p></div>
+        </div>
+
+        <!-- TABLE: waiting room + active match, share the same board -->
+        <div id="ludo-table-view" class="hidden">
+          <div class="ludo-status-row">
+            <div id="ludo-status-text" class="ludo-status-text"></div>
+          </div>
+          <div class="ludo-seats" id="ludo-seats"></div>
+          <div class="ludo-table-actions" id="ludo-table-actions"></div>
+          <div class="ludo-board" id="ludo-board"></div>
+          <div class="ludo-controls" id="ludo-controls"></div>
+          <div class="error-msg" id="ludo-game-error"></div>
+        </div>
+      </section>
+
+      <!-- BUSINESS TAB -->
+      <section id="panel-business" class="tab-panel hidden">
+        <div style="display:flex; justify-content:flex-end; margin-bottom:-4px;">
+          <button class="btn secondary small" id="my-tickets-btn">🎟️ My tickets</button>
+        </div>
+        <h2 class="section-title">Find a business</h2>
+        <div class="panel">
+          <div class="panel-row">
+            <div class="field">
+              <label>Search</label>
+              <input type="text" id="directory-search" placeholder="Try “cake”, “haircut”, “mechanic”…" />
+            </div>
+            <div class="field">
+              <label>Category</label>
+              <select id="directory-category">
+                <option value="">All categories</option>
+              </select>
+            </div>
+          </div>
+          <div id="directory-results"><p class="muted">Loading businesses…</p></div>
+        </div>
+
+        <div id="business-owner-panel" class="hidden">
+          <h2 class="section-title">Your business wallet</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
+            <div class="biz-wallet-balance">
+              <span class="biz-wallet-label">Business balance</span>
+              <span class="biz-wallet-value">GYD <span id="biz-wallet-balance">0.00</span></span>
+            </div>
+            <div class="panel-row" style="margin-top:16px;">
+              <div class="field">
+                <label>Move to personal wallet</label>
+                <input type="number" id="biz-wallet-move-amount" min="0.01" step="0.01" placeholder="1000" />
+              </div>
+              <button class="btn secondary" id="biz-wallet-move-btn">Move</button>
+            </div>
+            <div class="error-msg" id="biz-wallet-move-error"></div>
+            <p class="muted" id="biz-wallet-move-success" style="font-size:12.5px; margin-top:2px;"></p>
+          </div>
+
+          <h2 class="section-title">Your business page</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Set this up so customers can find you — by category, or by searching what you sell, like searching "cake" and seeing every bakery that listed it.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label>Category</label>
+                <select id="bizpage-category">
+                  <option value="">Choose a category…</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Logo emoji</label>
+                <input type="text" id="bizpage-logo" maxlength="8" placeholder="🍰" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Tagline</label>
+              <input type="text" id="bizpage-tagline" maxlength="140" placeholder="Fresh cakes baked daily in Georgetown" />
+            </div>
+            <div class="field">
+              <label>Description</label>
+              <input type="text" id="bizpage-description" maxlength="1000" placeholder="Tell customers about your business…" />
+            </div>
+            <div class="field">
+              <label>What you offer (comma-separated — this is what search matches)</label>
+              <input type="text" id="bizpage-keywords" maxlength="300" placeholder="wedding cakes, cupcakes, birthday cakes" />
+            </div>
+            <div class="panel-row">
+              <div class="field">
+                <label>Phone (optional)</label>
+                <input type="text" id="bizpage-phone" placeholder="+592 600 0000" />
+              </div>
+              <div class="field">
+                <label>Location (optional)</label>
+                <input type="text" id="bizpage-location" placeholder="Georgetown, Guyana" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Page color</label>
+              <div class="swatch-row" id="bizpage-swatches"></div>
+              <input type="hidden" id="bizpage-theme-color" value="#00d964" />
+            </div>
+            <div class="checkbox-field">
+              <input type="checkbox" id="bizpage-offers-delivery" />
+              <label for="bizpage-offers-delivery" style="margin:0;">I offer delivery</label>
+            </div>
+            <div class="field hidden" id="bizpage-delivery-fee-field">
+              <label>Delivery fee (GYD) — 0 means free delivery</label>
+              <input type="number" id="bizpage-delivery-fee" min="0" step="0.01" placeholder="500" />
+            </div>
+            <button class="btn" id="bizpage-save-btn">Save my page</button>
+            <div class="error-msg" id="bizpage-save-error"></div>
+            <p class="muted" id="bizpage-save-success" style="font-size:12.5px; margin-top:8px;"></p>
+          </div>
+
+          <h2 class="section-title">Products &amp; prices</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Shown on your page, and searchable — someone searching a product name finds you even if it's not in your keywords.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label>Product or service name</label>
+                <input type="text" id="product-name" placeholder="Chocolate cake (8-inch)" />
+              </div>
+              <div class="field">
+                <label>Price (GYD)</label>
+                <input type="number" id="product-price" min="0.01" step="0.01" placeholder="3000" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Description (optional)</label>
+              <input type="text" id="product-description" placeholder="Rich chocolate sponge with ganache" />
+            </div>
+            <div class="field">
+              <label>Photo (optional)</label>
+              <label class="btn secondary" for="product-image-input" style="display:inline-flex;">Choose photo</label>
+              <input type="file" id="product-image-input" accept="image/*" class="hidden" />
+              <div class="product-image-preview hidden" id="product-image-preview">
+                <img id="product-image-preview-img" alt="Preview" />
+                <button type="button" class="btn secondary small" id="product-image-remove-btn">Remove photo</button>
+              </div>
+            </div>
+            <button class="btn secondary" id="product-add-btn">Add product</button>
+            <div class="error-msg" id="product-error"></div>
+            <div id="my-products-list" style="margin-top:16px;"><p class="muted">No products added yet.</p></div>
+          </div>
+
+          <h2 class="section-title">Events &amp; tickets</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Post a concert, sale, class, or anything else with a date — it shows up on your page so people can buy tickets right in the app. The platform keeps 3.5% of each ticket; you get the rest in your business wallet.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label>Event title</label>
+                <input type="text" id="event-title" placeholder="Live at the Seawall" />
+              </div>
+              <div class="field">
+                <label>Date</label>
+                <input type="datetime-local" id="event-date" />
+              </div>
+            </div>
+            <div class="panel-row">
+              <div class="field">
+                <label>Location (optional)</label>
+                <input type="text" id="event-location" placeholder="Seawall Bandstand, Georgetown" />
+              </div>
+              <div class="field">
+                <label>Ticket price (GYD)</label>
+                <input type="number" id="event-price" min="0.01" step="0.01" placeholder="4000" />
+              </div>
+              <div class="field">
+                <label>Capacity (optional)</label>
+                <input type="number" id="event-capacity" min="1" step="1" placeholder="Leave blank for unlimited" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Description (optional)</label>
+              <input type="text" id="event-description" placeholder="Tell people what to expect…" />
+            </div>
+            <button class="btn secondary" id="event-add-btn">Post event</button>
+            <div class="error-msg" id="event-error"></div>
+            <div id="my-events-list" style="margin-top:16px;"><p class="muted">No events posted yet.</p></div>
+          </div>
+
+          <h2 class="section-title">Check a ticket in</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Enter or scan the code from a customer's ticket QR code at the door.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label>Ticket code</label>
+                <input type="text" id="checkin-code" placeholder="A1B2C3D4E5" style="text-transform:uppercase;" />
+              </div>
+              <button class="btn" id="checkin-btn">Check in</button>
+              <button class="btn secondary" id="checkin-scan-btn">📷 Scan</button>
+            </div>
+            <div id="checkin-camera" class="hidden" style="margin-top:10px;">
+              <video id="checkin-video" autoplay playsinline muted style="width:100%; max-width:320px; border-radius:12px;"></video>
+              <div style="margin-top:8px;"><button class="btn secondary small" id="checkin-stop-scan-btn">Stop camera</button></div>
+            </div>
+            <div class="error-msg" id="checkin-error"></div>
+            <div id="checkin-result" style="margin-top:10px;"></div>
+          </div>
+
+          <h2 class="section-title">Request a payment from a customer</h2>
+          <div class="panel">
+            <div class="panel-row">
+              <div class="field">
+                <label>Customer username</label>
+                <input type="text" id="charge-username" placeholder="customer_username" />
+              </div>
+              <div class="field">
+                <label>Amount (GYD)</label>
+                <input type="number" id="charge-amount" min="0.01" step="0.01" placeholder="1500" />
+              </div>
+              <div class="field">
+                <label>Memo</label>
+                <input type="text" id="charge-memo" placeholder="What's this for?" />
+              </div>
+              <button class="btn" id="charge-btn">Send charge request</button>
+            </div>
+            <div class="error-msg" id="charge-error"></div>
+          </div>
+
+          <h2 class="section-title">Requests you've sent</h2>
+          <div class="panel">
+            <div class="table-scroll"><table>
+              <thead><tr><th>Customer</th><th>Amount</th><th>Memo</th><th>Status</th></tr></thead>
+              <tbody id="sent-charges-body"></tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Payment requests to you</h2>
+        <div class="panel">
+          <div class="table-scroll"><table>
+            <thead><tr><th>Business</th><th>Amount</th><th>Memo</th><th>Status</th><th></th></tr></thead>
+            <tbody id="incoming-charges-body"></tbody>
+          </table></div>
+        </div>
+      </section>
+
+      <!-- BUSINESS PAGE (reached from the "Find a business" directory) -->
+      <section id="panel-bizpage" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="bizpage-back-btn">← Business</button>
+          <h2 class="section-title" style="margin:0;">Business page</h2>
+        </div>
+        <div class="panel bizpage-banner">
+          <div class="bizpage-logo" id="bizpage-view-logo">🏢</div>
+          <div class="bizpage-name" id="bizpage-view-name">—</div>
+          <div class="bizpage-cashtag" id="bizpage-view-cashtag"></div>
+          <span class="pill" id="bizpage-view-category"></span>
+          <p class="bizpage-tagline" id="bizpage-view-tagline"></p>
+        </div>
+        <div class="panel">
+          <p class="muted" id="bizpage-view-description"></p>
+          <div class="chip-row" id="bizpage-view-keywords"></div>
+          <p class="muted" id="bizpage-view-contact" style="margin-top:12px;"></p>
+          <p class="muted" id="bizpage-view-delivery" style="margin-top:8px; display:none;">🚚 Delivery available</p>
+        </div>
+
+        <h2 class="section-title">Products &amp; prices</h2>
+        <div class="panel" id="bizpage-view-products"><p class="muted">No products listed yet.</p></div>
+
+        <div class="panel hidden" id="bizpage-view-events-panel">
+          <h2 class="section-title" style="margin-top:0;">Events</h2>
+          <div id="bizpage-view-events"></div>
+        </div>
+
+        <div class="panel hidden" id="bizpage-checkout-panel">
+          <h2 class="section-title" style="margin-top:0;">Checkout</h2>
+          <div class="field">
+            <label>Amount (GYD)</label>
+            <input type="number" id="checkout-amount" min="0.01" step="0.01" placeholder="1500" />
+          </div>
+          <div class="field hidden" id="checkout-fulfillment-field">
+            <label>How would you like to receive this?</label>
+            <div class="fulfillment-row">
+              <button type="button" class="fulfillment-btn selected" data-fulfillment="pickup">Pickup</button>
+              <button type="button" class="fulfillment-btn" data-fulfillment="delivery">Delivery</button>
+            </div>
+          </div>
+          <div class="field hidden" id="checkout-address-field">
+            <label>Delivery address</label>
+            <input type="text" id="checkout-address" placeholder="Street, city" />
+          </div>
+          <p class="muted" id="checkout-total-preview" style="font-size:12.5px; min-height:16px;"></p>
+          <button class="btn full" id="checkout-pay-btn">Confirm &amp; pay</button>
+          <div class="error-msg" id="checkout-error"></div>
+          <p class="muted" id="checkout-success" style="font-size:12.5px; margin-top:6px;"></p>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+          <button class="btn full" id="bizpage-view-message-btn">Message</button>
+          <button class="btn secondary full" id="bizpage-view-pay-btn">Pay</button>
+        </div>
+      </section>
+
+      <!-- MY TICKETS (reached from the "My tickets" button on the Business tab) -->
+      <section id="panel-mytickets" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="mytickets-back-btn">← Business</button>
+          <h2 class="section-title" style="margin:0;">My tickets</h2>
+        </div>
+        <div id="my-tickets-list"><p class="muted">Loading your tickets…</p></div>
+      </section>
+
+      <!-- MESSAGES TAB -->
+      <section id="panel-messages" class="tab-panel hidden">
+        <h2 class="section-title">Messages</h2>
+        <div class="panel">
+          <div class="panel-row" style="margin-bottom:16px;">
+            <div class="field">
+              <label>Start a new conversation with</label>
+              <input type="text" id="new-thread-username" placeholder="username" />
+            </div>
+            <button class="btn secondary" id="new-thread-btn">Open</button>
+          </div>
+          <div class="threads-list">
+            <div class="thread-list" id="thread-list"></div>
+            <div class="thread-view">
+              <div id="thread-empty" class="muted" style="padding:20px 0;">Select a conversation, or start a new one above.</div>
+              <div id="thread-active" class="hidden" style="display:flex; flex-direction:column; height:100%;">
+                <h3 id="thread-title" style="margin:0 0 12px;"></h3>
+                <div class="messages-scroll" id="messages-scroll"></div>
+                <div class="compose-row">
+                  <input type="text" id="compose-input" placeholder="Type a message…" />
+                  <button class="btn" id="compose-send-btn">Send</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-tab="wallet">
+        <span class="nav-icon-badge badge-green">🏠</span>
+        <span class="nav-label">Home</span>
+      </button>
+      <button class="nav-item" data-tab="send">
+        <span class="nav-icon-badge badge-blue">➤</span>
+        <span class="nav-label">Send</span>
+      </button>
+      <button class="nav-item nav-item-elevated" data-tab="games">
+        <span class="nav-icon-badge badge-pink badge-elevated">🎮</span>
+        <span class="nav-label">Play</span>
+      </button>
+      <button class="nav-item" data-tab="business">
+        <span class="nav-icon-badge badge-orange">🏢</span>
+        <span class="nav-label">Business</span>
+      </button>
+      <button class="nav-item" data-tab="messages">
+        <span class="nav-icon-badge badge-teal">💬</span>
+        <span class="nav-label">Chat</span>
+      </button>
+    </nav>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

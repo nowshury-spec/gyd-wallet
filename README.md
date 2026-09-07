@@ -1,0 +1,327 @@
+# GYD Wallet — Phase 1 Prototype
+
+A working prototype of the app concept: a wallet denominated directly in
+Guyana dollars (GYD) funded by (simulated) real money, free-to-play games,
+a cash-out flow, Cash App-style payments (unique $Cashtag handles, instant
+pay-a-username transfers, and a Request Money flow), a MoneyGram-style
+send-to-anyone feature with a pickup reference code, a business payment
+portal, and person-to-person messaging.
+
+An earlier version of this prototype used an abstract "token" as the
+real-money-equivalent unit instead of GYD directly. That's been removed —
+there is now exactly one real-money balance (GYD), and it's never touched
+by either game. An even earlier version of the games ran on a separate
+"coins" currency bought with GYD; that's been removed too — see **Why the
+games are free to play** below for why there's no in-game currency at all
+anymore.
+
+This is **Phase 1** from the business plan: it proves out the full product
+experience without touching real money or requiring any license. Nothing
+here is connected to a real bank, card processor, or payment rail.
+
+The look is deliberately built to feel like something you'd want to open and
+play with — a Cash-App-style dark, vivid-green, phone-shaped app shell with a
+bottom icon bar (complete with an elevated "Play" button), a big animated
+coin flip, and a confetti burst on a win — rather than a business dashboard.
+
+## Running it
+
+Requires **Node.js 22.5 or later** (uses the built-in `node:sqlite` module —
+no `npm install` needed, no external dependencies at all).
+
+```
+node server.js
+```
+
+Then open **http://localhost:3000** in a browser. Create a couple of
+accounts (one as a business, to try the payment portal) and try the
+features against each other.
+
+The database is a single SQLite file created automatically at
+`data/app.db` the first time you run it. Delete the `data/` folder to
+reset everything back to empty.
+
+## Deploying this (Render)
+
+This repo includes a `render.yaml` blueprint for [Render](https://render.com), since it's a good fit for a plain, persistent Node.js server like this one (no build step, and Render will run `node server.js` directly):
+
+1. Push this repo to GitHub (or GitLab).
+2. In Render, create a new **Blueprint** and point it at the repo — it reads `render.yaml` and sets up the web service automatically, starting on the free plan.
+3. Render gives you a live `https://<something>.onrender.com` URL once the first deploy finishes.
+
+**Important limitation on the free plan**: Render's free web services don't get a persistent disk, so the SQLite database (`data/app.db`) lives in the container's own throwaway storage — every redeploy, or the free plan's auto-sleep-and-wake cycle, resets it back to empty. That's fine for letting people click around a live demo, but not for anything you want to keep accounts/balances in between deploys.
+
+To make data persist: upgrade the web service to a paid instance type (the cheapest one that supports a disk), add a **Disk** in Render's dashboard (mount path `/var/data` is the usual convention), and set an environment variable `DATA_DIR=/var/data` on the service — `db.js` already reads that env var and will use it instead of the default local folder. No code changes needed beyond that.
+
+## What's actually implemented
+
+- **Accounts** — register/log in, personal or business account type, sessions via a signed token (stored in the browser's local storage).
+- **Wallet** — "deposit" GYD (simulated — no payment processor is wired up), and a cash-out flow that escrows GYD and files a pending request.
+- **Games** — a coin-flip game, a 3-reel slot machine, and a head-to-head Ludo board game, all completely free to play: no wager, no cost, no balance requirement, open to any logged-in user (see **Why the games are free to play** below).
+- **Ludo** — a real 2- or 4-player board game played turn-by-turn against other people (not the house), reached from the Games tab: create a table (choosing 2 or 4 seats) or join someone else's open one from the lobby, and the match starts the moment the last seat fills. Roll the dice, tap a highlighted piece to move it, race all 4 of your pieces around the board and home before anyone else — landing on an opponent outside a safe square sends their piece back to base, and rolling a 6, capturing, or getting a piece home all earn another roll. See **How Ludo works** below for the exact rules and why it has no wager either.
+- **$Cashtag handles** — every account gets a unique, auto-generated `$cashtag` at signup (edit it any time from the Wallet tab), separate from the login username. Anywhere you'd type a username — sending, requesting, searching, QR pay — a `$cashtag` (with or without the leading `$`) works too, the same way Cash App treats a $Cashtag as your public payment handle.
+- **Pay or request, Cash App-style** — one screen does both: a big amount display driven by a numeric keypad (cents-first entry, exactly like tapping out an amount on Cash App's own "$" tab — typing 2-5-0-0 builds "$25.00"), a single "To" field for a username or $cashtag, and a Pay/Request button pair that only enable once both an amount and a recipient are set. Pay sends an instant, no-fee transfer to another user who already has an account here; Request asks them to pay you that amount, with an optional note — they see it as a pending request they can pay (debiting their balance, crediting yours) or decline, and you can cancel a request you sent as long as it's still pending.
+- **Send Money (MoneyGram-style)** — send GYD to anyone by name and phone number, no account required on their end, for a transfer fee (see **How Send Money pricing works** below). You get back a reference code; the recipient enters that code plus the recipient name you typed (the same two things a real money-transfer pickup counter asks for) to collect it into their own balance, registering for an account first if they don't have one. A pending transfer can be cancelled by the sender for a full refund (amount + fee) any time before it's picked up.
+- **QR code pay ("Scan & Pay" tab)** — every account has a personal QR code encoding `gydpay:pay?to=$cashtag` (optionally with a fixed amount/memo baked in, so a business can generate a "charge code" for a specific bill). Scanning someone's code — via the device camera, by uploading a photo of it, or by pasting the code manually — opens a confirm screen (editable amount/memo) and pays them through the same transfer endpoint used elsewhere. See **How QR pay actually works** below before relying on this for a real demo.
+- **Business directory ("Find a business")** — a business account can set up a public page (category, tagline, description, freeform keywords for what they sell, a logo emoji, a page color, phone/location) from the Business tab. Once saved, that page is searchable by anyone: free-text search matches the business name, tagline, description, category, keywords, AND their listed products — so searching "cake" finds every business that listed "cake" as a keyword or a product name, even if their category is just "Bakery & Desserts" and their name doesn't mention cake — plus a category dropdown to browse by type. Opening a result shows the full page with a **Products & prices** list and **Message** (opens a conversation with that business) and **Pay** (opens the inline checkout described below) buttons. A business account with no page saved yet simply doesn't appear in the directory — having a business account and having a page are separate steps.
+- **Products & prices** — from the same "Your business page" area, a business can list individual products or services with a name, a price in GYD, and an optional description — shown on their public page as a simple menu/catalog, and folded into directory search the same way keywords are (searching a product name finds the business even if that exact phrase never made it into the keywords field). This is purely informational — it doesn't create a way to buy a specific line item; the amount is still typed in at checkout, same as reading a menu before telling the cashier what you owe.
+- **Checkout with pickup or delivery** — a business can flag "I offer delivery" on their business page and set a delivery fee (0 means free delivery). When a customer pays that business through the directory's Pay button, they get an inline checkout — no tab-jump — where they type an amount and, if the business offers delivery, choose **Pickup** (no fee, no address) or **Delivery** (their delivery fee is added to the total and a delivery address is required). See **How checkout and delivery pricing work** below for how the fee is handled.
+- **Product photos** — a business can attach a photo to any product/price listing (from the "Products & prices" area), shown as a small thumbnail next to it — on their own editor and on the public business page. Photos are resized and compressed in the browser before upload (there's no real file-storage backend in this prototype — see **How product photos are stored** below), so no camera/photo library integration is needed beyond the browser's own file picker.
+- **Two separate wallets for a business account** — a business account has its own GYD balance for personal spending (deposits, cashing out, sending money — same as anyone) **plus** a second, separate business balance that only fills up from customers paying the business. See **How the business wallet works** below for exactly which payments go where and how a business gets its earnings into its personal balance.
+- **Business payment portal** — a business account can send a customer a charge request; the customer approves or declines it from their own account, and approved charges move GYD to the business balance. (Paying a business by scanning their QR code, or through the directory's Pay button, are the other customer-initiated ways to pay them — no approval step needed there, same as tapping to pay in person.)
+- **Messaging** — direct text conversations between any two users.
+- **Events & ticket sales** — from the "Events & tickets" area of the Business tab, a business can post an event (title, description, location, date, ticket price, and an optional capacity) that shows up right on their public business page. Anyone can buy one or more tickets there and pay through the app; each ticket gets its own unique code and QR image (found under the "My tickets" button on the Business tab), and the business scans or types that code in at the door to check someone in. See **How events & tickets work** below for the fee math and how check-in behaves on a repeat scan.
+
+## How QR pay actually works (read this before demoing it)
+
+Two separate browser features are doing the work, and each has a real limitation worth knowing about:
+
+**Generating the QR image** — the "Your code" panel doesn't draw the QR code itself; it asks a free public image service (`api.qrserver.com`) to render one, from the *user's own browser*, not from this server. That means: (1) it needs a normal internet connection to display, (2) the payload — a username and, if you set one, an amount/memo — is sent to that third-party service, which is fine for a demo but worth replacing with a self-hosted QR library (e.g. vendor a small library like `qrcode-generator`) before this goes anywhere near real users or real amounts, and (3) if you ever see a broken image icon where the QR should be, it's almost always that connection, not a bug — the raw payload text is always shown underneath as a fallback, and the "Copy code" button copies it.
+
+**Scanning** — this uses the browser's native `BarcodeDetector` API (no library needed), which is well supported in Chrome/Edge/Android but not in Safari/iOS as of this writing. Two fallbacks are built in for that: uploading a photo of a QR code (still uses `BarcodeDetector`, just against an image instead of live video), and pasting the raw code — or just typing a username — into the manual field. The manual field is also the easiest way to test the whole flow yourself without any camera at all: open one browser tab as user A, copy their code from "Your code", switch to a second tab logged in as user B, and paste it into "Or paste a code" on the Scan tab.
+
+**One real gotcha for camera scanning specifically**: browsers only allow camera access (`getUserMedia`) on `localhost` or over HTTPS — never over plain HTTP, even on your local network. So two phones both hitting `http://<your-laptop's-IP>:3000` over Wi-Fi will NOT be able to open the camera, even though the rest of the app works fine that way. To actually test camera-to-camera scanning between two devices, put this behind HTTPS (a reverse proxy, a tunnel like ngrok, or a real deployment) — testing on one machine with two browser tabs and the manual-paste fallback is the quickest way to verify the payment logic itself works without dealing with that.
+
+## How the slot machine's odds work
+
+The slot machine spins three reels, each drawn independently from the same
+weighted table of four symbols, and only counts as a win on an exact
+three-of-a-kind — the rarer the symbol, the bigger the on-screen "Nice! /
+Great! / Awesome! / JACKPOT!" label:
+
+| Symbol | Weight | Label (3 of a kind) | Chance of that symbol landing all 3 reels |
+| --- | --- | --- | --- |
+| 🍒 | 55 | Nice! | ~16.6% |
+| 🍋 | 28 | Great! | ~2.2% |
+| 🔔 | 12 | Awesome! | ~0.17% |
+| 💎 (jackpot) | 5 | JACKPOT! | ~0.01% |
+
+That works out to roughly a **1-in-5 spin landing a win** (~19% hit rate).
+Nothing is wagered and nothing is paid out — a win is purely a label and a
+line in your game history, kept rare on purpose (the 💎💎💎 jackpot is about
+1 in 10,000 spins) so it still feels special even though nothing of value
+changes hands. These odds were checked two ways: worked out analytically
+from the weights above, and confirmed against a 15,000-spin live simulation
+against the running server (actual hit rate 19.38%, in line with the ~19%
+target).
+
+Like the coin flip, this game never touches GYD or any other balance — see
+**Why the games are free to play** below.
+
+## How Ludo works
+
+Unlike the coin flip and the slot machine, Ludo isn't a house game — it's a
+real-time match between actual people, so it needs matchmaking on top of
+the game itself:
+
+- **Tables** — from the Games tab, "Play Ludo" opens a small lobby: create
+  a table (2 or 4 seats) or join one of the open tables other people have
+  started. A table starts the instant its last seat fills — there's no
+  separate "ready up" step. The host can cancel a table while it's still
+  waiting for players; once it's full and playing, it runs to a finish.
+- **The board** — a standard-shape Ludo board: four 6×6 colored corners
+  (red, green, gold, blue) for each seat's 4 pieces to start in, connected
+  by a shared 52-square outer track, with each color's own private 6-square
+  "home stretch" leading into the center. A 2-player table seats red and
+  blue, in opposite corners; a 4-player table seats all four colors.
+- **Turns** — roll the dice, then tap whichever highlighted piece you want
+  to move with that roll (the app only highlights pieces that can legally
+  move — a piece sitting at base needs a 6 to come out, and a piece can't
+  move past the finish line, it has to land on it exactly). Landing on an
+  opponent's piece sends it back to base, unless it's sitting on one of the
+  8 marked safe squares (each color's own entry square, plus one "star"
+  square further around the board). Rolling a 6, capturing an opponent, or
+  getting a piece all the way home each earn another roll — but three 6s in
+  a row forfeits the turn immediately, the classic anti-stalling rule, so
+  one lucky streak can't hog the board forever. First player to get all 4
+  pieces home wins the match.
+- **No wager** — same as the other two games, nothing of value is staked.
+  An earlier version of this feature let players wager GYD/coins into a
+  pot the winner took, which is exactly the kind of peer-to-peer betting
+  that makes a game like this a much bigger legal question than a house
+  game with a one-way currency ever was (see **Why the games are free to
+  play** below) — so wagering was removed entirely rather than carried
+  forward. Winning a match here is genuinely just bragging rights.
+- **Live updates** — while a table is open, the app polls it every couple
+  of seconds so you see your opponent's rolls and moves without refreshing.
+  There's no reconnect/resume story beyond that in this prototype — if
+  everyone just closes the tab mid-match, the table simply sits unfinished.
+
+## How Send Money pricing works
+
+The MoneyGram-style transfer charges a fee on top of the amount sent, using
+a flat-minimum-plus-percentage formula: **the greater of GYD 200 or 2.5% of
+the amount**, deducted from the sender's balance immediately along with the
+amount itself (so sending GYD 10,000 actually holds GYD 10,250 — the sender
+sees both numbers, and the total, before confirming). That mirrors how real
+remittance pricing tends to work: a flat minimum keeps small transfers from
+being effectively free, while the percentage keeps large transfers roughly
+proportional. These exact numbers are illustrative for a demo, not a
+researched real-world rate — a real build would price this per corridor and
+payout method, the same way actual remittance services do. The fee is kept
+back rather than paid to anyone, the same "house keeps it" idea as the slot
+machine's edge or Guyana Gaming Authority's casino rake, just applied to a
+payments product instead of a game.
+
+## How checkout and delivery pricing work
+
+Checkout is the same underlying GYD transfer used everywhere else — it just
+asks one extra question when the business supports delivery. Pickup charges
+exactly the amount typed in, no fee, no address. Delivery adds the
+business's own delivery fee to that amount and requires a delivery address
+before it will submit. The important difference from Send Money's fee: the
+delivery fee is credited **to the business**, not kept by the platform —
+because the business is the one who has to arrange getting the order there,
+the same way a restaurant (not the app) keeps a delivery charge on a food
+order. That means a GYD 3,000 order with a GYD 500 delivery fee charges the
+customer GYD 3,500 and credits the business the full GYD 3,500, not GYD
+3,000. A business that hasn't turned delivery on simply doesn't offer the
+option — checkout only shows Pickup, and trying to force delivery through
+the API is rejected the same as any other invalid request.
+
+## How events & tickets work
+
+A business's page can list events the same way it lists products — but
+instead of describing something to ask the cashier about, an event is
+something a customer buys straight through the app:
+
+- **Posting an event** — from the "Events & tickets" area of the Business
+  tab, a business fills in a title, an optional description and location, a
+  date, a ticket price, and an optional capacity (leave it blank for
+  unlimited tickets). It shows up immediately in the "Events" section of
+  their public page, right below their product list, as long as it's
+  active — cancelling an event (see below) or selling out hides it from new
+  buyers without touching anyone who already has a ticket.
+- **Buying tickets** — a customer picks a quantity (1 to 10 per purchase)
+  and taps "Buy ticket(s)". This charges their GYD balance exactly
+  `ticket price × quantity` — there's no separate "add to cart" step, and a
+  customer can't buy a ticket to their own event. If a capacity is set,
+  a purchase that would oversell the event is rejected with however many
+  tickets are actually left, and once every ticket is sold the event shows
+  as "sold out" and stops accepting new purchases entirely.
+- **The platform's 3.5% cut** — of every ticket sold, the platform keeps
+  3.5% of the *ticket price*, taken out of what the business receives
+  rather than added on top of what the customer pays. A GYD 4,000 ticket
+  always costs the buyer exactly GYD 4,000; the business's wallet is
+  credited GYD 3,860 (4,000 minus the GYD 140 fee), and the fee itself
+  isn't credited to any account — the same "the platform just keeps it"
+  treatment as Send Money's transfer fee, just at a different rate. Buying
+  multiple tickets in one purchase multiplies straight through: 3 tickets
+  at GYD 4,000 each charges GYD 12,000 and credits the business GYD
+  11,580. Ticket revenue lands in the business's **business** wallet, the
+  same balance customer payments always land in — see **How the business
+  wallet works** below.
+- **The ticket QR code** — every purchased ticket gets its own short,
+  unique code, found (along with a scannable QR image of it) under the
+  "My tickets" button on the Business tab. That QR image is generated the
+  same third-party-service way as the existing "Scan & Pay" QR codes — see
+  **How QR pay actually works** above for what that means and its one real
+  limitation (it needs the buyer's own device to have a normal internet
+  connection to render; the raw code is always shown as text underneath as
+  a fallback either way).
+- **Checking a ticket in** — a business coordinator checks tickets in from
+  the "Check a ticket in" panel right below their event list: type the code
+  in by hand, or tap "Scan" to use the device camera (the same
+  `BarcodeDetector`-based scanning already used for Scan & Pay, with the
+  same browser-support caveat — see **How QR pay actually works** above).
+  A valid, not-yet-used ticket flips to "checked in" and shows the buyer's
+  username; scanning the *same* ticket again isn't treated as an error —
+  it's reported as "Already Checked In" along with when it was first
+  checked in, so a coordinator re-scanning by accident (or someone trying
+  to reuse a ticket) gets a clear, calm answer either way rather than a
+  confusing failure message.
+- **Cancelling vs. deleting** — cancelling an event stops new ticket sales
+  but leaves every already-sold ticket exactly as valid as it was (someone
+  who already paid keeps their ticket even if the event can't sell any
+  more). Deleting an event removes it outright, but only while it has zero
+  tickets sold — once even one ticket has been bought, cancel is the only
+  option, so a paying customer's ticket can never simply disappear.
+
+## How the business wallet works
+
+A business account actually has two GYD balances under the hood, even though the app only ever calls the everyday one "your balance": a personal one (used for deposits, cashing out, and sending money — exactly like a personal account) and a separate business balance that only a business account has any use for. The business balance is what fills up when a customer pays the business — a plain transfer or QR-code pay to their $cashtag, business checkout, an approved charge request from the payment portal, or a money request the business itself sent out to be paid. None of those touch the owner's personal balance at all.
+
+That split is deliberate: it keeps the business's takings visibly separate from the owner's own spending money, the same reason a shop keeps a till separate from the owner's wallet. To actually spend or cash out what the business has earned, the owner uses **Move to personal wallet** on their business wallet panel — an instant, no-fee internal transfer from the business balance into their personal one. There's no path the other direction (personal money funding the business wallet) since nothing here needs it — the business wallet only ever fills from customer payments. One deliberate exception: a Send Money (MoneyGram-style) claim always lands in the personal wallet, even for a business account, since claiming a transfer sent to you by name and phone isn't "a customer buying something" — it's just picking up money addressed to you personally.
+
+One simplification worth knowing: the "Recent activity" list on the Wallet tab is a single combined ledger of everything that ever happened to the account, personal and business alike — it doesn't split into two separate activity feeds per wallet. A real build might want that split; this prototype keeps one list for simplicity.
+
+## How product photos are stored
+
+There's no file-upload endpoint or file storage in this zero-dependency prototype, so a product photo never becomes a file on the server at all. Instead, the browser reads the chosen photo, draws it onto an off-screen canvas resized to a maximum of 500px on its longest side, re-encodes that as a compressed JPEG, and sends the whole thing as a `data:image/...;base64,...` string in the same JSON request that creates the product — the server just validates it looks like an image and isn't unreasonably large (capped at roughly 1.5MB of raw image data), then stores that string as a normal text column. That keeps the feature genuinely working without adding an image-processing library or a place to store uploaded files, at the cost of every photo living inline in the SQLite database rather than as a separate optimized asset — fine for a demo, not how you'd want to do it at real scale (a real build would upload to object storage and store a URL instead).
+
+## Why the games are free to play
+
+The coin flip, the slot machine, and Ludo all cost nothing to play, pay out
+nothing of value, and don't touch GYD or any other balance at all — there
+is no in-game currency anywhere in this app. Play as many rounds (or
+matches) as you like with a brand-new account that has never deposited a
+cent; nothing is spent, nothing is won, and your GYD balance never moves
+because a game was played. A coin-flip/slots round is just a record of what
+happened (win or lose) for your own game history, and a Ludo match is just
+a record of who won — nothing more, for either kind of game.
+
+An earlier version of this prototype ran the coin flip and slot machine on
+a "coins" currency: GYD bought coins, coins were wagered on the games, and
+wins paid out more coins, with coins kept deliberately one-way (no
+converting back to GYD) so that no full loop existed from real money,
+through a game of chance, and back out again. That one-way design was a
+real mitigation, but it still left a currency, a wager, and a payout
+sitting in the games — the kind of structure that at least raises the
+gambling-law question, even if the one-way rule was meant to answer it. An
+even earlier version of Ludo had its own version of the same problem, and
+arguably a bigger one: tables wagered GYD or coins directly, with the
+winner taking the whole pot — real peer-to-peer betting between players,
+rather than a house-edge game, which is generally treated as a more
+straightforward case of gambling, not a less complicated one.
+
+Removing all of that settles the question a different way: rather than
+design carefully around the edge of what counts as gambling, there's simply
+nothing wagered and nothing paid out, for anyone, ever, in any game in this
+app. That's a stronger and simpler position than either the one-way-coins
+design or the wagered-Ludo-pot design was — it doesn't depend on a rule
+staying enforced (there's no coins-to-GYD conversion path, and no
+table-wager path, to accidentally reopen, because there's no currency
+staked in a game anywhere), and it doesn't require distinguishing "coins"
+from "real value" in the first place. You'd still need the Bank of Guyana
+money-transmission licensing to handle real deposits, cash-outs,
+peer-to-peer transfers, requests, Send Money, business checkout, and the
+business payment portal (those move real money regardless of whether any
+game exists at all), but none of the games need a gaming license from
+Guyana's Gaming Authority — there's nothing wagered for that framework
+(built entirely around physical casinos, per the business plan's research)
+to have any claim over. Worth having a Guyanese lawyer confirm this
+reasoning before it matters for real, but it's a much easier position to
+defend than either earlier design, precisely because there's nothing left
+to argue about.
+
+## What's deliberately NOT implemented (see the business plan)
+
+- **No real money in or out.** Deposits just add GYD to your balance directly; cash-out just records a request. Wiring in real payments needs a licensed money-transmission partner — this is Phase 2 in the plan, and shouldn't happen before that legal/licensing work is done. That licensing requirement covers deposits, cash-out, peer-to-peer transfers, requests, Send Money, and the business portal alike — it's about holding and moving other people's money at all, not about any single feature.
+- **No real-money gambling exposure.** The games are free to play (see **Why the games are free to play** above) — there is no in-game currency at all, so nothing is ever wagered or paid out. GYD, the one balance meant to represent real money, only moves via deposits, cash-out, peer-to-peer transfers, requests, Send Money, and the business payment portal — never through a game.
+- **No real cash pickup network for Send Money.** A real MoneyGram-style service has physical agent locations where a recipient without a bank account can walk in and collect cash. This prototype's "pickup" is digital only — the recipient needs to register an account here to receive the funds into a balance, not walk away with cash. Building an actual cash-pickup network is a much bigger undertaking (agent partnerships, cash management, physical security) well beyond this prototype's scope.
+- **No KYC/AML, fraud controls, or rate limiting.** Needed before this could handle real funds, not needed to demo the product.
+- **No password reset, email verification, or account recovery.**
+- **No mobile app** — this is a responsive web app; wrapping it for iOS/Android (or rebuilding natively) is a separate step.
+- **No self-hosted QR generation** — see "How QR pay actually works" above; it currently calls out to a public image API instead of generating codes locally.
+- **No ticket refunds.** A buyer can't cancel a purchased ticket for a refund from the app — a business can cancel the *event* (which stops new sales but leaves existing tickets alone), but there's no built-in way to reverse a specific ticket sale. A real build would need a refund policy and flow before this went live.
+
+## Project layout
+
+```
+server.js       HTTP server + all API routes (plain Node http module, no framework)
+db.js           SQLite schema and connection (node:sqlite)
+auth.js         Password hashing + signed session tokens (node:crypto)
+ludo.js         Pure Ludo game rules (movement, capture, win detection) — no HTTP or DB in here
+public/         Frontend: index.html, styles.css, app.js (vanilla JS, no build step)
+data/           Created at runtime — the SQLite database file lives here
+```
+
+## Why no npm packages
+
+Everything here runs on Node's built-in modules (`http`, `crypto`,
+`node:sqlite`) on purpose, so there's nothing to install and nothing to
+audit for supply-chain risk in this early prototype. If you continue this
+build, reaching for Express, a real ORM, and a proper frontend framework
+(React/Vue) once the team and requirements grow is entirely reasonable —
+this version optimizes for "runs anywhere with zero setup" over
+production architecture.

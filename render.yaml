@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: gyd-wallet
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: "true" # no dependencies to install — see README's "Why no npm packages"
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.2
+      # No DATA_DIR set here on purpose: the free plan has no persistent disk,
+      # so the SQLite file lives in the container's own ephemeral storage and
+      # resets on every deploy/restart. Upgrade the plan above (e.g. "starter")
+      # and add a disk (see README's "Deploying this" section) to persist data,
+      # then set DATA_DIR to the disk's mount path here.
+    healthCheckPath: /
