@@ -1252,11 +1252,15 @@ on(
       .prepare("SELECT * FROM business_events WHERE business_id = ? AND status = 'active' ORDER BY event_date ASC")
       .all(bizUser.id);
     const eventsPublic = await Promise.all(events.map(async (e) => businessEventPublic(e, await countTicketsSold(e.id))));
+    const jobs = await db
+      .prepare("SELECT * FROM job_postings WHERE business_id = ? AND status = 'active' ORDER BY created_at DESC")
+      .all(bizUser.id);
     sendJson(res, 200, {
       business: {
         ...businessProfilePublic(row),
         products: products.map(businessProductPublic),
         events: eventsPublic,
+        jobs: jobs.map((j) => jobPostingPublic(j)),
       },
     });
   })
@@ -1637,6 +1641,123 @@ on(
     await db.prepare("UPDATE event_tickets SET status = 'checked_in', checked_in_at = ? WHERE id = ?").run(now(), ticket.id);
     const updated = await db.prepare('SELECT * FROM event_tickets WHERE id = ?').get(ticket.id);
     sendJson(res, 200, { ok: true, eventTitle: event.title, ticket: eventTicketPublic(updated, buyerUsername) });
+  })
+);
+
+// ---------- business jobs (job board) ----------
+//
+// A business can post a job opening on its own page; it also shows up in
+// the site-wide jobs board below so someone doesn't have to already know
+// about a business to find its openings. There's no in-app applicant
+// tracker — "Apply" just starts a message thread with the business through
+// the existing messaging feature (see /api/messages above), the same way a
+// customer would message a business about anything else.
+
+const JOB_TYPES = ['Full-time', 'Part-time', 'Contract', 'Temporary'];
+
+function jobPostingPublic(row, business) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    location: row.location,
+    payInfo: row.pay_info,
+    jobType: row.job_type,
+    status: row.status,
+    createdAt: row.created_at,
+    business: business
+      ? { username: business.username, name: business.business_name || business.username }
+      : undefined,
+  };
+}
+
+on(
+  'GET',
+  '/api/business/jobs',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
+    sendJson(res, 200, { jobs: rows.map((r) => jobPostingPublic(r)) });
+  })
+);
+
+on(
+  'POST',
+  '/api/business/jobs',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const title = (body.title || '').trim().slice(0, 100);
+    const description = (body.description || '').trim().slice(0, 2000);
+    const location = (body.location || '').trim().slice(0, 140);
+    const payInfo = (body.payInfo || '').trim().slice(0, 100);
+    const jobType = JOB_TYPES.includes(body.jobType) ? body.jobType : null;
+
+    if (!title) return badRequest(res, 'Give the job a title.');
+    if (!description) return badRequest(res, 'Add a short description of the job.');
+
+    const id = crypto.randomUUID();
+    await db.prepare(
+      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+    ).run(id, user.id, title, description, location || null, payInfo || null, jobType, now());
+
+    const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
+    sendJson(res, 201, { jobs: rows.map((r) => jobPostingPublic(r)) });
+  })
+);
+
+on(
+  'POST',
+  '/api/business/jobs/:id/close',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const row = await db.prepare('SELECT * FROM job_postings WHERE id = ?').get(params.id);
+    if (!row) return sendJson(res, 404, { error: 'Job posting not found.' });
+    if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This job posting is not yours to close.' });
+    await db.prepare("UPDATE job_postings SET status = 'closed' WHERE id = ?").run(params.id);
+    const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
+    sendJson(res, 200, { jobs: rows.map((r) => jobPostingPublic(r)) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/business/jobs/:id',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const row = await db.prepare('SELECT * FROM job_postings WHERE id = ?').get(params.id);
+    if (!row) return sendJson(res, 404, { error: 'Job posting not found.' });
+    if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This job posting is not yours to remove.' });
+    await db.prepare('DELETE FROM job_postings WHERE id = ?').run(params.id);
+    const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
+    sendJson(res, 200, { jobs: rows.map((r) => jobPostingPublic(r)) });
+  })
+);
+
+// The site-wide jobs board: every active job posting across every business,
+// newest first, optionally filtered by a search term (matches title,
+// description, or location) or an exact job type — separate from a
+// business's own page so someone looking for work can browse openings
+// without already knowing which businesses are hiring.
+on(
+  'GET',
+  '/api/jobs',
+  requireAuth(async (req, res, params, query) => {
+    const q = (query.q || '').trim();
+    const jobType = (query.jobType || '').trim();
+    let sql = `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id WHERE j.status = 'active'`;
+    const args = [];
+    if (jobType) {
+      sql += ' AND j.job_type = ?';
+      args.push(jobType);
+    }
+    if (q) {
+      sql += ' AND (j.title LIKE ? OR j.description LIKE ? OR j.location LIKE ?)';
+      const like = `%${q}%`;
+      args.push(like, like, like);
+    }
+    sql += ' ORDER BY j.created_at DESC LIMIT 100';
+    const rows = await db.prepare(sql).all(...args);
+    sendJson(res, 200, {
+      jobs: rows.map((r) => jobPostingPublic(r, { username: r.username, business_name: r.business_name })),
+      jobTypes: JOB_TYPES,
+    });
   })
 );
 

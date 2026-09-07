@@ -224,6 +224,26 @@ CREATE TABLE IF NOT EXISTS event_tickets (
   checked_in_at TEXT
 );
 
+-- A job a business posts looking for hires. Shows on the business's own
+-- page (like events do) AND in the site-wide jobs board (GET /api/jobs) so
+-- someone doesn't have to already know about a business to find its
+-- openings. There's no in-app application system beyond that — "Apply"
+-- just starts a message thread with the business through the existing
+-- messaging feature (see server.js) rather than a separate applicant
+-- tracker. status lets a business close a listing without losing the
+-- record of having posted it.
+CREATE TABLE IF NOT EXISTS job_postings (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  location TEXT,
+  pay_info TEXT,
+  job_type TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active | closed
+  created_at TEXT NOT NULL
+);
+
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter

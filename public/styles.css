@@ -775,6 +775,13 @@ label.btn { display: inline-flex; }
   width: 56px; height: 56px; border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--border);
 }
 
+/* Each job on the site-wide Jobs board is its own card (.panel), rather
+   than several .event-row siblings sharing one panel like elsewhere — so
+   the divider line .event-row normally adds between siblings would show up
+   as a stray line inside every single card instead. */
+#jobs-board-list .event-row { border-bottom: none; padding: 0; margin-bottom: 20px; }
+#jobs-board-list .event-row:last-child { margin-bottom: 0; }
+
 /* ---------- business wallet (separate balance for business accounts) ---------- */
 
 .biz-wallet-balance {

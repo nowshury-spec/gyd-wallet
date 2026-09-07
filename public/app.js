@@ -137,6 +137,7 @@
           (tab === 'remit' && b.dataset.tab === 'send') ||
           (tab === 'bizpage' && b.dataset.tab === 'business') ||
           (tab === 'mytickets' && b.dataset.tab === 'business') ||
+          (tab === 'jobs' && b.dataset.tab === 'business') ||
           (tab === 'ludo' && b.dataset.tab === 'games')
       )
     );
@@ -154,16 +155,20 @@
       loadDirectory();
       loadMyBusinessPage();
       loadMyEvents();
+      loadMyJobs();
     }
     if (tab === 'messages') loadThreads();
     if (tab === 'wallet') loadTransactions();
     if (tab === 'remit') openRemitLobby();
     if (tab === 'ludo') enterLudoTab();
     if (tab === 'mytickets') loadMyTickets();
+    if (tab === 'jobs') loadJobsBoard();
   }
 
   document.getElementById('my-tickets-btn').onclick = () => switchTab('mytickets');
   document.getElementById('mytickets-back-btn').onclick = () => switchTab('business');
+  document.getElementById('jobs-board-btn').onclick = () => switchTab('jobs');
+  document.getElementById('jobs-back-btn').onclick = () => switchTab('business');
 
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
@@ -1147,6 +1152,199 @@
     }
   };
 
+  // ---------- business jobs (job board) ----------
+
+  async function loadMyJobs() {
+    if (!state.user.isBusiness) return;
+    const box = document.getElementById('my-jobs-list');
+    try {
+      const data = await api('/api/business/jobs');
+      renderMyJobs(data.jobs);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderMyJobs(jobs) {
+    const box = document.getElementById('my-jobs-list');
+    box.innerHTML = '';
+    if (jobs.length === 0) {
+      box.innerHTML = '<p class="muted">No jobs posted yet.</p>';
+      return;
+    }
+    jobs.forEach((j) => {
+      const row = document.createElement('div');
+      row.className = 'event-row';
+      const statusPill =
+        j.status === 'closed' ? '<span class="pill declined">closed</span>' : '<span class="pill completed">active</span>';
+      const details = [j.jobType, j.location, j.payInfo].filter(Boolean).join(' · ');
+      row.innerHTML = `
+        <div class="event-info">
+          <div class="event-title-row">
+            <span class="event-name">${j.title}</span>
+            ${statusPill}
+          </div>
+          ${details ? `<div class="muted" style="font-size:12px;">${details}</div>` : ''}
+          <div class="product-description" style="margin-top:2px;">${j.description}</div>
+        </div>
+        <div class="event-actions"></div>
+      `;
+      const actions = row.querySelector('.event-actions');
+
+      if (j.status === 'active') {
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'btn secondary small';
+        closeBtn.textContent = 'Close';
+        closeBtn.onclick = async () => {
+          if (!confirm(`Close "${j.title}"? It'll come down from your page and the Jobs board.`)) return;
+          try {
+            const data = await api(`/api/business/jobs/${j.id}/close`, 'POST', {});
+            renderMyJobs(data.jobs);
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        actions.appendChild(closeBtn);
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn secondary small';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = async () => {
+        if (!confirm(`Delete "${j.title}"?`)) return;
+        try {
+          const data = await api(`/api/business/jobs/${j.id}`, 'DELETE');
+          renderMyJobs(data.jobs);
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      actions.appendChild(delBtn);
+
+      box.appendChild(row);
+    });
+  }
+
+  document.getElementById('job-add-btn').onclick = async () => {
+    const title = document.getElementById('job-title').value.trim();
+    const description = document.getElementById('job-description').value.trim();
+    const location = document.getElementById('job-location').value.trim();
+    const payInfo = document.getElementById('job-pay').value.trim();
+    const jobType = document.getElementById('job-type').value;
+    const errBox = document.getElementById('job-error');
+    errBox.textContent = '';
+    if (!title) return (errBox.textContent = 'Give the job a title.');
+    if (!description) return (errBox.textContent = 'Add a short description of the job.');
+    try {
+      const data = await api('/api/business/jobs', 'POST', { title, description, location, payInfo, jobType });
+      document.getElementById('job-title').value = '';
+      document.getElementById('job-description').value = '';
+      document.getElementById('job-location').value = '';
+      document.getElementById('job-pay').value = '';
+      document.getElementById('job-type').value = '';
+      renderMyJobs(data.jobs);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  // The site-wide jobs board: every active job posting across every
+  // business, with search + job-type filtering — separate from a specific
+  // business's page so someone can browse openings without already
+  // knowing which businesses are hiring.
+  let jobsSearchDebounce = null;
+  async function loadJobsBoard() {
+    const box = document.getElementById('jobs-board-list');
+    const q = document.getElementById('jobs-search').value.trim();
+    const jobType = document.getElementById('jobs-type-filter').value;
+    box.innerHTML = '<p class="muted">Loading jobs…</p>';
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (jobType) params.set('jobType', jobType);
+      const data = await api(`/api/jobs?${params.toString()}`);
+      renderJobsBoard(data.jobs);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderJobsBoard(jobs) {
+    const box = document.getElementById('jobs-board-list');
+    box.innerHTML = '';
+    if (jobs.length === 0) {
+      box.innerHTML = '<p class="muted">No jobs found.</p>';
+      return;
+    }
+    jobs.forEach((j) => {
+      const row = document.createElement('div');
+      row.className = 'panel event-row';
+      const details = [j.jobType, j.location, j.payInfo].filter(Boolean).join(' · ');
+      row.innerHTML = `
+        <div class="event-info">
+          <div class="event-title-row">
+            <span class="event-name">${j.title}</span>
+          </div>
+          <div class="muted" style="font-size:12px;">${j.business.name}${details ? ' · ' + details : ''}</div>
+          <div class="product-description" style="margin-top:4px;">${j.description}</div>
+        </div>
+        <div class="event-actions"></div>
+      `;
+      const actions = row.querySelector('.event-actions');
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'btn small';
+      applyBtn.textContent = 'Apply';
+      applyBtn.onclick = () => applyToJob(j);
+      actions.appendChild(applyBtn);
+      box.appendChild(row);
+    });
+  }
+
+  function applyToJob(j) {
+    switchTab('messages');
+    openThread(j.business.username, `Hi, I'm interested in the ${j.title} position.`);
+  }
+
+  document.getElementById('jobs-search').addEventListener('input', () => {
+    clearTimeout(jobsSearchDebounce);
+    jobsSearchDebounce = setTimeout(loadJobsBoard, 300);
+  });
+  document.getElementById('jobs-type-filter').addEventListener('change', loadJobsBoard);
+
+  function renderBizPageJobs(b) {
+    const panel = document.getElementById('bizpage-view-jobs-panel');
+    const box = document.getElementById('bizpage-view-jobs');
+    box.innerHTML = '';
+    const jobs = (b.jobs || []).filter((j) => j.status === 'active');
+    if (jobs.length === 0) {
+      panel.classList.add('hidden');
+      return;
+    }
+    panel.classList.remove('hidden');
+    jobs.forEach((j) => {
+      const row = document.createElement('div');
+      row.className = 'event-row';
+      const details = [j.jobType, j.location, j.payInfo].filter(Boolean).join(' · ');
+      row.innerHTML = `
+        <div class="event-info">
+          <div class="event-title-row">
+            <span class="event-name">${j.title}</span>
+          </div>
+          ${details ? `<div class="muted" style="font-size:12px;">${details}</div>` : ''}
+          <div class="product-description" style="margin-top:2px;">${j.description}</div>
+        </div>
+        <div class="event-actions"></div>
+      `;
+      const actions = row.querySelector('.event-actions');
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'btn small';
+      applyBtn.textContent = 'Apply';
+      applyBtn.onclick = () => applyToJob({ ...j, business: { username: b.username, name: b.businessName } });
+      actions.appendChild(applyBtn);
+      box.appendChild(row);
+    });
+  }
+
   // ---------- ticket check-in ----------
 
   async function runCheckin(rawCode) {
@@ -1407,6 +1605,7 @@
       }
 
       renderBizPageEvents(b, username);
+      renderBizPageJobs(b);
 
       document.getElementById('bizpage-view-message-btn').onclick = () => {
         switchTab('messages');
@@ -1599,11 +1798,12 @@
     }
   }
 
-  async function openThread(username) {
+  async function openThread(username, prefill) {
     state.activeThreadUsername = username;
     document.getElementById('thread-empty').classList.add('hidden');
     document.getElementById('thread-active').classList.remove('hidden');
     document.getElementById('thread-title').textContent = username;
+    if (prefill) document.getElementById('compose-input').value = prefill;
     await loadThreads();
     await refreshThreadMessages();
   }
