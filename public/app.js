@@ -79,13 +79,14 @@
   document.getElementById('register-form').onsubmit = async (e) => {
     e.preventDefault();
     const username = document.getElementById('register-username').value.trim();
+    const email = document.getElementById('register-email').value.trim();
     const password = document.getElementById('register-password').value;
     const isBusiness = document.getElementById('register-is-business').checked;
     const businessName = document.getElementById('register-business-name').value.trim();
     const errBox = document.getElementById('register-error');
     errBox.textContent = '';
     try {
-      const data = await api('/api/register', 'POST', { username, password, isBusiness, businessName });
+      const data = await api('/api/register', 'POST', { username, email, password, isBusiness, businessName });
       setToken(data.token);
       state.user = data.user;
       enterApp();

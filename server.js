@@ -81,6 +81,7 @@ function publicUser(u) {
     id: u.id,
     username: u.username,
     cashtag: u.cashtag,
+    email: u.email || null,
     isBusiness: !!u.is_business,
     businessName: u.business_name || null,
     gydBalance: u.gyd_balance,
@@ -88,6 +89,11 @@ function publicUser(u) {
     createdAt: u.created_at,
   };
 }
+
+// Deliberately simple (RFC 5322 in full is far more permissive than anyone
+// actually wants to type into a signup form) — good enough to reject
+// obvious typos without rejecting real addresses.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Cash App-style $Cashtag: a short, unique, user-changeable payment handle
 // that's separate from (but defaults to) the login username. Looking
@@ -206,22 +212,32 @@ function fmtNum(v) {
 
 on('POST', '/api/register', async (req, res, params, query, body) => {
   const { username, password, isBusiness, businessName } = body;
+  const email = (body.email || '').trim().toLowerCase();
   if (!username || typeof username !== 'string' || username.length < 3) {
     return badRequest(res, 'Username must be at least 3 characters.');
+  }
+  // Required so a sender always has a way to reach whoever an account
+  // belongs to, and so a future "forgot password" flow has somewhere to
+  // go — see the email column's comment in supabase/schema.sql for why
+  // the column itself stays nullable even though this endpoint requires it.
+  if (!email || !EMAIL_RE.test(email)) {
+    return badRequest(res, 'Enter a valid email address.');
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
     return badRequest(res, 'Password must be at least 6 characters.');
   }
   const existing = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) return badRequest(res, 'That username is already taken.');
+  const existingEmail = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
+  if (existingEmail) return badRequest(res, 'An account with that email already exists.');
 
   const { salt, hash } = hashPassword(password);
   const id = crypto.randomUUID();
   const cashtag = await generateUniqueCashtag(username);
   await db.prepare(
-    `INSERT INTO users (id, username, cashtag, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
-  ).run(id, username, cashtag, hash, salt, isBusiness ? 1 : 0, isBusiness ? (businessName || username) : null, now());
+    `INSERT INTO users (id, username, cashtag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
+  ).run(id, username, cashtag, email, hash, salt, isBusiness ? 1 : 0, isBusiness ? (businessName || username) : null, now());
 
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   const token = makeSessionToken(id);

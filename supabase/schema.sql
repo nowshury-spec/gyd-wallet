@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   cashtag TEXT UNIQUE,
+  -- Required for every new signup (enforced in server.js's /api/register,
+  -- not by a NOT NULL here) so a sender always has a way to reach the
+  -- account a payment landed in, and so a lost-password recovery flow has
+  -- somewhere to go later. Nullable at the column level on purpose: a
+  -- handful of accounts were created before this requirement existed, and
+  -- making it NOT NULL would have broken that pre-existing data on
+  -- migration. UNIQUE still allows any number of NULLs in Postgres, so it
+  -- doesn't weaken the one-email-per-account rule for everyone after.
+  email TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   is_business INTEGER NOT NULL DEFAULT 0,
