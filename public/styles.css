@@ -654,7 +654,7 @@ label.btn { display: inline-flex; }
   .phone-frame { max-width: 100%; border-left: none; border-right: none; }
 }
 
-/* ---------- send money (MoneyGram-style remittance) ---------- */
+/* ---------- GYD Direct (our own send-to-anyone transfer feature) ---------- */
 
 .arcade-panel-remit {
   background:

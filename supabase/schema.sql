@@ -95,13 +95,12 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL
 );
 
--- A MoneyGram-style remittance: the sender pays an amount plus a fee up
--- front (escrowed out of their balance immediately), gets back a reference
--- code, and hands that code to the recipient out of band (text, call, in
--- person). The recipient — who does not need to already have an account —
--- "picks up" the transfer by entering the reference code and the recipient
--- name the sender typed in, the same two pieces of information a real
--- money-transfer pickup asks for.
+-- A GYD Direct transfer (our own send-to-anyone feature): the sender pays
+-- an amount plus a fee up front (escrowed out of their balance
+-- immediately), gets back a private reference code, and hands that code to
+-- the recipient out of band (text, call, in person). The recipient — who
+-- does not need to already have an account — claims the transfer by
+-- entering the reference code and the recipient name the sender typed in.
 CREATE TABLE IF NOT EXISTS remittances (
   id TEXT PRIMARY KEY,
   reference_code TEXT UNIQUE NOT NULL,
@@ -125,7 +124,7 @@ CREATE TABLE IF NOT EXISTS remittances (
 -- do — having a business account and having a page are separate steps.
 -- offers_delivery/delivery_fee let a business flag delivery as an option a
 -- customer can pick at checkout, with the fee going to the business (they're
--- the one arranging the delivery) — unlike Send Money's fee above, which the
+-- the one arranging the delivery) — unlike GYD Direct's fee above, which the
 -- platform itself keeps.
 CREATE TABLE IF NOT EXISTS business_profiles (
   user_id TEXT PRIMARY KEY,
@@ -220,7 +219,7 @@ CREATE TABLE IF NOT EXISTS business_events (
 -- the 3.5%-of-ticket-price cut the platform keeps out of price_paid before
 -- the rest reaches the business's wallet — see server.js's events section
 -- for the exact math and README.md for why the fee isn't credited to any
--- account (same "the platform just keeps it" treatment as Send Money's fee).
+-- account (same "the platform just keeps it" treatment as GYD Direct's fee).
 CREATE TABLE IF NOT EXISTS event_tickets (
   id TEXT PRIMARY KEY,
   event_id TEXT NOT NULL,

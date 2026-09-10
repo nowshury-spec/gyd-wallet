@@ -3,8 +3,8 @@
 A working prototype of the app concept: a wallet denominated directly in
 Guyana dollars (GYD) funded by (simulated) real money, free-to-play games,
 a cash-out flow, Cash App-style payments (unique $Cashtag handles, instant
-pay-a-username transfers, and a Request Money flow), a MoneyGram-style
-send-to-anyone feature with a pickup reference code, a business payment
+pay-a-username transfers, and a Request Money flow), GYD Direct — our own
+send-to-anyone feature with a private reference code — a business payment
 portal, and person-to-person messaging.
 
 An earlier version of this prototype used an abstract "token" as the
@@ -88,7 +88,7 @@ flight against the same account at once.
 - **Ludo** — a real 2- or 4-player board game played turn-by-turn against other people (not the house), reached from the Games tab: create a table (choosing 2 or 4 seats) or join someone else's open one from the lobby, and the match starts the moment the last seat fills. Roll the dice, tap a highlighted piece to move it, race all 4 of your pieces around the board and home before anyone else — landing on an opponent outside a safe square sends their piece back to base, and rolling a 6, capturing, or getting a piece home all earn another roll. See **How Ludo works** below for the exact rules and why it has no wager either.
 - **$Cashtag handles** — every account gets a unique, auto-generated `$cashtag` at signup (edit it any time from the Wallet tab), separate from the login username. Anywhere you'd type a username — sending, requesting, searching, QR pay — a `$cashtag` (with or without the leading `$`) works too, the same way Cash App treats a $Cashtag as your public payment handle.
 - **Pay or request, Cash App-style** — one screen does both: a big amount display driven by a numeric keypad (cents-first entry, exactly like tapping out an amount on Cash App's own "$" tab — typing 2-5-0-0 builds "$25.00"), a single "To" field for a username or $cashtag, and a Pay/Request button pair that only enable once both an amount and a recipient are set. Pay sends an instant, no-fee transfer to another user who already has an account here; Request asks them to pay you that amount, with an optional note — they see it as a pending request they can pay (debiting their balance, crediting yours) or decline, and you can cancel a request you sent as long as it's still pending.
-- **Send Money (MoneyGram-style)** — send GYD to anyone by name and phone number, no account required on their end, for a transfer fee (see **How Send Money pricing works** below). You get back a reference code; the recipient enters that code plus the recipient name you typed (the same two things a real money-transfer pickup counter asks for) to collect it into their own balance, registering for an account first if they don't have one. A pending transfer can be cancelled by the sender for a full refund (amount + fee) any time before it's picked up.
+- **GYD Direct** — our own send-to-anyone transfer feature: send GYD to anyone by name and phone number, no account required on their end, for a transfer fee (see **How GYD Direct pricing works** below). You get back a private reference code; the recipient enters that code plus the recipient name you typed to claim it into their own balance, registering for an account first if they don't have one. A pending transfer can be cancelled by the sender for a full refund (amount + fee) any time before it's claimed.
 - **QR code pay ("Scan & Pay" tab)** — every account has a personal QR code encoding `gydpay:pay?to=$cashtag` (optionally with a fixed amount/memo baked in, so a business can generate a "charge code" for a specific bill). Scanning someone's code — via the device camera, by uploading a photo of it, or by pasting the code manually — opens a confirm screen (editable amount/memo) and pays them through the same transfer endpoint used elsewhere. See **How QR pay actually works** below before relying on this for a real demo.
 - **Business directory ("Find a business")** — a business account can set up a public page (category, tagline, description, freeform keywords for what they sell, a logo emoji, a page color, phone/location) from the Business tab. Once saved, that page is searchable by anyone: free-text search matches the business name, tagline, description, category, keywords, AND their listed products — so searching "cake" finds every business that listed "cake" as a keyword or a product name, even if their category is just "Bakery & Desserts" and their name doesn't mention cake — plus a category dropdown to browse by type. Opening a result shows the full page with a **Products & prices** list and **Message** (opens a conversation with that business) and **Pay** (opens the inline checkout described below) buttons. A business account with no page saved yet simply doesn't appear in the directory — having a business account and having a page are separate steps.
 - **Products & prices** — from the same "Your business page" area, a business can list individual products or services with a name, a price in GYD, and an optional description — shown on their public page as a simple menu/catalog, and folded into directory search the same way keywords are (searching a product name finds the business even if that exact phrase never made it into the keywords field). This is purely informational — it doesn't create a way to buy a specific line item; the amount is still typed in at checkout, same as reading a menu before telling the cashier what you owe.
@@ -175,9 +175,9 @@ the game itself:
   There's no reconnect/resume story beyond that in this prototype — if
   everyone just closes the tab mid-match, the table simply sits unfinished.
 
-## How Send Money pricing works
+## How GYD Direct pricing works
 
-The MoneyGram-style transfer charges a fee on top of the amount sent, using
+A GYD Direct transfer charges a fee on top of the amount sent, using
 a flat-minimum-plus-percentage formula: **the greater of GYD 200 or 2.5% of
 the amount**, deducted from the sender's balance immediately along with the
 amount itself (so sending GYD 10,000 actually holds GYD 10,250 — the sender
@@ -197,7 +197,7 @@ Checkout is the same underlying GYD transfer used everywhere else — it just
 asks one extra question when the business supports delivery. Pickup charges
 exactly the amount typed in, no fee, no address. Delivery adds the
 business's own delivery fee to that amount and requires a delivery address
-before it will submit. The important difference from Send Money's fee: the
+before it will submit. The important difference from GYD Direct's fee: the
 delivery fee is credited **to the business**, not kept by the platform —
 because the business is the one who has to arrange getting the order there,
 the same way a restaurant (not the app) keeps a delivery charge on a food
@@ -233,7 +233,7 @@ something a customer buys straight through the app:
   always costs the buyer exactly GYD 4,000; the business's wallet is
   credited GYD 3,860 (4,000 minus the GYD 140 fee), and the fee itself
   isn't credited to any account — the same "the platform just keeps it"
-  treatment as Send Money's transfer fee, just at a different rate. Buying
+  treatment as GYD Direct's transfer fee, just at a different rate. Buying
   multiple tickets in one purchase multiplies straight through: 3 tickets
   at GYD 4,000 each charges GYD 12,000 and credits the business GYD
   11,580. Ticket revenue lands in the business's **business** wallet, the
@@ -269,7 +269,7 @@ something a customer buys straight through the app:
 
 A business account actually has two GYD balances under the hood, even though the app only ever calls the everyday one "your balance": a personal one (used for deposits, cashing out, and sending money — exactly like a personal account) and a separate business balance that only a business account has any use for. The business balance is what fills up when a customer pays the business — a plain transfer or QR-code pay to their $cashtag, business checkout, an approved charge request from the payment portal, or a money request the business itself sent out to be paid. None of those touch the owner's personal balance at all.
 
-That split is deliberate: it keeps the business's takings visibly separate from the owner's own spending money, the same reason a shop keeps a till separate from the owner's wallet. To actually spend or cash out what the business has earned, the owner uses **Move to personal wallet** on their business wallet panel — an instant, no-fee internal transfer from the business balance into their personal one. There's no path the other direction (personal money funding the business wallet) since nothing here needs it — the business wallet only ever fills from customer payments. One deliberate exception: a Send Money (MoneyGram-style) claim always lands in the personal wallet, even for a business account, since claiming a transfer sent to you by name and phone isn't "a customer buying something" — it's just picking up money addressed to you personally.
+That split is deliberate: it keeps the business's takings visibly separate from the owner's own spending money, the same reason a shop keeps a till separate from the owner's wallet. To actually spend or cash out what the business has earned, the owner uses **Move to personal wallet** on their business wallet panel — an instant, no-fee internal transfer from the business balance into their personal one. There's no path the other direction (personal money funding the business wallet) since nothing here needs it — the business wallet only ever fills from customer payments. One deliberate exception: a GYD Direct claim always lands in the personal wallet, even for a business account, since claiming a transfer sent to you by name and phone isn't "a customer buying something" — it's just picking up money addressed to you personally.
 
 One simplification worth knowing: the "Recent activity" list on the Wallet tab is a single combined ledger of everything that ever happened to the account, personal and business alike — it doesn't split into two separate activity feeds per wallet. A real build might want that split; this prototype keeps one list for simplicity.
 
@@ -312,7 +312,7 @@ table-wager path, to accidentally reopen, because there's no currency
 staked in a game anywhere), and it doesn't require distinguishing "coins"
 from "real value" in the first place. You'd still need the Bank of Guyana
 money-transmission licensing to handle real deposits, cash-outs,
-peer-to-peer transfers, requests, Send Money, business checkout, and the
+peer-to-peer transfers, requests, GYD Direct, business checkout, and the
 business payment portal (those move real money regardless of whether any
 game exists at all), but none of the games need a gaming license from
 Guyana's Gaming Authority — there's nothing wagered for that framework
@@ -324,9 +324,9 @@ to argue about.
 
 ## What's deliberately NOT implemented (see the business plan)
 
-- **No real money in or out.** Deposits just add GYD to your balance directly; cash-out just records a request. Wiring in real payments needs a licensed money-transmission partner — this is Phase 2 in the plan, and shouldn't happen before that legal/licensing work is done. That licensing requirement covers deposits, cash-out, peer-to-peer transfers, requests, Send Money, and the business portal alike — it's about holding and moving other people's money at all, not about any single feature.
-- **No real-money gambling exposure.** The games are free to play (see **Why the games are free to play** above) — there is no in-game currency at all, so nothing is ever wagered or paid out. GYD, the one balance meant to represent real money, only moves via deposits, cash-out, peer-to-peer transfers, requests, Send Money, and the business payment portal — never through a game.
-- **No real cash pickup network for Send Money.** A real MoneyGram-style service has physical agent locations where a recipient without a bank account can walk in and collect cash. This prototype's "pickup" is digital only — the recipient needs to register an account here to receive the funds into a balance, not walk away with cash. Building an actual cash-pickup network is a much bigger undertaking (agent partnerships, cash management, physical security) well beyond this prototype's scope.
+- **No real money in or out.** Deposits just add GYD to your balance directly; cash-out just records a request. Wiring in real payments needs a licensed money-transmission partner — this is Phase 2 in the plan, and shouldn't happen before that legal/licensing work is done. That licensing requirement covers deposits, cash-out, peer-to-peer transfers, requests, GYD Direct, and the business portal alike — it's about holding and moving other people's money at all, not about any single feature.
+- **No real-money gambling exposure.** The games are free to play (see **Why the games are free to play** above) — there is no in-game currency at all, so nothing is ever wagered or paid out. GYD, the one balance meant to represent real money, only moves via deposits, cash-out, peer-to-peer transfers, requests, GYD Direct, and the business payment portal — never through a game.
+- **No real cash pickup network for GYD Direct.** A real money-transfer service has physical agent locations where a recipient without a bank account can walk in and collect cash. This prototype's "pickup" is digital only — the recipient needs to register an account here to receive the funds into a balance, not walk away with cash. Building an actual cash-pickup network is a much bigger undertaking (agent partnerships, cash management, physical security) well beyond this prototype's scope.
 - **No KYC/AML, fraud controls, or rate limiting.** Needed before this could handle real funds, not needed to demo the product.
 - **No password reset, email verification, or account recovery.**
 - **No mobile app** — this is a responsive web app; wrapping it for iOS/Android (or rebuilding natively) is a separate step.

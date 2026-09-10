@@ -1,7 +1,7 @@
 {
   "name": "gyd-wallet",
   "version": "0.1.0",
-  "description": "Phase 1 prototype: a GYD wallet, free-to-play games (coin flip, slots, and a 2/4-player Ludo board game), Cash App-style $cashtag payments and money requests, a MoneyGram-style send-money feature, a searchable business directory with customizable pages, photo product/price listings, pickup-or-delivery checkout, business-posted events with in-app ticket sales (QR ticket codes, door check-in, a 3.5% platform fee), a separate business wallet, a business payment portal, and messaging. Zero external dependencies — runs on Node.js 22+ using node:sqlite.",
+  "description": "Phase 1 prototype: a GYD wallet, free-to-play games (coin flip, slots, and a 2/4-player Ludo board game), Cash App-style $cashtag payments and money requests, GYD Direct (our own send-to-anyone transfer feature), a searchable business directory with customizable pages, photo product/price listings, pickup-or-delivery checkout, business-posted events with in-app ticket sales (QR ticket codes, door check-in, a 3.5% platform fee), a separate business wallet, a business payment portal, and messaging. Zero external dependencies — runs on Node.js 22+ using node:sqlite.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -1,4 +1,4 @@
-// GYD Wallet / Send Money / Games / Business Portal / Messaging — Phase 1 prototype.
+// GYD Wallet / GYD Direct / Games / Business Portal / Messaging — Phase 1 prototype.
 //
 // Zero npm dependencies: built on Node's http and crypto modules, plus its
 // built-in fetch() to reach the database — so `node server.js` is all
@@ -132,9 +132,9 @@ async function isBusinessAccount(userId) {
   return !!(row && row.is_business);
 }
 
-// A short numeric reference code in the same spirit as a real money-transfer
-// pickup code (MoneyGram's own reference numbers are 8 digits) — easy to
-// read over the phone or copy into a text message.
+// A short numeric reference code for GYD Direct, our own send-to-anyone
+// transfer feature — 8 digits, easy to read over the phone or copy into a
+// text message.
 async function generateReferenceCode() {
   for (let attempt = 0; attempt < 20; attempt++) {
     const code = String(Math.floor(10000000 + Math.random() * 90000000));
@@ -422,7 +422,7 @@ on(
   })
 );
 
-// ---------- send money (MoneyGram-style remittance) ----------
+// ---------- GYD Direct (our own send-to-anyone transfer feature) ----------
 //
 // This is a different shape of "send money" than the plain P2P transfer
 // above: instead of paying a username you already know is on the app, you
@@ -575,7 +575,7 @@ on(
 // ---------- request money (Cash App-style pay/request) ----------
 //
 // Cash App lets you either pay someone or request money from them; this is
-// the request half. Unlike Send Money above, this only ever moves money
+// the request half. Unlike GYD Direct above, this only ever moves money
 // between two existing accounts — from_user is the person asking to be
 // paid, to_user is the person being asked to pay, and paying it is just a
 // transfer gated behind the payer's approval instead of happening instantly.
@@ -1407,7 +1407,7 @@ function eventTicketPublic(row, buyerUsername) {
   };
 }
 
-// A short, unique ticket code — same idea as the Send Money reference code
+// A short, unique ticket code — same idea as the GYD Direct reference code
 // above, but identifying one specific purchased ticket rather than a
 // pending transfer. This is exactly what gets encoded into the ticket's QR
 // image and what a coordinator scans (or types) at the door.
@@ -1539,7 +1539,7 @@ on(
     // The platform takes its cut out of the ticket price rather than adding a
     // fee on top — the buyer pays exactly ticketPrice × quantity, and the
     // business receives the rest. See README.md for why the fee itself
-    // isn't credited to any account (same treatment as Send Money's fee).
+    // isn't credited to any account (same treatment as GYD Direct's fee).
     const perTicketFee = Math.round(event.ticket_price * EVENT_TICKET_FEE_RATE * 100) / 100;
     const totalFee = Math.round(perTicketFee * quantity * 100) / 100;
     const netToBusiness = Math.round((totalPrice - totalFee) * 100) / 100;
@@ -1784,7 +1784,7 @@ on(
 // business offers delivery the customer can choose delivery over pickup,
 // adding the business's own delivery fee to the total. That fee goes to the
 // business (they're the one arranging the delivery), not the platform —
-// unlike Send Money's fee, which the platform keeps. Pickup never needs an
+// unlike GYD Direct's fee, which the platform keeps. Pickup never needs an
 // address; delivery always does.
 
 on(

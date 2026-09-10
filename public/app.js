@@ -2062,14 +2062,14 @@
     }
   };
 
-  // ---------- send money (MoneyGram-style remittance) ----------
+  // ---------- GYD Direct (our own send-to-anyone transfer feature) ----------
 
   document.getElementById('remit-open-btn').onclick = () => switchTab('remit');
   document.getElementById('remit-back-btn').onclick = () => switchTab('send');
 
   // Mirrors the server's fee formula purely for an up-front estimate as the
   // user types — the server recalculates and enforces the real fee, this is
-  // just so nobody is surprised by the total when they hit "Send Money".
+  // just so nobody is surprised by the total when they hit "Send with GYD Direct".
   function estimateRemitFee(amount) {
     return Math.round(Math.max(200, amount * 0.025) * 100) / 100;
   }
