@@ -252,6 +252,22 @@ CREATE TABLE IF NOT EXISTS job_postings (
   created_at TEXT NOT NULL
 );
 
+-- A "forgot password" reset code. Since this Phase 1 prototype has no real
+-- email sending set up (see "Why no npm packages" in README.md), the code
+-- generated here is handed straight back to the browser and shown on
+-- screen instead of actually being emailed — the same "simulated" spirit
+-- as deposits. Only one active code per user at a time: requesting a new
+-- one deletes any earlier unused code for that user first (see server.js),
+-- so there's never more than one row per user_id to check against.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter

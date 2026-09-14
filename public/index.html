@@ -43,6 +43,7 @@
         <input type="password" id="login-password" autocomplete="current-password" required />
       </div>
       <button type="submit" class="btn full">Log in</button>
+      <button type="button" class="link-btn" id="forgot-password-link">Forgot your password?</button>
       <div class="error-msg" id="login-error"></div>
     </form>
 
@@ -69,6 +70,32 @@
       </div>
       <button type="submit" class="btn full">Create account</button>
       <div class="error-msg" id="register-error"></div>
+    </form>
+
+    <form id="forgot-form" class="hidden">
+      <p class="forgot-intro">Enter the email on your account and we'll show you a reset code.</p>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="forgot-email" autocomplete="email" required />
+      </div>
+      <button type="submit" class="btn full">Send reset code</button>
+      <button type="button" class="link-btn" id="forgot-back-link">Back to log in</button>
+      <div class="error-msg" id="forgot-error"></div>
+    </form>
+
+    <form id="reset-form" class="hidden">
+      <div class="reset-code-display" id="reset-code-display"></div>
+      <div class="field">
+        <label>Reset code</label>
+        <input type="text" id="reset-code" inputmode="numeric" maxlength="6" required />
+      </div>
+      <div class="field">
+        <label>New password</label>
+        <input type="password" id="reset-new-password" autocomplete="new-password" required />
+      </div>
+      <button type="submit" class="btn full">Reset password</button>
+      <button type="button" class="link-btn" id="reset-back-link">Back to log in</button>
+      <div class="error-msg" id="reset-error"></div>
     </form>
     </div>
   </div>

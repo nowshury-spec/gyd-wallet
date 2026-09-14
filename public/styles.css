@@ -202,6 +202,36 @@ input, button, select { font-size: 14px; font-family: inherit; }
 
 .error-msg { color: var(--bad); font-size: 12.5px; margin-top: 10px; min-height: 16px; }
 
+.link-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 14px;
+  padding: 4px;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.forgot-intro { font-size: 13px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+
+.reset-code-display {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  text-align: center;
+}
+.reset-code-display strong { font-size: 22px; letter-spacing: 4px; color: var(--accent); display: block; margin: 6px 0 2px; }
+
 /* ---------- app shell: a centered "phone" like Cash App's own web layout ---------- */
 
 #app-screen {

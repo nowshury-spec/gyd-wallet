@@ -254,6 +254,68 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
   sendJson(res, 200, { token, user: publicUser(user) });
 });
 
+const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+// Forgotten password, step 1: look the account up by email and issue a
+// reset code. There's no real email sending wired up in this Phase 1
+// prototype (see "Why no npm packages" in README.md), so — in the same
+// "simulated" spirit as deposits — the code is handed straight back in
+// this response and shown on screen instead of actually being emailed.
+// Wiring in a real mail provider later just means deleting the `code`
+// line from this response and emailing it instead; nothing else changes.
+on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) => {
+  const email = (body.email || '').trim().toLowerCase();
+  if (!email || !EMAIL_RE.test(email)) {
+    return badRequest(res, 'Enter a valid email address.');
+  }
+  const user = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
+  if (!user) return badRequest(res, 'No account found with that email.');
+
+  // Only one active code per user at a time — clear out any earlier
+  // unused one so there's nothing stale left to accidentally match.
+  await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+
+  const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  const createdAt = now();
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+  await db.prepare(
+    `INSERT INTO password_resets (id, user_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
+  ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt);
+
+  sendJson(res, 200, { code, expiresInMinutes: 15 });
+});
+
+// Forgotten password, step 2: spend the code from step 1 to set a new
+// password. Logs the person straight in afterward (same response shape as
+// /api/login) so they don't have to re-enter the new password immediately.
+on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => {
+  const email = (body.email || '').trim().toLowerCase();
+  const code = (body.code || '').trim();
+  const { newPassword } = body;
+  if (!email || !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address.');
+  if (!code) return badRequest(res, 'Enter the reset code.');
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+    return badRequest(res, 'Password must be at least 6 characters.');
+  }
+  const user = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
+  if (!user) return badRequest(res, 'No account found with that email.');
+
+  const reset = await db
+    .prepare('SELECT * FROM password_resets WHERE user_id = ? AND code = ? AND used_at IS NULL')
+    .get(user.id, code);
+  if (!reset || new Date(reset.expires_at).getTime() < Date.now()) {
+    return badRequest(res, 'That reset code is invalid or has expired.');
+  }
+
+  const { salt, hash } = hashPassword(newPassword);
+  await db.prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, user.id);
+  await db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(now(), reset.id);
+
+  const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  const token = makeSessionToken(user.id);
+  sendJson(res, 200, { token, user: publicUser(updated) });
+});
+
 on(
   'GET',
   '/api/me',

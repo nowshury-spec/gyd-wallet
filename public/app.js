@@ -50,10 +50,14 @@
   document.getElementById('tab-register').onclick = () => switchAuthTab('register');
 
   function switchAuthTab(which) {
+    const isAuthTab = which === 'login' || which === 'register';
+    document.querySelector('.auth-tabs').classList.toggle('hidden', !isAuthTab);
     document.getElementById('tab-login').classList.toggle('active', which === 'login');
     document.getElementById('tab-register').classList.toggle('active', which === 'register');
     document.getElementById('login-form').classList.toggle('hidden', which !== 'login');
     document.getElementById('register-form').classList.toggle('hidden', which !== 'register');
+    document.getElementById('forgot-form').classList.toggle('hidden', which !== 'forgot');
+    document.getElementById('reset-form').classList.toggle('hidden', which !== 'reset');
   }
 
   document.getElementById('register-is-business').onchange = (e) => {
@@ -87,6 +91,55 @@
     errBox.textContent = '';
     try {
       const data = await api('/api/register', 'POST', { username, email, password, isBusiness, businessName });
+      setToken(data.token);
+      state.user = data.user;
+      enterApp();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('forgot-password-link').onclick = () => {
+    document.getElementById('login-error').textContent = '';
+    document.getElementById('forgot-email').value = document.getElementById('login-username').value.includes('@')
+      ? document.getElementById('login-username').value.trim()
+      : '';
+    document.getElementById('forgot-error').textContent = '';
+    switchAuthTab('forgot');
+  };
+
+  document.getElementById('forgot-back-link').onclick = () => switchAuthTab('login');
+  document.getElementById('reset-back-link').onclick = () => switchAuthTab('login');
+
+  let resetEmail = '';
+
+  document.getElementById('forgot-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('forgot-email').value.trim();
+    const errBox = document.getElementById('forgot-error');
+    errBox.textContent = '';
+    try {
+      const data = await api('/api/auth/forgot-password', 'POST', { email });
+      resetEmail = email;
+      document.getElementById('reset-code-display').innerHTML =
+        `Since GYD Wallet doesn't send real emails yet, here's your simulated reset code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+      document.getElementById('reset-code').value = '';
+      document.getElementById('reset-new-password').value = '';
+      document.getElementById('reset-error').textContent = '';
+      switchAuthTab('reset');
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('reset-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const code = document.getElementById('reset-code').value.trim();
+    const newPassword = document.getElementById('reset-new-password').value;
+    const errBox = document.getElementById('reset-error');
+    errBox.textContent = '';
+    try {
+      const data = await api('/api/auth/reset-password', 'POST', { email: resetEmail, code, newPassword });
       setToken(data.token);
       state.user = data.user;
       enterApp();
