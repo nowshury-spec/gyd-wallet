@@ -231,6 +231,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
   text-align: center;
 }
 .reset-code-display strong { font-size: 22px; letter-spacing: 4px; color: var(--accent); display: block; margin: 6px 0 2px; }
+.reset-code-display strong.username-value { letter-spacing: normal; word-break: break-word; }
 
 /* ---------- app shell: a centered "phone" like Cash App's own web layout ---------- */
 

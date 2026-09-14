@@ -316,6 +316,20 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
   sendJson(res, 200, { token, user: publicUser(updated) });
 });
 
+// Forgotten username: same "simulated" idea as forgot-password above, but
+// simpler — there's no secret to reset, just a lookup, so the username is
+// handed straight back and shown on screen instead of being emailed.
+on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) => {
+  const email = (body.email || '').trim().toLowerCase();
+  if (!email || !EMAIL_RE.test(email)) {
+    return badRequest(res, 'Enter a valid email address.');
+  }
+  const user = await db.prepare('SELECT username FROM users WHERE LOWER(email) = ?').get(email);
+  if (!user) return badRequest(res, 'No account found with that email.');
+
+  sendJson(res, 200, { username: user.username });
+});
+
 on(
   'GET',
   '/api/me',

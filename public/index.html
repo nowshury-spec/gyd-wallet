@@ -44,6 +44,7 @@
       </div>
       <button type="submit" class="btn full">Log in</button>
       <button type="button" class="link-btn" id="forgot-password-link">Forgot your password?</button>
+      <button type="button" class="link-btn" id="forgot-username-link">Forgot your username?</button>
       <div class="error-msg" id="login-error"></div>
     </form>
 
@@ -97,6 +98,22 @@
       <button type="button" class="link-btn" id="reset-back-link">Back to log in</button>
       <div class="error-msg" id="reset-error"></div>
     </form>
+
+    <form id="forgot-username-form" class="hidden">
+      <p class="forgot-intro">Enter the email on your account and we'll show you your username.</p>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="forgot-username-email" autocomplete="email" required />
+      </div>
+      <button type="submit" class="btn full">Find my username</button>
+      <button type="button" class="link-btn" id="forgot-username-back-link">Back to log in</button>
+      <div class="error-msg" id="forgot-username-error"></div>
+    </form>
+
+    <div id="username-result-panel" class="hidden">
+      <div class="reset-code-display" id="username-result-display"></div>
+      <button type="button" class="btn full" id="username-result-login-btn">Back to log in</button>
+    </div>
     </div>
   </div>
 </div>

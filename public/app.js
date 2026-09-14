@@ -58,6 +58,8 @@
     document.getElementById('register-form').classList.toggle('hidden', which !== 'register');
     document.getElementById('forgot-form').classList.toggle('hidden', which !== 'forgot');
     document.getElementById('reset-form').classList.toggle('hidden', which !== 'reset');
+    document.getElementById('forgot-username-form').classList.toggle('hidden', which !== 'forgot-username');
+    document.getElementById('username-result-panel').classList.toggle('hidden', which !== 'username-result');
   }
 
   document.getElementById('register-is-business').onchange = (e) => {
@@ -143,6 +145,33 @@
       setToken(data.token);
       state.user = data.user;
       enterApp();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('forgot-username-link').onclick = () => {
+    document.getElementById('login-error').textContent = '';
+    document.getElementById('forgot-username-email').value = document.getElementById('login-username').value.includes('@')
+      ? document.getElementById('login-username').value.trim()
+      : '';
+    document.getElementById('forgot-username-error').textContent = '';
+    switchAuthTab('forgot-username');
+  };
+
+  document.getElementById('forgot-username-back-link').onclick = () => switchAuthTab('login');
+  document.getElementById('username-result-login-btn').onclick = () => switchAuthTab('login');
+
+  document.getElementById('forgot-username-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('forgot-username-email').value.trim();
+    const errBox = document.getElementById('forgot-username-error');
+    errBox.textContent = '';
+    try {
+      const data = await api('/api/auth/forgot-username', 'POST', { email });
+      document.getElementById('username-result-display').innerHTML =
+        `Here's the username on that account:<strong class="username-value">${data.username}</strong>`;
+      switchAuthTab('username-result');
     } catch (err) {
       errBox.textContent = err.message;
     }
