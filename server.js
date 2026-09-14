@@ -244,17 +244,42 @@ on('POST', '/api/register', async (req, res, params, query, body) => {
   sendJson(res, 201, { token, user: publicUser(user) });
 });
 
+const LOGIN_MAX_ATTEMPTS = 8;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS_PER_IP = 30; // backstop against one IP guessing across many usernames
+
 on('POST', '/api/login', async (req, res, params, query, body) => {
   const { username, password } = body;
+  const ip = getClientIp(req);
+  const perAccountKey = `login:${(username || '').toLowerCase()}:${ip}`;
+  const perIpKey = `login-ip:${ip}`;
+
+  const perAccountBucket = rateLimitPeek(perAccountKey);
+  const perIpBucket = rateLimitPeek(perIpKey);
+  if (perAccountBucket.count >= LOGIN_MAX_ATTEMPTS || perIpBucket.count >= LOGIN_MAX_ATTEMPTS_PER_IP) {
+    const bucket = perAccountBucket.count >= LOGIN_MAX_ATTEMPTS ? perAccountBucket : perIpBucket;
+    return sendJson(res, 429, {
+      error: `Too many login attempts. Try again in ${retryAfterMinutes(bucket)} minute(s).`,
+    });
+  }
+
   const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
   if (!user || !verifyPassword(password || '', user.password_salt, user.password_hash)) {
+    rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS);
+    rateLimitRecord(perIpKey, LOGIN_WINDOW_MS);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
+  rateLimitReset(perAccountKey);
   const token = makeSessionToken(user.id);
   sendJson(res, 200, { token, user: publicUser(user) });
 });
 
 const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_RESET_CODE_ATTEMPTS = 5; // wrong guesses allowed before a fresh code is required
+const FORGOT_MAX_PER_IP = 8; // requests per IP per window, for both forgot-* endpoints
+const FORGOT_WINDOW_MS = 15 * 60 * 1000;
+const RESET_PASSWORD_MAX_PER_IP = 30; // backstop against guessing codes across many emails
+const RESET_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
 
 // Forgotten password, step 1: look the account up by email and issue a
 // reset code. There's no real email sending wired up in this Phase 1
@@ -263,24 +288,41 @@ const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
 // this response and shown on screen instead of actually being emailed.
 // Wiring in a real mail provider later just means deleting the `code`
 // line from this response and emailing it instead; nothing else changes.
+//
+// IMPORTANT: this always responds with a freshly generated code, whether
+// or not the email actually has an account — the code just never gets
+// stored anywhere for an email that doesn't match one. If this instead
+// returned an error for unknown emails, anyone could use this endpoint to
+// check which emails have accounts here; responding identically either way
+// closes that off without changing anything a real user experiences.
 on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) => {
   const email = (body.email || '').trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) {
     return badRequest(res, 'Enter a valid email address.');
   }
+
+  const ipKey = `forgot-password-ip:${getClientIp(req)}`;
+  const ipBucket = rateLimitPeek(ipKey);
+  if (ipBucket.count >= FORGOT_MAX_PER_IP) {
+    return sendJson(res, 429, {
+      error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
+    });
+  }
+  rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
+
   const user = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
-  if (!user) return badRequest(res, 'No account found with that email.');
-
-  // Only one active code per user at a time — clear out any earlier
-  // unused one so there's nothing stale left to accidentally match.
-  await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
-
   const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
-  const createdAt = now();
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
-  await db.prepare(
-    `INSERT INTO password_resets (id, user_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
-  ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt);
+
+  if (user) {
+    // Only one active code per user at a time — clear out any earlier
+    // unused one so there's nothing stale left to accidentally match.
+    await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+    const createdAt = now();
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+    await db.prepare(
+      `INSERT INTO password_resets (id, user_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
+    ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt);
+  }
 
   sendJson(res, 200, { code, expiresInMinutes: 15 });
 });
@@ -297,14 +339,42 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
   if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
     return badRequest(res, 'Password must be at least 6 characters.');
   }
+
+  const ipKey = `reset-password-ip:${getClientIp(req)}`;
+  const ipBucket = rateLimitPeek(ipKey);
+  if (ipBucket.count >= RESET_PASSWORD_MAX_PER_IP) {
+    return sendJson(res, 429, {
+      error: `Too many attempts from this connection. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
+    });
+  }
+  rateLimitRecord(ipKey, RESET_PASSWORD_WINDOW_MS);
+
+  // Same "invalid or expired" message for every failure case below — unknown
+  // email, no active code, expired code, wrong code, too many guesses — so
+  // this endpoint can't be used to check whether an email has an account
+  // (see the enumeration note on /api/auth/forgot-password above).
+  const invalidMsg = 'That reset code is invalid or has expired.';
+
   const user = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
-  if (!user) return badRequest(res, 'No account found with that email.');
+  if (!user) return badRequest(res, invalidMsg);
 
   const reset = await db
-    .prepare('SELECT * FROM password_resets WHERE user_id = ? AND code = ? AND used_at IS NULL')
-    .get(user.id, code);
+    .prepare('SELECT * FROM password_resets WHERE user_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1')
+    .get(user.id);
   if (!reset || new Date(reset.expires_at).getTime() < Date.now()) {
-    return badRequest(res, 'That reset code is invalid or has expired.');
+    return badRequest(res, invalidMsg);
+  }
+  // A 6-digit code only has 1,000,000 possibilities, so without this an
+  // automated script could simply try all of them inside the 15-minute
+  // window. Capping wrong guesses per code makes that infeasible — after
+  // this many misses, the code is dead even if it hasn't expired yet, and
+  // the only way forward is requesting a brand new one.
+  if (reset.attempts >= MAX_RESET_CODE_ATTEMPTS) {
+    return badRequest(res, 'Too many incorrect attempts. Request a new reset code.');
+  }
+  if (reset.code !== code) {
+    await db.prepare('UPDATE password_resets SET attempts = attempts + 1 WHERE id = ?').run(reset.id);
+    return badRequest(res, invalidMsg);
   }
 
   const { salt, hash } = hashPassword(newPassword);
@@ -319,11 +389,31 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
 // Forgotten username: same "simulated" idea as forgot-password above, but
 // simpler — there's no secret to reset, just a lookup, so the username is
 // handed straight back and shown on screen instead of being emailed.
+//
+// NOTE (unlike forgot-password above): this one CAN'T fully hide whether an
+// email has an account, because the whole point is showing the real
+// username on screen — there's no fake value to hand back instead without
+// actively misleading someone who typos their own email. The IP rate limit
+// below is the mitigation: it caps how many emails any one visitor can
+// probe per window, without needing real email delivery to close this off
+// completely (which would require sending the username out-of-band instead
+// of displaying it, the same way a production build should for the reset
+// code above).
 on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) => {
   const email = (body.email || '').trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) {
     return badRequest(res, 'Enter a valid email address.');
   }
+
+  const ipKey = `forgot-username-ip:${getClientIp(req)}`;
+  const ipBucket = rateLimitPeek(ipKey);
+  if (ipBucket.count >= FORGOT_MAX_PER_IP) {
+    return sendJson(res, 429, {
+      error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
+    });
+  }
+  rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
+
   const user = await db.prepare('SELECT username FROM users WHERE LOWER(email) = ?').get(email);
   if (!user) return badRequest(res, 'No account found with that email.');
 
@@ -2044,9 +2134,94 @@ function serveStatic(req, res, parsedUrl) {
   });
 }
 
+// ---------- security headers ----------
+// Applied to every response (API and static alike). These don't replace
+// having good application logic (the rate limiting and validation
+// elsewhere in this file matter far more), but they close off a handful of
+// cheap browser-level attacks: forcing HTTPS, stopping this site from being
+// framed by another page (clickjacking), stopping the browser from
+// "helpfully" guessing a file's type in a way that enables an XSS, and
+// restricting where scripts/styles/images/connections are allowed to come
+// from so an injected `<script src="evil.example">` (if one ever slipped
+// through) would simply be refused by the browser.
+const CSP =
+  "default-src 'self'; " +
+  "script-src 'self'; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src https://fonts.gstatic.com; " +
+  "img-src 'self' data: https://api.qrserver.com; " +
+  "connect-src 'self'; " +
+  "frame-ancestors 'none'; " +
+  "base-uri 'self'; " +
+  "form-action 'self'";
+
+function applySecurityHeaders(res) {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Content-Security-Policy', CSP);
+}
+
+// ---------- lightweight rate limiting ----------
+// A small in-memory guard against brute-forcing (guessing passwords or
+// reset codes) and against hammering the account-lookup endpoints. It's
+// intentionally simple — a Map, not a separate service — since this is a
+// single-instance Phase 1 prototype; the trade-off is that counts reset if
+// the server restarts or redeploys. That's an acceptable gap for a
+// prototype (it still stops casual/automated abuse), but a production
+// deployment behind multiple instances should move this to something
+// shared, like a Redis counter.
+const rateLimitBuckets = new Map(); // key -> { count, resetAt }
+
+function rateLimitPeek(key) {
+  const bucket = rateLimitBuckets.get(key);
+  if (!bucket || bucket.resetAt <= Date.now()) return { count: 0, resetAt: 0 };
+  return bucket;
+}
+
+function rateLimitRecord(key, windowMs) {
+  const nowMs = Date.now();
+  let bucket = rateLimitBuckets.get(key);
+  if (!bucket || bucket.resetAt <= nowMs) {
+    bucket = { count: 0, resetAt: nowMs + windowMs };
+    rateLimitBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  return bucket;
+}
+
+function rateLimitReset(key) {
+  rateLimitBuckets.delete(key);
+}
+
+function retryAfterMinutes(bucket) {
+  return Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 60000));
+}
+
+// Periodic cleanup so this Map doesn't grow forever on a long-running
+// process — expired buckets are also skipped on read, this just reclaims
+// their memory.
+setInterval(() => {
+  const nowMs = Date.now();
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (bucket.resetAt <= nowMs) rateLimitBuckets.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
+function getClientIp(req) {
+  // Render (like most PaaS providers) sits in front of the app as a proxy
+  // and forwards the real client IP as the first entry of this header.
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return xff.split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
+
 // ---------- server ----------
 
 const server = http.createServer(async (req, res) => {
+  applySecurityHeaders(res);
   const parsedUrl = url.parse(req.url, true);
   const pathname = decodeURIComponent(parsedUrl.pathname);
 

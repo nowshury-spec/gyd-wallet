@@ -265,7 +265,11 @@ CREATE TABLE IF NOT EXISTS password_resets (
   code TEXT NOT NULL,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
-  used_at TEXT
+  used_at TEXT,
+  -- Wrong guesses against this code, so an automated script can't just try
+  -- all 1,000,000 possible 6-digit codes within the 15-minute window —
+  -- server.js locks the code out after MAX_RESET_CODE_ATTEMPTS misses.
+  attempts INTEGER NOT NULL DEFAULT 0
 );
 
 -- ---------------------------------------------------------------------
