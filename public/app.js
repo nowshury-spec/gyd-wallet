@@ -192,6 +192,7 @@
   });
 
   document.getElementById('header-scan-btn').onclick = () => switchTab('qr');
+  document.getElementById('header-support-btn').onclick = () => switchTab('support');
 
   document.querySelectorAll('.quick-action').forEach((btn) => {
     btn.onclick = () => {
@@ -246,6 +247,7 @@
     if (tab === 'ludo') enterLudoTab();
     if (tab === 'mytickets') loadMyTickets();
     if (tab === 'jobs') loadJobsBoard();
+    if (tab === 'support') loadSupportTickets();
   }
 
   document.getElementById('my-tickets-btn').onclick = () => switchTab('mytickets');
@@ -1553,6 +1555,65 @@
           <img src="${ticketQrUrl(t.ticketCode)}" alt="Ticket QR code" width="140" height="140" />
           <code>${t.ticketCode}</code>
         </div>
+      `;
+      box.appendChild(card);
+    });
+  }
+
+  // ---------- help & support ----------
+
+  document.getElementById('support-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const subject = document.getElementById('support-subject').value.trim();
+    const message = document.getElementById('support-message').value.trim();
+    const errBox = document.getElementById('support-error');
+    errBox.textContent = '';
+    try {
+      await api('/api/support/tickets', 'POST', { subject, message });
+      document.getElementById('support-form').reset();
+      loadSupportTickets();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  async function loadSupportTickets() {
+    const box = document.getElementById('support-tickets-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api('/api/support/tickets/mine');
+      renderSupportTickets(data.tickets);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderSupportTickets(tickets) {
+    const box = document.getElementById('support-tickets-list');
+    box.innerHTML = '';
+    if (tickets.length === 0) {
+      box.innerHTML = '<p class="muted">No requests sent yet.</p>';
+      return;
+    }
+    tickets.forEach((t) => {
+      const card = document.createElement('div');
+      card.className = 'panel';
+      card.style.marginBottom = '10px';
+      card.innerHTML = `
+        <div class="panel-row" style="justify-content:space-between; align-items:flex-start;">
+          <strong>${t.subject}</strong>
+          <span class="pill ${t.status}">${t.status}</span>
+        </div>
+        <div class="muted" style="font-size:12px; margin:4px 0 8px;">${timeAgo(t.createdAt)}</div>
+        <div style="font-size:13px;">${t.message}</div>
+        ${
+          t.staffReply
+            ? `<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+                 <div class="muted" style="font-size:11px; font-weight:700; margin-bottom:4px;">SUPPORT REPLY</div>
+                 <div style="font-size:13px;">${t.staffReply}</div>
+               </div>`
+            : '<div class="muted" style="font-size:12px; margin-top:8px;">Waiting on a reply…</div>'
+        }
       `;
       box.appendChild(card);
     });

@@ -1,0 +1,149 @@
+/* Staff portal (public/staff.html) — deliberately its own stylesheet, kept
+   small and separate from the customer app's styles.css, since this page
+   isn't phone-shaped like the rest of the app; it reuses styles.css's
+   :root color tokens, .btn/.field/.panel/.pill/.error-msg building blocks,
+   and .hero-mark/.hero-note/.section-title so the two feel like the same
+   product without duplicating the whole design system. */
+
+body { background: var(--bg); color: var(--text); }
+
+/* ---------- login screen ---------- */
+
+#staff-login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.staff-login-wrapper { width: 100%; max-width: 380px; }
+.staff-login-wrapper .auth-card { border-radius: var(--radius-lg); }
+
+.staff-login-header { text-align: center; margin-bottom: 26px; }
+.staff-login-title { font-size: 22px; font-weight: 800; margin: 8px 0 4px; }
+
+/* ---------- dashboard shell ---------- */
+
+.staff-shell {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+}
+
+.staff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.staff-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.staff-header-actions { display: flex; align-items: center; gap: 12px; }
+
+.staff-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.staff-summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.staff-summary-num { font-size: 26px; font-weight: 800; color: var(--accent); }
+.staff-summary-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.staff-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2);
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.staff-tab {
+  flex: 1;
+  min-width: 100px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.staff-tab.active { background: var(--accent); color: #04180c; }
+
+.staff-panel-toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+
+/* filter/status buttons reuse .btn/.btn.secondary from styles.css; this
+   just marks whichever one is the active filter */
+.staff-filter-btn.active { background: var(--accent); color: #04180c; border-color: transparent; }
+
+.staff-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.staff-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.staff-item-meta { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.staff-item-body { font-size: 13.5px; line-height: 1.5; margin-bottom: 10px; }
+
+.staff-reply-box {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.staff-reply-box textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.staff-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.staff-employee-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.staff-employee-row:last-child { border-bottom: none; }

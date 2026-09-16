@@ -56,8 +56,16 @@ CREATE TABLE IF NOT EXISTS cashout_requests (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   amount_gyd DOUBLE PRECISION NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | rejected
+  created_at TEXT NOT NULL,
+  -- Who on staff (staff_accounts.id) resolved this, and when — see the
+  -- staff portal's cash-out queue in server.js. A 'completed' request means
+  -- a staff member actually paid the customer outside the app (still no
+  -- licensed payout integration — see README's "Why no npm packages" scope
+  -- note); a 'rejected' one refunds the escrowed GYD back to the customer's
+  -- balance instead.
+  resolved_at TEXT,
+  resolved_by TEXT
 );
 
 -- The games are free to play — no coins, no wager, nothing of value paid
@@ -138,7 +146,16 @@ CREATE TABLE IF NOT EXISTS business_profiles (
   location TEXT,
   offers_delivery INTEGER NOT NULL DEFAULT 0,
   delivery_fee DOUBLE PRECISION NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  -- Staff review gate for the staff portal's "Business & job approvals"
+  -- queue: pending | approved | rejected. Defaults to 'approved' at the
+  -- column level so every profile that existed before this feature stays
+  -- visible with no action needed — server.js explicitly sets 'pending' on
+  -- a brand NEW profile's first creation only, not on later edits, so an
+  -- already-approved business isn't yanked out of the directory just for
+  -- touching up their page. Only a profile pending review is hidden from
+  -- /api/business/directory.
+  review_status TEXT NOT NULL DEFAULT 'approved'
 );
 
 -- A line item on a business's page — a specific product or service and its
@@ -249,7 +266,13 @@ CREATE TABLE IF NOT EXISTS job_postings (
   pay_info TEXT,
   job_type TEXT,
   status TEXT NOT NULL DEFAULT 'active', -- active | closed
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Same staff review gate as business_profiles.review_status above:
+  -- pending | approved | rejected. Defaults to 'approved' so postings that
+  -- existed before this feature stay visible; new postings start 'pending'
+  -- and are hidden from the public /api/jobs board until staff approve
+  -- them.
+  review_status TEXT NOT NULL DEFAULT 'approved'
 );
 
 -- A "forgot password" reset code. Since this Phase 1 prototype has no real
@@ -270,6 +293,45 @@ CREATE TABLE IF NOT EXISTS password_resets (
   -- all 1,000,000 possible 6-digit codes within the 15-minute window —
   -- server.js locks the code out after MAX_RESET_CODE_ATTEMPTS misses.
   attempts INTEGER NOT NULL DEFAULT 0
+);
+
+-- Employee/staff logins for the internal staff portal (public/staff.html) —
+-- completely separate from the `users` table above (customers and
+-- businesses). There's no self-signup for these: the first one is seeded
+-- directly, and any logged-in staff member can create another from the
+-- portal's "Add employee" panel (see POST /api/staff/accounts). Kept as its
+-- own table, rather than a flag on `users`, so a staff login can never be
+-- confused with a customer login even though they share the same
+-- password-hashing code.
+CREATE TABLE IF NOT EXISTS staff_accounts (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- A support request a customer submits from the app. user_id is nullable
+-- because someone might need help before they can log in (e.g. they can't
+-- get into their account at all) — name/email are captured directly on the
+-- ticket in that case instead of being looked up from a user row.
+-- staff_reply is a single text field rather than a full message thread —
+-- enough for a Phase 1 "someone on staff read this and responded" loop; a
+-- real back-and-forth thread is a natural upgrade later; see the messages
+-- table above for the pattern this app already uses for actual message
+-- threads, which a future version of this could switch to.
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  name TEXT,
+  email TEXT,
+  subject TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open', -- open | resolved
+  staff_reply TEXT,
+  replied_by TEXT,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
 );
 
 -- ---------------------------------------------------------------------

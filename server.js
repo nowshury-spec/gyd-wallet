@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const url = require('url');
 
 const db = require('./db');
-const { hashPassword, verifyPassword, makeSessionToken, verify } = require('./auth');
+const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify } = require('./auth');
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
 
 const PORT = process.env.PORT || 3000;
@@ -74,6 +74,24 @@ async function getAuthedUser(req) {
   if (!data) return null;
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(data.uid);
   return user || null;
+}
+
+// Staff sessions are a completely separate token shape (see auth.js's
+// makeStaffSessionToken) — a customer token has no `role` field at all, so
+// it can never satisfy `data.role === 'staff'` here no matter what account
+// it belongs to, and a staff token has no `uid` so it can't be used with
+// getAuthedUser above either.
+async function getAuthedStaff(req) {
+  const header = req.headers['authorization'] || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const data = verify(token);
+  if (!data || data.role !== 'staff') return null;
+  const staff = await db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(data.sid);
+  return staff || null;
+}
+
+function publicStaff(s) {
+  return { id: s.id, username: s.username, createdAt: s.created_at };
 }
 
 function publicUser(u) {
@@ -194,6 +212,14 @@ function requireBusiness(handler) {
     if (!user.is_business) return sendJson(res, 403, { error: 'This action requires a business account.' });
     return handler(req, res, params, query, body, user);
   });
+}
+
+function requireStaffAuth(handler) {
+  return async (req, res, params, query, body) => {
+    const staff = await getAuthedStaff(req);
+    if (!staff) return sendJson(res, 401, { error: 'Not authenticated.' });
+    return handler(req, res, params, query, body, staff);
+  };
 }
 
 function badRequest(res, message) {
@@ -1314,6 +1340,11 @@ on('POST', '/api/business/charge-requests/:id/decline', resolveChargeRequest('de
 
 function businessProfilePublic(row) {
   return {
+    // business_profiles.user_id (its primary key, always present since
+    // every join that builds one of these rows includes bp.*) — the staff
+    // portal's approve/reject buttons need this exact id, not the display
+    // username, to call POST /api/staff/approvals/business/:userId/....
+    userId: row.user_id,
     username: row.username,
     cashtag: row.cashtag,
     businessName: row.business_name,
@@ -1331,6 +1362,12 @@ function businessProfilePublic(row) {
     offersDelivery: !!row.offers_delivery,
     deliveryFee: row.delivery_fee || 0,
     updatedAt: row.updated_at,
+    // 'pending' | 'approved' | 'rejected' — surfaced so a business owner can
+    // see their own page is awaiting staff review (see the staff portal's
+    // approvals queue). Doesn't affect anything the owner can do with their
+    // own profile; it only controls whether OTHER people can find it via
+    // the directory search below.
+    reviewStatus: row.review_status || 'approved',
   };
 }
 
@@ -1368,15 +1405,22 @@ on(
 
     const existing = await db.prepare('SELECT user_id FROM business_profiles WHERE user_id = ?').get(user.id);
     if (existing) {
+      // An edit to an already-reviewed page never resets its review_status
+      // — only a brand new page (the branch below) starts out 'pending', so
+      // a business that's already approved isn't yanked out of the
+      // directory just for touching up their tagline or hours.
       await db.prepare(
         `UPDATE business_profiles
          SET category = ?, tagline = ?, description = ?, keywords = ?, theme_color = ?, logo_emoji = ?, phone = ?, location = ?, offers_delivery = ?, delivery_fee = ?, updated_at = ?
          WHERE user_id = ?`
       ).run(category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now(), user.id);
     } else {
+      // A brand new business page starts 'pending' and won't show up in
+      // /api/business/directory until a staff member approves it from the
+      // staff portal — see the "Business & job approvals" queue.
       await db.prepare(
-        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at, review_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
       ).run(user.id, category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now());
     }
 
@@ -1393,7 +1437,10 @@ on(
   requireAuth(async (req, res, params, query) => {
     const q = (query.q || '').trim();
     const category = (query.category || '').trim();
-    let sql = 'SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE 1=1';
+    // Only pages a staff member has approved show up here — a page
+    // awaiting review or one that was rejected is invisible to everyone
+    // except its own owner (via GET /api/business/profile above).
+    let sql = "SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.review_status = 'approved'";
     const args = [];
     if (category) {
       sql += ' AND bp.category = ?';
@@ -1847,6 +1894,9 @@ function jobPostingPublic(row, business) {
     jobType: row.job_type,
     status: row.status,
     createdAt: row.created_at,
+    // 'pending' | 'approved' | 'rejected' — see review_status on
+    // business_profiles above for the same idea applied to job postings.
+    reviewStatus: row.review_status || 'approved',
     business: business
       ? { username: business.username, name: business.business_name || business.username }
       : undefined,
@@ -1875,10 +1925,14 @@ on(
     if (!title) return badRequest(res, 'Give the job a title.');
     if (!description) return badRequest(res, 'Add a short description of the job.');
 
+    // Starts 'pending' — won't show up on the public /api/jobs board until
+    // a staff member approves it from the staff portal's approvals queue.
+    // It's still visible on the business's own GET /api/business/jobs list
+    // above (with its reviewStatus) right away.
     const id = crypto.randomUUID();
     await db.prepare(
-      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at, review_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 'pending')`
     ).run(id, user.id, title, description, location || null, payInfo || null, jobType, now());
 
     const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
@@ -1923,7 +1977,10 @@ on(
   requireAuth(async (req, res, params, query) => {
     const q = (query.q || '').trim();
     const jobType = (query.jobType || '').trim();
-    let sql = `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id WHERE j.status = 'active'`;
+    // Only approved postings show up on the public board — one still
+    // awaiting (or denied) staff review is only visible to its own
+    // business via GET /api/business/jobs above.
+    let sql = `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id WHERE j.status = 'active' AND j.review_status = 'approved'`;
     const args = [];
     if (jobType) {
       sql += ' AND j.job_type = ?';
@@ -2217,6 +2274,371 @@ function getClientIp(req) {
   if (xff) return xff.split(',')[0].trim();
   return req.socket.remoteAddress || 'unknown';
 }
+
+// ---------- support tickets (customer-facing) ----------
+//
+// A lightweight "contact support" channel: a customer submits a ticket
+// (logged in or not — someone locked out of their account still needs a
+// way to ask for help), and a staff member answers it from the staff
+// portal (see the staff routes below). There's no live back-and-forth
+// thread yet — one message in, one staff reply out — see the note on the
+// support_tickets table in supabase/schema.sql for the natural next step.
+
+function supportTicketPublic(row) {
+  return {
+    id: row.id,
+    subject: row.subject,
+    message: row.message,
+    status: row.status,
+    staffReply: row.staff_reply || null,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at || null,
+  };
+}
+
+on('POST', '/api/support/tickets', async (req, res, params, query, body) => {
+  const subject = (body.subject || '').trim().slice(0, 140);
+  const message = (body.message || '').trim().slice(0, 2000);
+  if (!subject) return badRequest(res, 'Add a short subject line.');
+  if (!message) return badRequest(res, 'Describe the issue you\'re having.');
+
+  const ipKey = `support-ticket-ip:${getClientIp(req)}`;
+  const ipBucket = rateLimitPeek(ipKey);
+  if (ipBucket.count >= 10) {
+    return sendJson(res, 429, {
+      error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
+    });
+  }
+  rateLimitRecord(ipKey, 15 * 60 * 1000);
+
+  // If the request carries a valid session, attach it to the ticket and
+  // pull name/email from the account instead of trusting client-supplied
+  // values for those — a logged-in submission can't spoof whose ticket it
+  // is. Someone without a session (or who isn't logged in right now) must
+  // supply their own name and email so staff have a way to identify them.
+  const authedUser = await getAuthedUser(req);
+  let userId = null;
+  let name = null;
+  let email = null;
+  if (authedUser) {
+    userId = authedUser.id;
+    name = authedUser.username;
+    email = authedUser.email || null;
+  } else {
+    name = (body.name || '').trim().slice(0, 80);
+    email = (body.email || '').trim().slice(0, 200);
+    if (!name) return badRequest(res, 'Enter your name.');
+    if (!email || !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address.');
+  }
+
+  const id = crypto.randomUUID();
+  await db.prepare(
+    `INSERT INTO support_tickets (id, user_id, name, email, subject, message, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`
+  ).run(id, userId, name, email, subject, message, now());
+
+  sendJson(res, 201, { ticketId: id });
+});
+
+on(
+  'GET',
+  '/api/support/tickets/mine',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const rows = await db
+      .prepare('SELECT * FROM support_tickets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50')
+      .all(user.id);
+    sendJson(res, 200, { tickets: rows.map(supportTicketPublic) });
+  })
+);
+
+// ---------- staff portal ----------
+//
+// A completely separate login system for employees (see auth.js's
+// makeStaffSessionToken and requireStaffAuth above) — a customer account,
+// even a business one, has no access here no matter what. There's no
+// self-signup: the first staff account is seeded directly, and any
+// logged-in staff member can create another from the "Add employee" panel
+// in public/staff.html (POST /api/staff/accounts below). The portal itself
+// is public/staff.html + public/staff.js, served the same static way as
+// the customer app but as its own page — see README.md for the URL.
+
+const STAFF_LOGIN_MAX_ATTEMPTS = 8;
+const STAFF_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+on('POST', '/api/staff/login', async (req, res, params, query, body) => {
+  const { username, password } = body;
+  const ip = getClientIp(req);
+  const key = `staff-login:${(username || '').toLowerCase()}:${ip}`;
+  const bucket = rateLimitPeek(key);
+  if (bucket.count >= STAFF_LOGIN_MAX_ATTEMPTS) {
+    return sendJson(res, 429, {
+      error: `Too many login attempts. Try again in ${retryAfterMinutes(bucket)} minute(s).`,
+    });
+  }
+
+  const staff = await db.prepare('SELECT * FROM staff_accounts WHERE username = ?').get(username || '');
+  if (!staff || !verifyPassword(password || '', staff.password_salt, staff.password_hash)) {
+    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    return sendJson(res, 401, { error: 'Invalid username or password.' });
+  }
+  rateLimitReset(key);
+  const token = makeStaffSessionToken(staff.id);
+  sendJson(res, 200, { token, staff: publicStaff(staff) });
+});
+
+on(
+  'GET',
+  '/api/staff/me',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    sendJson(res, 200, { staff: publicStaff(staff) });
+  })
+);
+
+on(
+  'GET',
+  '/api/staff/accounts',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const rows = await db.prepare('SELECT * FROM staff_accounts ORDER BY created_at ASC').all();
+    sendJson(res, 200, { accounts: rows.map(publicStaff) });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/accounts',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const username = (body.username || '').trim();
+    const password = body.password;
+    if (!username || username.length < 3) return badRequest(res, 'Username must be at least 3 characters.');
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return badRequest(res, 'Password must be at least 6 characters.');
+    }
+    const existing = await db.prepare('SELECT id FROM staff_accounts WHERE username = ?').get(username);
+    if (existing) return badRequest(res, 'That username is already taken.');
+
+    const { salt, hash } = hashPassword(password);
+    await db.prepare(
+      `INSERT INTO staff_accounts (id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)`
+    ).run(crypto.randomUUID(), username, hash, salt, now());
+
+    const rows = await db.prepare('SELECT * FROM staff_accounts ORDER BY created_at ASC').all();
+    sendJson(res, 201, { accounts: rows.map(publicStaff) });
+  })
+);
+
+// A quick set of counts for the dashboard's summary/badges, so a staff
+// member can see at a glance what needs attention without opening every
+// panel.
+on(
+  'GET',
+  '/api/staff/summary',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const [openTickets, pendingCashouts, pendingBusinesses, pendingJobs] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE status = 'open'").get(),
+      db.prepare("SELECT COUNT(*) AS n FROM cashout_requests WHERE status = 'pending'").get(),
+      db.prepare("SELECT COUNT(*) AS n FROM business_profiles WHERE review_status = 'pending'").get(),
+      db.prepare("SELECT COUNT(*) AS n FROM job_postings WHERE review_status = 'pending'").get(),
+    ]);
+    sendJson(res, 200, {
+      openTickets: Number(openTickets.n),
+      pendingCashouts: Number(pendingCashouts.n),
+      pendingApprovals: Number(pendingBusinesses.n) + Number(pendingJobs.n),
+    });
+  })
+);
+
+// ---- staff: support tickets ----
+
+on(
+  'GET',
+  '/api/staff/support-tickets',
+  requireStaffAuth(async (req, res, params, query) => {
+    const status = query.status === 'resolved' ? 'resolved' : 'open';
+    const rows = await db
+      .prepare('SELECT * FROM support_tickets WHERE status = ? ORDER BY created_at ASC LIMIT 200')
+      .all(status);
+    sendJson(res, 200, {
+      tickets: rows.map((r) => ({
+        ...supportTicketPublic(r),
+        name: r.name,
+        email: r.email,
+        repliedBy: r.replied_by,
+      })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/support-tickets/:id/reply',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const reply = (body.reply || '').trim().slice(0, 2000);
+    const resolve = !!body.resolve;
+    if (!reply) return badRequest(res, 'Write a reply before sending.');
+
+    const ticket = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
+    if (!ticket) return sendJson(res, 404, { error: 'Ticket not found.' });
+
+    await db.prepare(
+      `UPDATE support_tickets
+       SET staff_reply = ?, replied_by = ?, status = ?, resolved_at = ?
+       WHERE id = ?`
+    ).run(reply, staff.username, resolve ? 'resolved' : 'open', resolve ? now() : null, params.id);
+
+    const updated = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
+    sendJson(res, 200, {
+      ticket: { ...supportTicketPublic(updated), name: updated.name, email: updated.email, repliedBy: updated.replied_by },
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/support-tickets/:id/resolve',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const ticket = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
+    if (!ticket) return sendJson(res, 404, { error: 'Ticket not found.' });
+    await db.prepare("UPDATE support_tickets SET status = 'resolved', resolved_at = ? WHERE id = ?").run(now(), params.id);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+// ---- staff: cash-out queue ----
+//
+// A cash-out request only ever gets created as 'pending' (see
+// /api/wallet/cashout above) and, before this portal existed, had no way
+// to ever move past that — the GYD was escrowed out of the customer's
+// balance but nobody could mark the request handled. "Complete" means a
+// staff member actually paid the customer outside the app (see the scope
+// note on /api/wallet/cashout); "reject" refunds the escrowed GYD back to
+// the customer's balance instead, for when a request can't be honored.
+
+on(
+  'GET',
+  '/api/staff/cashouts',
+  requireStaffAuth(async (req, res, params, query) => {
+    const status = ['pending', 'completed', 'rejected'].includes(query.status) ? query.status : 'pending';
+    const rows = await db
+      .prepare(
+        `SELECT c.*, u.username, u.cashtag FROM cashout_requests c JOIN users u ON u.id = c.user_id
+         WHERE c.status = ? ORDER BY c.created_at ASC LIMIT 200`
+      )
+      .all(status);
+    sendJson(res, 200, {
+      cashouts: rows.map((r) => ({
+        id: r.id,
+        username: r.username,
+        cashtag: r.cashtag,
+        amountGyd: r.amount_gyd,
+        status: r.status,
+        createdAt: r.created_at,
+        resolvedAt: r.resolved_at,
+      })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/cashouts/:id/complete',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const rows = await db.raw(
+      `UPDATE cashout_requests SET status = 'completed', resolved_at = $1, resolved_by = $2
+       WHERE id = $3 AND status = 'pending' RETURNING id`,
+      [now(), staff.id, params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'That request is no longer pending.');
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/cashouts/:id/reject',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    // One atomic statement: only refunds if the request was still pending,
+    // so it can never be double-refunded by two staff clicking at once.
+    const rows = await db.raw(
+      `WITH upd AS (
+         UPDATE cashout_requests SET status = 'rejected', resolved_at = $1, resolved_by = $2
+         WHERE id = $3 AND status = 'pending'
+         RETURNING user_id, amount_gyd
+       ), credit AS (
+         UPDATE users SET gyd_balance = gyd_balance + (SELECT amount_gyd FROM upd)
+         WHERE id = (SELECT user_id FROM upd)
+       )
+       SELECT * FROM upd`,
+      [now(), staff.id, params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'That request is no longer pending.');
+    const { user_id, amount_gyd } = rows[0];
+    await logTx({
+      type: 'cashout_rejected_refund',
+      toUser: user_id,
+      amount: amount_gyd,
+      currency: 'GYD',
+      note: `Refund for rejected cash-out ${params.id}`,
+    });
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+// ---- staff: business & job approvals ----
+
+on(
+  'GET',
+  '/api/staff/approvals',
+  requireStaffAuth(async (req, res, params, query) => {
+    const [businesses, jobs] = await Promise.all([
+      db
+        .prepare(
+          `SELECT u.username, u.cashtag, u.business_name, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id
+           WHERE bp.review_status = 'pending' ORDER BY bp.updated_at ASC LIMIT 100`
+        )
+        .all(),
+      db
+        .prepare(
+          `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id
+           WHERE j.review_status = 'pending' ORDER BY j.created_at ASC LIMIT 100`
+        )
+        .all(),
+    ]);
+    sendJson(res, 200, {
+      businesses: businesses.map(businessProfilePublic),
+      jobs: jobs.map((r) => jobPostingPublic(r, { username: r.username, business_name: r.business_name })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/approvals/business/:userId/:decision',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    if (!['approve', 'reject'].includes(params.decision)) return sendJson(res, 404, { error: 'No such route.' });
+    const status = params.decision === 'approve' ? 'approved' : 'rejected';
+    const rows = await db.raw(
+      `UPDATE business_profiles SET review_status = $1 WHERE user_id = $2 AND review_status = 'pending' RETURNING user_id`,
+      [status, params.userId]
+    );
+    if (rows.length === 0) return badRequest(res, 'That business page is no longer awaiting review.');
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/approvals/job/:id/:decision',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    if (!['approve', 'reject'].includes(params.decision)) return sendJson(res, 404, { error: 'No such route.' });
+    const status = params.decision === 'approve' ? 'approved' : 'rejected';
+    const rows = await db.raw(
+      `UPDATE job_postings SET review_status = $1 WHERE id = $2 AND review_status = 'pending' RETURNING id`,
+      [status, params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'That job posting is no longer awaiting review.');
+    sendJson(res, 200, { ok: true });
+  })
+);
 
 // ---------- server ----------
 

@@ -60,4 +60,15 @@ function makeSessionToken(userId) {
   return sign({ uid: userId, exp: Date.now() + TOKEN_TTL_MS });
 }
 
-module.exports = { hashPassword, verifyPassword, makeSessionToken, verify };
+// A separate token shape for employee/staff logins (see server.js's
+// /api/staff/* routes and the staff portal in public/staff.html). Carrying
+// `role: 'staff'` means a customer token and a staff token are never
+// interchangeable even though they're both just signed JSON underneath —
+// server.js's requireStaffAuth checks for this exact role before trusting
+// the token at all, and a regular customer session (uid, no role) simply
+// doesn't have it.
+function makeStaffSessionToken(staffId) {
+  return sign({ sid: staffId, role: 'staff', exp: Date.now() + TOKEN_TTL_MS });
+}
+
+module.exports = { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify };

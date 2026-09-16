@@ -99,6 +99,8 @@ flight against the same account at once.
 - **Messaging** — direct text conversations between any two users.
 - **Events & ticket sales** — from the "Events & tickets" area of the Business tab, a business can post an event (title, description, location, date, ticket price, and an optional capacity) that shows up right on their public business page. Anyone can buy one or more tickets there and pay through the app; each ticket gets its own unique code and QR image (found under the "My tickets" button on the Business tab), and the business scans or types that code in at the door to check someone in. See **How events & tickets work** below for the fee math and how check-in behaves on a repeat scan.
 - **Job board** — from the "Jobs" area of the Business tab, a business can post an opening (title, description, and optionally a location, pay, and job type — Full-time, Part-time, Contract, or Temporary). It shows up both on the business's own page and in the site-wide **Jobs** board (the 💼 button next to "My tickets" on the Business tab), which anyone can search or filter by job type. There's no separate application system — an "Apply" button just opens a message thread with the business through the existing messaging feature, pre-filled with a short interest note the applicant can edit before sending. A business can close a listing (comes down from both places, but the posting itself isn't lost) or delete it outright.
+- **Help & Support (customer-facing)** — the 🛟 button in the app header opens a "Contact support" form. A customer's request becomes a support ticket a staff member answers from the staff portal below; the reply shows up back in the customer's own "Your requests" list on the same screen. No live back-and-forth thread yet — one message in, one staff reply out.
+- **Staff portal** — a completely separate employee sign-in at `/staff.html`, for staff to handle three queues: open support tickets, stuck cash-out requests (see **How the staff portal works** below for why these needed a human), and new business pages/job postings awaiting approval before they go public. See that section for how to create the first staff login.
 
 ## How QR pay actually works (read this before demoing it)
 
@@ -272,6 +274,32 @@ A business account actually has two GYD balances under the hood, even though the
 That split is deliberate: it keeps the business's takings visibly separate from the owner's own spending money, the same reason a shop keeps a till separate from the owner's wallet. To actually spend or cash out what the business has earned, the owner uses **Move to personal wallet** on their business wallet panel — an instant, no-fee internal transfer from the business balance into their personal one. There's no path the other direction (personal money funding the business wallet) since nothing here needs it — the business wallet only ever fills from customer payments. One deliberate exception: a GYD Direct claim always lands in the personal wallet, even for a business account, since claiming a transfer sent to you by name and phone isn't "a customer buying something" — it's just picking up money addressed to you personally.
 
 One simplification worth knowing: the "Recent activity" list on the Wallet tab is a single combined ledger of everything that ever happened to the account, personal and business alike — it doesn't split into two separate activity feeds per wallet. A real build might want that split; this prototype keeps one list for simplicity.
+
+## How the staff portal works
+
+The staff portal lives at `/staff.html` (e.g. `https://gyd-wallet.onrender.com/staff.html`) and is completely separate from the customer app — a customer account, even a business one, has no access there, and a staff login has no access to the customer app either (see auth.js's `makeStaffSessionToken` and server.js's `requireStaffAuth`). There's no self-signup: the very first staff account has to be created directly against the database (see below), after which any logged-in staff member can create another from the portal's **Employees** tab.
+
+It has three working queues, each closing a real gap that existed before it:
+
+- **Support** — every ticket a customer submits through the app's "Contact support" form (see the Help & Support bullet above), open ones first. Replying can also mark a ticket resolved in the same action; the reply shows up back in the customer's own "Your requests" list.
+- **Cash-outs** — before this existed, a cash-out request (see **What's actually implemented**) had no way to ever move past "pending": the GYD was escrowed out of the customer's balance the moment they asked, but nothing could ever mark the request handled. "Mark paid" is for after a staff member has actually paid the customer outside the app (there's still no licensed payout integration — see **Why no npm packages**); "Reject & refund" puts the escrowed GYD back into the customer's balance instead, for a request that can't be honored.
+- **Approvals** — a brand new business page or job posting now starts out `pending` and stays invisible to the public directory/jobs board until a staff member approves it here (see the `review_status` column in `supabase/schema.sql`). An already-approved business editing their existing page doesn't get sent back for review — only a page's first creation triggers it.
+
+**Creating the first staff account.** Since there's no self-signup, insert one directly against the Supabase project (SQL Editor, or the equivalent `exec_query` call) — hash the password the same way `auth.js`'s `hashPassword` does, or just run this from a Node shell that has this project's `auth.js` on its path:
+
+```js
+const { hashPassword } = require('./auth');
+const crypto = require('crypto');
+const { salt, hash } = hashPassword('choose-a-real-password-here');
+console.log(crypto.randomUUID(), hash, salt); // paste these into the INSERT below
+```
+
+```sql
+INSERT INTO staff_accounts (id, username, password_hash, password_salt, created_at)
+VALUES ('<uuid from above>', 'yourusername', '<hash from above>', '<salt from above>', now()::text);
+```
+
+After that, sign in at `/staff.html` and use the **Employees** tab to add anyone else who needs access — no more manual SQL required.
 
 ## How product photos are stored
 

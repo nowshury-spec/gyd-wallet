@@ -170,13 +170,15 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; }
 
-.field input[type="text"], .field input[type="password"], .field input[type="number"], #user-search {
+.field input[type="text"], .field input[type="password"], .field input[type="number"], .field input[type="email"], .field textarea, #user-search {
   width: 100%; padding: 11px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: var(--surface-2); color: var(--text); transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: inherit; font-size: 14px;
 }
+.field textarea { resize: vertical; }
 
-.field input:focus, #user-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.field input::placeholder { color: var(--muted-2); }
+.field input:focus, .field textarea:focus, #user-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted-2); }
 
 .checkbox-field { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; font-size: 13px; color: var(--muted); }
 .checkbox-field input { accent-color: var(--accent); width: 16px; height: 16px; }
@@ -398,9 +400,9 @@ tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
 
 .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: capitalize; }
-.pill.completed, .pill.approved { background: var(--good-soft); color: var(--good); }
-.pill.pending { background: var(--gold-soft); color: var(--gold); }
-.pill.declined { background: var(--bad-soft); color: var(--bad); }
+.pill.completed, .pill.approved, .pill.resolved { background: var(--good-soft); color: var(--good); }
+.pill.pending, .pill.open { background: var(--gold-soft); color: var(--gold); }
+.pill.declined, .pill.rejected { background: var(--bad-soft); color: var(--bad); }
 
 .muted { color: var(--muted); }
 
