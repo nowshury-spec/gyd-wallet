@@ -66,7 +66,13 @@
   };
 
   function enterDashboard() {
-    document.getElementById('staff-who').textContent = state.staff.username;
+    const isOwner = state.staff.role === 'owner';
+    document.getElementById('staff-who').textContent = `${state.staff.username}${isOwner ? ' (owner)' : ''}`;
+    // The "Add employee" form and the Audit log tab are owner-only on the
+    // server too (see requireStaffOwner) — hiding them here is just so a
+    // regular employee never sees controls that would just 403 anyway.
+    document.getElementById('add-employee-panel').classList.toggle('hidden', !isOwner);
+    document.getElementById('tab-audit-log').classList.toggle('hidden', !isOwner);
     loginScreen.classList.add('hidden');
     dashboardScreen.classList.remove('hidden');
     loadSummary();
@@ -97,6 +103,7 @@
     if (tab === 'cashouts') loadCashouts();
     if (tab === 'approvals') loadApprovals();
     if (tab === 'employees') loadEmployees();
+    if (tab === 'audit') loadAuditLog();
   }
 
   async function loadSummary() {
@@ -383,10 +390,11 @@
     e.preventDefault();
     const username = document.getElementById('new-employee-username').value.trim();
     const password = document.getElementById('new-employee-password').value;
+    const role = document.getElementById('new-employee-is-owner').checked ? 'owner' : 'employee';
     const errBox = document.getElementById('add-employee-error');
     errBox.textContent = '';
     try {
-      await api('/api/staff/accounts', 'POST', { username, password });
+      await api('/api/staff/accounts', 'POST', { username, password, role });
       document.getElementById('add-employee-form').reset();
       loadEmployees();
     } catch (err) {
@@ -415,7 +423,42 @@
     accounts.forEach((a) => {
       const row = document.createElement('div');
       row.className = 'staff-employee-row';
-      row.innerHTML = `<span>${a.username}</span><span class="muted">added ${timeAgo(a.createdAt)}</span>`;
+      row.innerHTML = `<span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}</span><span class="muted">added ${timeAgo(a.createdAt)}</span>`;
+      box.appendChild(row);
+    });
+  }
+
+  // ---------- audit log (owner-only) ----------
+
+  async function loadAuditLog() {
+    const box = document.getElementById('audit-log-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api('/api/staff/audit-log');
+      renderAuditLog(data.entries);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderAuditLog(entries) {
+    const box = document.getElementById('audit-log-list');
+    box.innerHTML = '';
+    if (entries.length === 0) {
+      box.innerHTML = '<p class="muted">Nothing logged yet.</p>';
+      return;
+    }
+    entries.forEach((e) => {
+      const row = document.createElement('div');
+      row.className = 'staff-item';
+      row.innerHTML = `
+        <div class="staff-item-top">
+          <strong>${e.action.replace(/_/g, ' ')}</strong>
+          <span class="muted" style="font-size:12px;">${timeAgo(e.createdAt)}</span>
+        </div>
+        <div class="staff-item-meta">by ${e.staffUsername}</div>
+        ${e.details ? `<div class="staff-item-body">${e.details}</div>` : ''}
+      `;
       box.appendChild(row);
     });
   }

@@ -91,7 +91,21 @@ async function getAuthedStaff(req) {
 }
 
 function publicStaff(s) {
-  return { id: s.id, username: s.username, createdAt: s.created_at };
+  return { id: s.id, username: s.username, role: s.role || 'employee', createdAt: s.created_at };
+}
+
+// A permanent, append-only record of anything a staff member does that
+// could move money or grant access — see the staff_audit_log comment in
+// supabase/schema.sql. This never updates or deletes a row, only inserts,
+// and nothing in the staff portal's UI or API ever exposes a way to edit or
+// remove an entry — that's what makes it trustworthy as a fraud/theft
+// check rather than something an employee could quietly tidy up after
+// themselves.
+async function logStaffAction(staff, action, target, details) {
+  await db.prepare(
+    `INSERT INTO staff_audit_log (id, staff_id, staff_username, action, target, details, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(crypto.randomUUID(), staff.id, staff.username, action, target || null, details || null, now());
 }
 
 function publicUser(u) {
@@ -220,6 +234,19 @@ function requireStaffAuth(handler) {
     if (!staff) return sendJson(res, 401, { error: 'Not authenticated.' });
     return handler(req, res, params, query, body, staff);
   };
+}
+
+// The actual fraud/theft control on top of requireStaffAuth: an 'employee'
+// can use the support/cash-out/approvals queues, but only an 'owner' can
+// create another staff account or read the audit log — so no single
+// employee, however compromised or dishonest, can quietly grant an
+// accomplice access or cover their tracks. See the role comment on
+// staff_accounts in supabase/schema.sql.
+function requireStaffOwner(handler) {
+  return requireStaffAuth(async (req, res, params, query, body, staff) => {
+    if (staff.role !== 'owner') return sendJson(res, 403, { error: 'This action requires an owner-level staff account.' });
+    return handler(req, res, params, query, body, staff);
+  });
 }
 
 function badRequest(res, message) {
@@ -2406,9 +2433,12 @@ on(
 on(
   'POST',
   '/api/staff/accounts',
-  requireStaffAuth(async (req, res, params, query, body, staff) => {
+  // Owner-only — see requireStaffOwner's comment for why this is the actual
+  // fraud/theft control, not just a permissions nicety.
+  requireStaffOwner(async (req, res, params, query, body, staff) => {
     const username = (body.username || '').trim();
     const password = body.password;
+    const role = body.role === 'owner' ? 'owner' : 'employee';
     if (!username || username.length < 3) return badRequest(res, 'Username must be at least 3 characters.');
     if (!password || typeof password !== 'string' || password.length < 6) {
       return badRequest(res, 'Password must be at least 6 characters.');
@@ -2416,10 +2446,12 @@ on(
     const existing = await db.prepare('SELECT id FROM staff_accounts WHERE username = ?').get(username);
     if (existing) return badRequest(res, 'That username is already taken.');
 
+    const newId = crypto.randomUUID();
     const { salt, hash } = hashPassword(password);
     await db.prepare(
-      `INSERT INTO staff_accounts (id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)`
-    ).run(crypto.randomUUID(), username, hash, salt, now());
+      `INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(newId, username, hash, salt, role, now());
+    await logStaffAction(staff, 'staff_account_created', newId, `Created ${role} account "${username}"`);
 
     const rows = await db.prepare('SELECT * FROM staff_accounts ORDER BY created_at ASC').all();
     sendJson(res, 201, { accounts: rows.map(publicStaff) });
@@ -2544,10 +2576,22 @@ on(
   requireStaffAuth(async (req, res, params, query, body, staff) => {
     const rows = await db.raw(
       `UPDATE cashout_requests SET status = 'completed', resolved_at = $1, resolved_by = $2
-       WHERE id = $3 AND status = 'pending' RETURNING id`,
+       WHERE id = $3 AND status = 'pending' RETURNING id, user_id, amount_gyd`,
       [now(), staff.id, params.id]
     );
     if (rows.length === 0) return badRequest(res, 'That request is no longer pending.');
+    // This is the single most fraud-sensitive action in the whole portal —
+    // it's a staff member's word that money actually left the building,
+    // with nothing in the app itself able to verify that. The audit log
+    // entry is what makes that claim checkable after the fact: an owner
+    // can see exactly which employee marked which payout complete, and
+    // when, permanently.
+    await logStaffAction(
+      staff,
+      'cashout_completed',
+      params.id,
+      `Marked GYD ${rows[0].amount_gyd} cash-out paid for user ${rows[0].user_id}`
+    );
     sendJson(res, 200, { ok: true });
   })
 );
@@ -2579,6 +2623,7 @@ on(
       currency: 'GYD',
       note: `Refund for rejected cash-out ${params.id}`,
     });
+    await logStaffAction(staff, 'cashout_rejected', params.id, `Rejected & refunded GYD ${amount_gyd} for user ${user_id}`);
     sendJson(res, 200, { ok: true });
   })
 );
@@ -2621,6 +2666,7 @@ on(
       [status, params.userId]
     );
     if (rows.length === 0) return badRequest(res, 'That business page is no longer awaiting review.');
+    await logStaffAction(staff, `business_${status}`, params.userId, `${status} business page for user ${params.userId}`);
     sendJson(res, 200, { ok: true });
   })
 );
@@ -2636,7 +2682,29 @@ on(
       [status, params.id]
     );
     if (rows.length === 0) return badRequest(res, 'That job posting is no longer awaiting review.');
+    await logStaffAction(staff, `job_${status}`, params.id, `${status} job posting ${params.id}`);
     sendJson(res, 200, { ok: true });
+  })
+);
+
+// The audit trail itself — owner-only (see requireStaffOwner). Read-only:
+// there is deliberately no endpoint anywhere that edits or deletes an
+// entry once written.
+on(
+  'GET',
+  '/api/staff/audit-log',
+  requireStaffOwner(async (req, res, params, query) => {
+    const rows = await db.prepare('SELECT * FROM staff_audit_log ORDER BY created_at DESC LIMIT 300').all();
+    sendJson(res, 200, {
+      entries: rows.map((r) => ({
+        id: r.id,
+        staffUsername: r.staff_username,
+        action: r.action,
+        target: r.target,
+        details: r.details,
+        createdAt: r.created_at,
+      })),
+    });
   })
 );
 

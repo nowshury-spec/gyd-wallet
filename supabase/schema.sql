@@ -297,17 +297,39 @@ CREATE TABLE IF NOT EXISTS password_resets (
 
 -- Employee/staff logins for the internal staff portal (public/staff.html) —
 -- completely separate from the `users` table above (customers and
--- businesses). There's no self-signup for these: the first one is seeded
--- directly, and any logged-in staff member can create another from the
--- portal's "Add employee" panel (see POST /api/staff/accounts). Kept as its
--- own table, rather than a flag on `users`, so a staff login can never be
--- confused with a customer login even though they share the same
--- password-hashing code.
+-- businesses), so a staff login can never be confused with a customer login
+-- even though they share the same password-hashing code.
+--
+-- role is 'owner' or 'employee' — this is the actual fraud/theft control
+-- for the staff portal: only an 'owner' can create another staff account
+-- (see requireStaffOwner in server.js) or view the audit log below, so one
+-- compromised or dishonest employee can't quietly grant an accomplice
+-- access. There's no self-signup for the very first account either way —
+-- see README.md's "How the staff portal works" for how that one gets
+-- seeded (as 'owner').
 CREATE TABLE IF NOT EXISTS staff_accounts (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'employee', -- 'owner' | 'employee'
+  created_at TEXT NOT NULL
+);
+
+-- A permanent record of every sensitive staff action — cash-out payouts and
+-- rejections, business/job approval decisions, and new staff accounts being
+-- created. This is the other half of the fraud/theft control: nothing here
+-- is ever updated or deleted by the app (see server.js's logStaffAction —
+-- it only ever INSERTs), so an owner reviewing GET /api/staff/audit-log
+-- gets a trustworthy trail of who did what and when, including anything an
+-- employee might prefer wasn't easily checked on.
+CREATE TABLE IF NOT EXISTS staff_audit_log (
+  id TEXT PRIMARY KEY,
+  staff_id TEXT NOT NULL,
+  staff_username TEXT NOT NULL, -- denormalized so the log stays readable even if the staff row is ever removed
+  action TEXT NOT NULL,
+  target TEXT,
+  details TEXT,
   created_at TEXT NOT NULL
 );
 

@@ -70,6 +70,7 @@
       <button class="staff-tab" data-staff-tab="cashouts">Cash-outs</button>
       <button class="staff-tab" data-staff-tab="approvals">Approvals</button>
       <button class="staff-tab" data-staff-tab="employees">Employees</button>
+      <button class="staff-tab hidden" id="tab-audit-log" data-staff-tab="audit">Audit log</button>
     </nav>
 
     <main class="staff-main">
@@ -99,8 +100,10 @@
       </section>
 
       <section id="staff-panel-employees" class="staff-panel hidden">
-        <div class="panel">
+        <div class="panel hidden" id="add-employee-panel">
           <h2 class="section-title" style="margin-top:0;">Add an employee</h2>
+          <p class="forgot-intro">Only an owner-level account can add employees or view the audit log — that's what
+          keeps one employee from quietly granting someone else access.</p>
           <form id="add-employee-form">
             <div class="field">
               <label>Username</label>
@@ -110,12 +113,22 @@
               <label>Temporary password</label>
               <input type="password" id="new-employee-password" required />
             </div>
+            <div class="checkbox-field">
+              <input type="checkbox" id="new-employee-is-owner" />
+              <label for="new-employee-is-owner" style="margin:0;">Give this account owner access too</label>
+            </div>
             <button type="submit" class="btn full">Create employee login</button>
             <div class="error-msg" id="add-employee-error"></div>
           </form>
         </div>
         <h2 class="section-title" style="margin-top:22px;">Current employees</h2>
         <div id="employees-list"><p class="muted">Loading…</p></div>
+      </section>
+
+      <section id="staff-panel-audit" class="staff-panel hidden">
+        <p class="forgot-intro">A permanent record of every payout, approval, and employee account created — nothing
+        here can be edited or deleted from the app.</p>
+        <div id="audit-log-list"><p class="muted">Loading…</p></div>
       </section>
 
     </main>

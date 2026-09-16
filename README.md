@@ -277,7 +277,7 @@ One simplification worth knowing: the "Recent activity" list on the Wallet tab i
 
 ## How the staff portal works
 
-The staff portal lives at `/staff.html` (e.g. `https://gyd-wallet.onrender.com/staff.html`) and is completely separate from the customer app — a customer account, even a business one, has no access there, and a staff login has no access to the customer app either (see auth.js's `makeStaffSessionToken` and server.js's `requireStaffAuth`). There's no self-signup: the very first staff account has to be created directly against the database (see below), after which any logged-in staff member can create another from the portal's **Employees** tab.
+The staff portal lives at `/staff.html` (e.g. `https://gyd-wallet.onrender.com/staff.html`) and is completely separate from the customer app — a customer account, even a business one, has no access there, and a staff login has no access to the customer app either (see auth.js's `makeStaffSessionToken` and server.js's `requireStaffAuth`). There's no self-signup: the very first staff account has to be created directly against the database (see below), after which an **owner**-level staff member can create more from the portal's **Employees** tab.
 
 It has three working queues, each closing a real gap that existed before it:
 
@@ -285,7 +285,12 @@ It has three working queues, each closing a real gap that existed before it:
 - **Cash-outs** — before this existed, a cash-out request (see **What's actually implemented**) had no way to ever move past "pending": the GYD was escrowed out of the customer's balance the moment they asked, but nothing could ever mark the request handled. "Mark paid" is for after a staff member has actually paid the customer outside the app (there's still no licensed payout integration — see **Why no npm packages**); "Reject & refund" puts the escrowed GYD back into the customer's balance instead, for a request that can't be honored.
 - **Approvals** — a brand new business page or job posting now starts out `pending` and stays invisible to the public directory/jobs board until a staff member approves it here (see the `review_status` column in `supabase/schema.sql`). An already-approved business editing their existing page doesn't get sent back for review — only a page's first creation triggers it.
 
-**Creating the first staff account.** Since there's no self-signup, insert one directly against the Supabase project (SQL Editor, or the equivalent `exec_query` call) — hash the password the same way `auth.js`'s `hashPassword` does, or just run this from a Node shell that has this project's `auth.js` on its path:
+**Fraud/theft controls.** Two things keep an employee from quietly abusing the access above, both enforced server-side, not just hidden in the UI:
+
+- **Owner vs. employee roles** (`staff_accounts.role`) — only an owner-level account can create another staff login (`requireStaffOwner` in server.js) or view the audit log below. A regular employee can work every queue above but can't grant anyone else access, including themselves a second account.
+- **A permanent audit log** (`staff_audit_log`, visible under the portal's **Audit log** tab, owner-only) — every cash-out marked paid or rejected, every business/job approval decision, and every new staff account created is recorded with exactly who did it and when. Nothing in the app ever updates or deletes a log entry, so it's a trustworthy record an owner can check, not something an employee could tidy up after themselves.
+
+**Creating the first staff account.** Since there's no self-signup, insert one directly against the Supabase project (SQL Editor, or the equivalent `exec_query` call) as `role = 'owner'` — hash the password the same way `auth.js`'s `hashPassword` does, or just run this from a Node shell that has this project's `auth.js` on its path:
 
 ```js
 const { hashPassword } = require('./auth');
@@ -295,11 +300,11 @@ console.log(crypto.randomUUID(), hash, salt); // paste these into the INSERT bel
 ```
 
 ```sql
-INSERT INTO staff_accounts (id, username, password_hash, password_salt, created_at)
-VALUES ('<uuid from above>', 'yourusername', '<hash from above>', '<salt from above>', now()::text);
+INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at)
+VALUES ('<uuid from above>', 'yourusername', '<hash from above>', '<salt from above>', 'owner', now()::text);
 ```
 
-After that, sign in at `/staff.html` and use the **Employees** tab to add anyone else who needs access — no more manual SQL required.
+After that, sign in at `/staff.html` and use the **Employees** tab to add anyone else who needs access (leave "owner access" unchecked for a regular employee) — no more manual SQL required.
 
 ## How product photos are stored
 
