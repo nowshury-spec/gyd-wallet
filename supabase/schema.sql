@@ -37,7 +37,15 @@ CREATE TABLE IF NOT EXISTS users (
   business_name TEXT,
   gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
   business_gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Session-revocation control: every login token embeds the moment it was
+  -- issued (see auth.js's `iat`). "Log out of all other devices"
+  -- (POST /api/security/logout-all-sessions) just sets this to right now —
+  -- getAuthedUser in server.js then rejects any token issued before this
+  -- timestamp, which is every token that existed a moment ago, without the
+  -- app needing to track or list individual sessions anywhere. NULL means
+  -- "never logged out everywhere," so every existing token stays valid.
+  sessions_invalidated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -309,7 +317,35 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee', -- 'owner' | 'employee'
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Same session-revocation mechanism as users.sessions_invalidated_at
+  -- above. Set by a staff member logging themselves out everywhere
+  -- (POST /api/staff/logout-all-sessions), OR by an owner forcibly cutting
+  -- off a specific employee's access (POST
+  -- /api/staff/accounts/:id/revoke-sessions) — e.g. right after they're let
+  -- go, or the moment their account is suspected compromised, without
+  -- needing to know or reset their password first.
+  sessions_invalidated_at TEXT
+);
+
+-- A one-time 6-digit code required after username+password to finish a
+-- staff login — see POST /api/staff/login and /api/staff/login/verify-code
+-- in server.js. Same "simulated" pattern as password_resets below (the code
+-- comes straight back in the API response and is shown on screen, since
+-- this Phase 1 prototype has no real email/SMS sending set up yet — see
+-- README's "Why no npm packages"). Until real delivery exists this is
+-- mostly a structural second step rather than a true second factor, since
+-- anyone who already has the password can see the code too; it becomes a
+-- real second factor the moment the code is actually sent somewhere only
+-- the real staff member can see, with no other code changes needed.
+CREATE TABLE IF NOT EXISTS staff_login_codes (
+  id TEXT PRIMARY KEY,
+  staff_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0
 );
 
 -- A permanent record of every sensitive staff action — cash-out payouts and

@@ -185,6 +185,25 @@
     authScreen.classList.remove('hidden');
   };
 
+  // Signs this account out of every device it's logged into, including
+  // this one — see the comment on POST /api/security/logout-all-sessions
+  // in server.js for why there's no "everywhere but here" option without
+  // tracking individual sessions.
+  document.getElementById('logout-all-btn').onclick = async () => {
+    if (!confirm('This will sign you out on every device, including this one. Continue?')) return;
+    try {
+      await api('/api/security/logout-all-sessions', 'POST');
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    setToken(null);
+    state.user = null;
+    if (state.pollHandle) clearInterval(state.pollHandle);
+    appScreen.classList.add('hidden');
+    authScreen.classList.remove('hidden');
+  };
+
   // ---------- app shell / nav ----------
 
   document.querySelectorAll('.nav-item').forEach((btn) => {

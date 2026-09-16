@@ -73,7 +73,15 @@ async function getAuthedUser(req) {
   const data = verify(token);
   if (!data) return null;
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(data.uid);
-  return user || null;
+  if (!user) return null;
+  // "Log out of all other devices" (POST /api/security/logout-all-sessions)
+  // sets sessions_invalidated_at to the moment it's clicked — any token
+  // issued before that, including one an attacker stole earlier, stops
+  // working immediately even though it hasn't hit its 7-day expiry yet.
+  if (user.sessions_invalidated_at && (!data.iat || data.iat < new Date(user.sessions_invalidated_at).getTime())) {
+    return null;
+  }
+  return user;
 }
 
 // Staff sessions are a completely separate token shape (see auth.js's
@@ -87,7 +95,15 @@ async function getAuthedStaff(req) {
   const data = verify(token);
   if (!data || data.role !== 'staff') return null;
   const staff = await db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(data.sid);
-  return staff || null;
+  if (!staff) return null;
+  // Same session-revocation check as getAuthedUser above — lets a staff
+  // member log themselves out everywhere, or an owner cut off a specific
+  // employee's access outright (see /api/staff/logout-all-sessions and
+  // /api/staff/accounts/:id/revoke-sessions).
+  if (staff.sessions_invalidated_at && (!data.iat || data.iat < new Date(staff.sessions_invalidated_at).getTime())) {
+    return null;
+  }
+  return staff;
 }
 
 function publicStaff(s) {
@@ -472,6 +488,22 @@ on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) =>
 
   sendJson(res, 200, { username: user.username });
 });
+
+// "Log out of all other devices" — see users.sessions_invalidated_at in
+// supabase/schema.sql for the mechanism. This also signs the current
+// device out (the token making this very request was issued before "now"
+// too), which is a deliberate simplification: without tracking individual
+// sessions there's no way to tell "this device" apart from any other, so
+// the safest, clearest behavior is "everywhere, including here" — the
+// person just logs back in on this device afterward.
+on(
+  'POST',
+  '/api/security/logout-all-sessions',
+  requireAuth(async (req, res, params, query, body, user) => {
+    await db.prepare('UPDATE users SET sessions_invalidated_at = ? WHERE id = ?').run(now(), user.id);
+    sendJson(res, 200, { ok: true });
+  })
+);
 
 on(
   'GET',
@@ -2471,7 +2503,16 @@ on(
 
 const STAFF_LOGIN_MAX_ATTEMPTS = 8;
 const STAFF_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const STAFF_CODE_TTL_MS = 10 * 60 * 1000;
+const MAX_STAFF_CODE_ATTEMPTS = 5;
 
+// Step 1 of staff login: username + password only gets a one-time code, not
+// a session — see /api/staff/login/verify-code below for step 2. The code
+// comes back in this same response and staff.js shows it on screen, the
+// same "simulated" pattern as /api/auth/forgot-password (see
+// staff_login_codes in supabase/schema.sql for the important caveat: this
+// is a real second STEP today, but not yet a real second FACTOR until an
+// actual email/SMS integration replaces "shown on screen").
 on('POST', '/api/staff/login', async (req, res, params, query, body) => {
   const { username, password } = body;
   const ip = getClientIp(req);
@@ -2489,6 +2530,54 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
   rateLimitReset(key);
+
+  const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  await db.prepare('DELETE FROM staff_login_codes WHERE staff_id = ?').run(staff.id);
+  await db.prepare(
+    `INSERT INTO staff_login_codes (id, staff_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
+  ).run(crypto.randomUUID(), staff.id, code, now(), new Date(Date.now() + STAFF_CODE_TTL_MS).toISOString());
+
+  sendJson(res, 200, { requiresCode: true, username: staff.username, code, expiresInMinutes: 10 });
+});
+
+// Step 2: spend the code from step 1 to actually get a session token.
+on('POST', '/api/staff/login/verify-code', async (req, res, params, query, body) => {
+  const username = (body.username || '').trim();
+  const code = (body.code || '').trim();
+  const ip = getClientIp(req);
+  const key = `staff-login-code:${username.toLowerCase()}:${ip}`;
+  const bucket = rateLimitPeek(key);
+  if (bucket.count >= STAFF_LOGIN_MAX_ATTEMPTS) {
+    return sendJson(res, 429, {
+      error: `Too many attempts. Try again in ${retryAfterMinutes(bucket)} minute(s).`,
+    });
+  }
+
+  const invalidMsg = 'That code is invalid or has expired — log in again to get a new one.';
+  const staff = await db.prepare('SELECT * FROM staff_accounts WHERE username = ?').get(username || '');
+  if (!staff) {
+    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    return badRequest(res, invalidMsg);
+  }
+
+  const pending = await db
+    .prepare('SELECT * FROM staff_login_codes WHERE staff_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1')
+    .get(staff.id);
+  if (!pending || new Date(pending.expires_at).getTime() < Date.now()) {
+    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    return badRequest(res, invalidMsg);
+  }
+  if (pending.attempts >= MAX_STAFF_CODE_ATTEMPTS) {
+    return badRequest(res, 'Too many incorrect attempts. Log in again to get a new code.');
+  }
+  if (pending.code !== code) {
+    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    await db.prepare('UPDATE staff_login_codes SET attempts = attempts + 1 WHERE id = ?').run(pending.id);
+    return badRequest(res, invalidMsg);
+  }
+
+  rateLimitReset(key);
+  await db.prepare('UPDATE staff_login_codes SET used_at = ? WHERE id = ?').run(now(), pending.id);
   const token = makeStaffSessionToken(staff.id);
   sendJson(res, 200, { token, staff: publicStaff(staff) });
 });
@@ -2501,6 +2590,19 @@ on(
   })
 );
 
+// A staff member logging themselves out of every device they're signed in
+// on — same mechanism and same "signs out this device too" trade-off as
+// POST /api/security/logout-all-sessions above, applied to staff_accounts.
+on(
+  'POST',
+  '/api/staff/logout-all-sessions',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    await db.prepare('UPDATE staff_accounts SET sessions_invalidated_at = ? WHERE id = ?').run(now(), staff.id);
+    await logStaffAction(staff, 'staff_logged_out_everywhere', staff.id, `${staff.username} signed out of all devices`);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
 on(
   'GET',
   '/api/staff/accounts',
@@ -2509,6 +2611,34 @@ on(
     sendJson(res, 200, { accounts: rows.map(publicStaff) });
   })
 );
+
+// A staff account can approve cash-outs and (with owner role) create other
+// staff logins or read the audit log, so it needs a real password, not just
+// the bare-minimum 6 characters a customer account requires. This is the
+// direct fix for exactly what happened when the first account here was
+// created with a password identical to its own username: at least 10
+// characters, a mix of letters and digits, and never the username itself
+// (in any capitalization) or one of the handful of passwords everyone
+// tries first.
+const COMMON_WEAK_PASSWORDS = new Set([
+  'password', 'password1', 'password123', '1234567890', 'qwertyuiop',
+  'letmein', 'welcome', 'welcome1', 'admin1234', 'changeme', 'employee1',
+]);
+function validateStaffPassword(username, password) {
+  if (!password || typeof password !== 'string' || password.length < 10) {
+    return 'Password must be at least 10 characters.';
+  }
+  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return 'Password must include both letters and numbers.';
+  }
+  if (password.toLowerCase() === (username || '').toLowerCase()) {
+    return "Password can't be the same as the username.";
+  }
+  if (COMMON_WEAK_PASSWORDS.has(password.toLowerCase())) {
+    return 'That password is too common — choose something harder to guess.';
+  }
+  return null;
+}
 
 on(
   'POST',
@@ -2520,9 +2650,8 @@ on(
     const password = body.password;
     const role = body.role === 'owner' ? 'owner' : 'employee';
     if (!username || username.length < 3) return badRequest(res, 'Username must be at least 3 characters.');
-    if (!password || typeof password !== 'string' || password.length < 6) {
-      return badRequest(res, 'Password must be at least 6 characters.');
-    }
+    const passwordError = validateStaffPassword(username, password);
+    if (passwordError) return badRequest(res, passwordError);
     const existing = await db.prepare('SELECT id FROM staff_accounts WHERE username = ?').get(username);
     if (existing) return badRequest(res, 'That username is already taken.');
 
@@ -2535,6 +2664,24 @@ on(
 
     const rows = await db.prepare('SELECT * FROM staff_accounts ORDER BY created_at ASC').all();
     sendJson(res, 201, { accounts: rows.map(publicStaff) });
+  })
+);
+
+// An owner cutting off a specific employee's access outright — e.g. right
+// after letting them go, or the moment their account is suspected
+// compromised — without needing to know or reset their password first.
+// Uses the exact same mechanism as a staff member logging themselves out
+// (see staff_accounts.sessions_invalidated_at), just triggered by someone
+// else on their behalf.
+on(
+  'POST',
+  '/api/staff/accounts/:id/revoke-sessions',
+  requireStaffOwner(async (req, res, params, query, body, staff) => {
+    const target = await db.prepare('SELECT id, username FROM staff_accounts WHERE id = ?').get(params.id);
+    if (!target) return sendJson(res, 404, { error: 'Staff account not found.' });
+    await db.prepare('UPDATE staff_accounts SET sessions_invalidated_at = ? WHERE id = ?').run(now(), target.id);
+    await logStaffAction(staff, 'staff_sessions_revoked', target.id, `Signed "${target.username}" out of all devices`);
+    sendJson(res, 200, { ok: true });
   })
 );
 

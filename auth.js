@@ -56,8 +56,13 @@ function verify(token) {
   }
 }
 
+// `iat` (issued-at) is what makes "log out of all other devices" possible
+// despite these tokens being stateless — see users.sessions_invalidated_at /
+// staff_accounts.sessions_invalidated_at in supabase/schema.sql and
+// getAuthedUser/getAuthedStaff in server.js, which reject any token whose
+// `iat` is older than that timestamp.
 function makeSessionToken(userId) {
-  return sign({ uid: userId, exp: Date.now() + TOKEN_TTL_MS });
+  return sign({ uid: userId, iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS });
 }
 
 // A separate token shape for employee/staff logins (see server.js's
@@ -68,7 +73,7 @@ function makeSessionToken(userId) {
 // the token at all, and a regular customer session (uid, no role) simply
 // doesn't have it.
 function makeStaffSessionToken(staffId) {
-  return sign({ sid: staffId, role: 'staff', exp: Date.now() + TOKEN_TTL_MS });
+  return sign({ sid: staffId, role: 'staff', iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS });
 }
 
 module.exports = { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify };

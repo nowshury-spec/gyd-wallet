@@ -32,6 +32,18 @@
         <button type="submit" class="btn full">Log in</button>
         <div class="error-msg" id="staff-login-error"></div>
       </form>
+
+      <form id="staff-code-form" class="hidden">
+        <p class="forgot-intro">One more step — enter the verification code to finish signing in.</p>
+        <div class="reset-code-display" id="staff-code-display"></div>
+        <div class="field">
+          <label>Verification code</label>
+          <input type="text" id="staff-code-input" inputmode="numeric" maxlength="6" required />
+        </div>
+        <button type="submit" class="btn full">Verify &amp; log in</button>
+        <button type="button" class="link-btn" id="staff-code-back-link">Back to log in</button>
+        <div class="error-msg" id="staff-code-error"></div>
+      </form>
     </div>
   </div>
 </div>
@@ -46,6 +58,7 @@
       </div>
       <div class="staff-header-actions">
         <span class="muted" id="staff-who"></span>
+        <button class="btn secondary small" id="staff-logout-all-btn" title="Signs out every device this account is logged into, including this one">Log out everywhere</button>
         <button class="btn secondary small" id="staff-logout-btn">Log out</button>
       </div>
     </header>

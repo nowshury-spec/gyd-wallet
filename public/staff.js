@@ -41,6 +41,9 @@
 
   const loginScreen = document.getElementById('staff-login-screen');
   const dashboardScreen = document.getElementById('staff-dashboard-screen');
+  const loginForm = document.getElementById('staff-login-form');
+  const codeForm = document.getElementById('staff-code-form');
+  let pendingUsername = null;
 
   document.getElementById('staff-login-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -50,15 +53,67 @@
     errBox.textContent = '';
     try {
       const data = await api('/api/staff/login', 'POST', { username, password });
+      // Username + password alone isn't enough to get in — a one-time code
+      // is required next (see /api/staff/login/verify-code). The code is
+      // shown right here for now since this prototype has no real
+      // email/SMS sending set up yet (same as the customer forgot-password
+      // flow) — see the comment on staff_login_codes in schema.sql for why
+      // that means this is a real second STEP today, on its way to being a
+      // real second FACTOR once real delivery exists.
+      pendingUsername = username;
+      document.getElementById('staff-code-display').innerHTML =
+        `Since this doesn't send real emails/SMS yet, here's your simulated verification code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+      document.getElementById('staff-code-input').value = '';
+      document.getElementById('staff-code-error').textContent = '';
+      loginForm.classList.add('hidden');
+      codeForm.classList.remove('hidden');
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('staff-code-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const code = document.getElementById('staff-code-input').value.trim();
+    const errBox = document.getElementById('staff-code-error');
+    errBox.textContent = '';
+    try {
+      const data = await api('/api/staff/login/verify-code', 'POST', { username: pendingUsername, code });
       setToken(data.token);
       state.staff = data.staff;
+      codeForm.classList.add('hidden');
+      loginForm.classList.remove('hidden');
       enterDashboard();
     } catch (err) {
       errBox.textContent = err.message;
     }
   };
 
+  document.getElementById('staff-code-back-link').onclick = () => {
+    codeForm.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    document.getElementById('staff-login-password').value = '';
+  };
+
   document.getElementById('staff-logout-btn').onclick = () => {
+    setToken(null);
+    state.staff = null;
+    dashboardScreen.classList.add('hidden');
+    loginScreen.classList.remove('hidden');
+  };
+
+  // Signs this account out of every device it's logged into, including the
+  // one making this request — see the comment on
+  // POST /api/staff/logout-all-sessions in server.js for why there's no
+  // "everywhere but here" option without tracking individual sessions.
+  document.getElementById('staff-logout-all-btn').onclick = async () => {
+    if (!confirm('This will sign this account out on every device, including this one. Continue?')) return;
+    try {
+      await api('/api/staff/logout-all-sessions', 'POST');
+    } catch {
+      // Even if the request fails, still clear the local token below —
+      // there's nothing useful left to do with it either way.
+    }
     setToken(null);
     state.staff = null;
     dashboardScreen.classList.add('hidden');
@@ -325,12 +380,33 @@
       box.innerHTML = '<p class="muted">No employees yet.</p>';
       return;
     }
+    const isOwner = state.staff.role === 'owner';
     accounts.forEach((a) => {
       const row = document.createElement('div');
       row.className = 'staff-employee-row';
-      row.innerHTML = `<span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}</span><span class="muted">added ${timeAgo(a.createdAt)}</span>`;
+      row.innerHTML = `
+        <span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}</span>
+        <span class="muted">added ${timeAgo(a.createdAt)}</span>
+        ${isOwner ? '<button class="btn small secondary revoke-sessions-btn" title="Signs this account out of every device it\'s logged into">Sign out everywhere</button>' : ''}
+      `;
+      if (isOwner) {
+        row.querySelector('.revoke-sessions-btn').onclick = () => revokeStaffSessions(a.id, a.username);
+      }
       box.appendChild(row);
     });
+  }
+
+  // Owner-only — see requireStaffOwner on the server route. Lets an owner
+  // cut off a specific employee's access right now (a suspected compromise,
+  // someone just let go) without needing their password.
+  async function revokeStaffSessions(id, username) {
+    if (!confirm(`Sign "${username}" out of every device they're logged into?`)) return;
+    try {
+      await api(`/api/staff/accounts/${id}/revoke-sessions`, 'POST');
+      alert(`${username} has been signed out everywhere.`);
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   // ---------- audit log (owner-only) ----------
