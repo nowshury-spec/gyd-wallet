@@ -147,14 +147,11 @@ CREATE TABLE IF NOT EXISTS business_profiles (
   offers_delivery INTEGER NOT NULL DEFAULT 0,
   delivery_fee DOUBLE PRECISION NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
-  -- Staff review gate for the staff portal's "Business & job approvals"
-  -- queue: pending | approved | rejected. Defaults to 'approved' at the
-  -- column level so every profile that existed before this feature stays
-  -- visible with no action needed — server.js explicitly sets 'pending' on
-  -- a brand NEW profile's first creation only, not on later edits, so an
-  -- already-approved business isn't yanked out of the directory just for
-  -- touching up their page. Only a profile pending review is hidden from
-  -- /api/business/directory.
+  -- Used to be a staff review gate (pending | approved | rejected) that held
+  -- a brand new business page out of the directory until staff approved it.
+  -- That gate has been removed — every page publishes immediately on
+  -- creation — but the column stays (always 'approved' now) so existing
+  -- rows and the /api/business/directory query below don't need touching.
   review_status TEXT NOT NULL DEFAULT 'approved'
 );
 
@@ -267,11 +264,10 @@ CREATE TABLE IF NOT EXISTS job_postings (
   job_type TEXT,
   status TEXT NOT NULL DEFAULT 'active', -- active | closed
   created_at TEXT NOT NULL,
-  -- Same staff review gate as business_profiles.review_status above:
-  -- pending | approved | rejected. Defaults to 'approved' so postings that
-  -- existed before this feature stay visible; new postings start 'pending'
-  -- and are hidden from the public /api/jobs board until staff approve
-  -- them.
+  -- Same removed staff-approval gate as business_profiles.review_status
+  -- above — kept as a column (always 'approved') so nothing else needs to
+  -- change; every posting is visible on the public /api/jobs board the
+  -- moment it's created.
   review_status TEXT NOT NULL DEFAULT 'approved'
 );
 
@@ -317,8 +313,8 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
 );
 
 -- A permanent record of every sensitive staff action — cash-out payouts and
--- rejections, business/job approval decisions, and new staff accounts being
--- created. This is the other half of the fraud/theft control: nothing here
+-- rejections, and new staff accounts being created. This is the other half
+-- of the fraud/theft control: nothing here
 -- is ever updated or deleted by the app (see server.js's logStaffAction —
 -- it only ever INSERTs), so an owner reviewing GET /api/staff/audit-log
 -- gets a trustworthy trail of who did what and when, including anything an
@@ -354,6 +350,25 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   replied_by TEXT,
   created_at TEXT NOT NULL,
   resolved_at TEXT
+);
+
+-- A customer's star rating (and optional comment) on a business's page.
+-- One row per (business, reviewer) pair — UNIQUE below — so leaving a new
+-- review when you've already reviewed that business updates your existing
+-- one instead of piling up duplicates; server.js does this as an upsert.
+-- business_id/reviewer_id both point at users.id (a business's "id" is the
+-- same id business_profiles.user_id uses everywhere else in this file).
+-- Comments are shown publicly on the business's page — there's no staff
+-- moderation queue for these in this Phase 1 version.
+CREATE TABLE IF NOT EXISTS business_reviews (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL,
+  reviewer_id TEXT NOT NULL,
+  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (business_id, reviewer_id)
 );
 
 -- ---------------------------------------------------------------------

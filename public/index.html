@@ -805,6 +805,7 @@
           <div class="bizpage-cashtag" id="bizpage-view-cashtag"></div>
           <span class="pill" id="bizpage-view-category"></span>
           <p class="bizpage-tagline" id="bizpage-view-tagline"></p>
+          <div class="star-summary" id="bizpage-view-rating-summary" style="margin-top:10px;"></div>
         </div>
         <div class="panel">
           <p class="muted" id="bizpage-view-description"></p>
@@ -825,6 +826,30 @@
           <h2 class="section-title" style="margin-top:0;">Jobs</h2>
           <div id="bizpage-view-jobs"></div>
         </div>
+
+        <div class="panel" id="bizpage-review-form-panel">
+          <h2 class="section-title" style="margin-top:0;">Rate this business</h2>
+          <div class="star-picker" id="bizpage-review-star-picker">
+            <button type="button" class="star-picker-btn" data-value="1">★</button>
+            <button type="button" class="star-picker-btn" data-value="2">★</button>
+            <button type="button" class="star-picker-btn" data-value="3">★</button>
+            <button type="button" class="star-picker-btn" data-value="4">★</button>
+            <button type="button" class="star-picker-btn" data-value="5">★</button>
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label>Comment (optional)</label>
+            <textarea id="bizpage-review-comment" rows="3" placeholder="What was your experience like?" maxlength="1000"></textarea>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn" id="bizpage-review-submit-btn">Submit rating</button>
+            <button class="btn secondary hidden" id="bizpage-review-remove-btn">Remove my rating</button>
+          </div>
+          <div class="error-msg" id="bizpage-review-error"></div>
+          <p class="muted" id="bizpage-review-success" style="font-size:12.5px; margin-top:6px;"></p>
+        </div>
+
+        <h2 class="section-title">Ratings &amp; reviews</h2>
+        <div class="panel" id="bizpage-view-reviews"><p class="muted">No reviews yet.</p></div>
 
         <div class="panel hidden" id="bizpage-checkout-panel">
           <h2 class="section-title" style="margin-top:0;">Checkout</h2>

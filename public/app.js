@@ -894,6 +894,22 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  // Renders a rating as "★★★★☆ 4.3 (12)" — filled stars for the rounded
+  // average, empty stars for the rest, with the review count in parens so
+  // it's clear at a glance how much that average is actually based on. A
+  // business with no reviews yet just shows a muted "No reviews yet" line
+  // instead of a 0-star row, which would otherwise look like a bad rating.
+  function starSummaryHtml(avgRating, reviewCount, small) {
+    const count = reviewCount || 0;
+    const sizeClass = small ? ' star-summary-small' : '';
+    if (!count || avgRating === null || avgRating === undefined) {
+      return `<div class="star-summary${sizeClass} muted">No reviews yet</div>`;
+    }
+    const rounded = Math.round(avgRating);
+    const stars = '★'.repeat(rounded) + '☆'.repeat(5 - rounded);
+    return `<div class="star-summary${sizeClass}"><span class="star-glyphs">${stars}</span> <span class="muted">${avgRating.toFixed(1)} (${count})</span></div>`;
+  }
+
   ['bizpage-category', 'directory-category'].forEach((id) => {
     const sel = document.getElementById(id);
     BUSINESS_CATEGORIES.forEach((c) => {
@@ -1679,6 +1695,7 @@
           <div class="directory-info">
             <div class="biz-name">${b.businessName}</div>
             <div class="biz-tagline">${b.tagline || ''}</div>
+            ${starSummaryHtml(b.avgRating, b.reviewCount, true)}
           </div>
           <span class="pill" style="background:${hexToRgba(b.themeColor, 0.16)}; color:${b.themeColor};">${b.category}</span>
         `;
@@ -1708,6 +1725,7 @@
       categoryEl.style.color = b.themeColor;
       document.getElementById('bizpage-view-tagline').textContent = b.tagline || '';
       document.getElementById('bizpage-view-description').textContent = b.description || '';
+      document.getElementById('bizpage-view-rating-summary').innerHTML = starSummaryHtml(b.avgRating, b.reviewCount, false);
       const keywordsBox = document.getElementById('bizpage-view-keywords');
       keywordsBox.innerHTML = '';
       b.keywords.forEach((k) => {
@@ -1750,6 +1768,7 @@
 
       renderBizPageEvents(b, username);
       renderBizPageJobs(b);
+      renderBizPageReviews(b, username);
 
       document.getElementById('bizpage-view-message-btn').onclick = () => {
         switchTab('messages');
@@ -1761,6 +1780,91 @@
       switchTab('business');
     }
   }
+
+  // ---------- ratings & reviews ----------
+
+  let reviewBusinessUsername = null;
+  let reviewSelectedRating = 0;
+
+  function setReviewStars(rating) {
+    reviewSelectedRating = rating;
+    document.querySelectorAll('#bizpage-review-star-picker .star-picker-btn').forEach((btn) => {
+      btn.classList.toggle('selected', Number(btn.dataset.value) <= rating);
+    });
+  }
+
+  document.querySelectorAll('#bizpage-review-star-picker .star-picker-btn').forEach((btn) => {
+    btn.onclick = () => setReviewStars(Number(btn.dataset.value));
+  });
+
+  function renderBizPageReviews(b, username) {
+    reviewBusinessUsername = username;
+    const formPanel = document.getElementById('bizpage-review-form-panel');
+    const errBox = document.getElementById('bizpage-review-error');
+    const successBox = document.getElementById('bizpage-review-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+
+    // A business can't rate its own page — hide the "rate this business"
+    // form entirely when the logged-in user is viewing their own listing.
+    formPanel.classList.toggle('hidden', !!b.isOwnBusiness);
+    if (!b.isOwnBusiness) {
+      setReviewStars(b.myReview ? b.myReview.rating : 0);
+      document.getElementById('bizpage-review-comment').value = b.myReview ? b.myReview.comment || '' : '';
+      document.getElementById('bizpage-review-remove-btn').classList.toggle('hidden', !b.myReview);
+    }
+
+    const box = document.getElementById('bizpage-view-reviews');
+    box.innerHTML = '';
+    if (!b.reviews || b.reviews.length === 0) {
+      box.innerHTML = '<p class="muted">No reviews yet — be the first to rate this business.</p>';
+      return;
+    }
+    b.reviews.forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'review-row';
+      row.innerHTML = `
+        <div class="review-row-top">
+          <span class="star-glyphs">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+          <strong>@${r.reviewerUsername}</strong>
+        </div>
+        ${r.comment ? `<div class="product-description" style="margin-top:4px;">${r.comment}</div>` : ''}
+      `;
+      box.appendChild(row);
+    });
+  }
+
+  document.getElementById('bizpage-review-submit-btn').onclick = async () => {
+    const errBox = document.getElementById('bizpage-review-error');
+    const successBox = document.getElementById('bizpage-review-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    if (!reviewSelectedRating) return (errBox.textContent = 'Choose a star rating from 1 to 5.');
+    const comment = document.getElementById('bizpage-review-comment').value.trim();
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(reviewBusinessUsername)}/review`, 'POST', {
+        rating: reviewSelectedRating,
+        comment,
+      });
+      successBox.textContent = 'Thanks — your rating was saved.';
+      openBusinessPage(reviewBusinessUsername);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('bizpage-review-remove-btn').onclick = async () => {
+    const errBox = document.getElementById('bizpage-review-error');
+    errBox.textContent = '';
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(reviewBusinessUsername)}/review`, 'DELETE');
+      setReviewStars(0);
+      document.getElementById('bizpage-review-comment').value = '';
+      openBusinessPage(reviewBusinessUsername);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
 
   function renderBizPageEvents(b, username) {
     const panel = document.getElementById('bizpage-view-events-panel');

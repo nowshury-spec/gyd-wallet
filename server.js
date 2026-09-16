@@ -237,7 +237,7 @@ function requireStaffAuth(handler) {
 }
 
 // The actual fraud/theft control on top of requireStaffAuth: an 'employee'
-// can use the support/cash-out/approvals queues, but only an 'owner' can
+// can use the support/cash-out queues, but only an 'owner' can
 // create another staff account or read the audit log — so no single
 // employee, however compromised or dishonest, can quietly grant an
 // accomplice access or cover their tracks. See the role comment on
@@ -1368,9 +1368,7 @@ on('POST', '/api/business/charge-requests/:id/decline', resolveChargeRequest('de
 function businessProfilePublic(row) {
   return {
     // business_profiles.user_id (its primary key, always present since
-    // every join that builds one of these rows includes bp.*) — the staff
-    // portal's approve/reject buttons need this exact id, not the display
-    // username, to call POST /api/staff/approvals/business/:userId/....
+    // every join that builds one of these rows includes bp.*).
     userId: row.user_id,
     username: row.username,
     cashtag: row.cashtag,
@@ -1389,12 +1387,12 @@ function businessProfilePublic(row) {
     offersDelivery: !!row.offers_delivery,
     deliveryFee: row.delivery_fee || 0,
     updatedAt: row.updated_at,
-    // 'pending' | 'approved' | 'rejected' — surfaced so a business owner can
-    // see their own page is awaiting staff review (see the staff portal's
-    // approvals queue). Doesn't affect anything the owner can do with their
-    // own profile; it only controls whether OTHER people can find it via
-    // the directory search below.
+    // Always 'approved' now — the staff review gate this used to reflect
+    // was removed, but the field stays for compatibility with anything
+    // still reading it.
     reviewStatus: row.review_status || 'approved',
+    avgRating: row.avg_rating != null ? Math.round(Number(row.avg_rating) * 10) / 10 : null,
+    reviewCount: row.review_count != null ? Number(row.review_count) : 0,
   };
 }
 
@@ -1403,7 +1401,12 @@ on(
   '/api/business/profile',
   requireBusiness(async (req, res, params, query, body, user) => {
     const row = await db
-      .prepare('SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?')
+      .prepare(
+        `SELECT u.*, bp.*,
+           (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+         FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
+      )
       .get(user.id);
     sendJson(res, 200, { profile: row ? businessProfilePublic(row) : null });
   })
@@ -1442,17 +1445,21 @@ on(
          WHERE user_id = ?`
       ).run(category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now(), user.id);
     } else {
-      // A brand new business page starts 'pending' and won't show up in
-      // /api/business/directory until a staff member approves it from the
-      // staff portal — see the "Business & job approvals" queue.
+      // A brand new business page goes live in the directory immediately —
+      // no staff approval step.
       await db.prepare(
-        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at, review_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(user.id, category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now());
     }
 
     const row = await db
-      .prepare('SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?')
+      .prepare(
+        `SELECT u.*, bp.*,
+           (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+         FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
+      )
       .get(user.id);
     sendJson(res, 200, { profile: businessProfilePublic(row) });
   })
@@ -1464,10 +1471,10 @@ on(
   requireAuth(async (req, res, params, query) => {
     const q = (query.q || '').trim();
     const category = (query.category || '').trim();
-    // Only pages a staff member has approved show up here — a page
-    // awaiting review or one that was rejected is invisible to everyone
-    // except its own owner (via GET /api/business/profile above).
-    let sql = "SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.review_status = 'approved'";
+    let sql = `SELECT u.*, bp.*,
+      (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
+      (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+      FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.review_status = 'approved'`;
     const args = [];
     if (category) {
       sql += ' AND bp.category = ?';
@@ -1494,11 +1501,16 @@ on(
 on(
   'GET',
   '/api/business/directory/:handle',
-  requireAuth(async (req, res, params) => {
+  requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(params.handle);
     if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
     const row = await db
-      .prepare('SELECT u.*, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?')
+      .prepare(
+        `SELECT u.*, bp.*,
+           (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+         FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
+      )
       .get(bizUser.id);
     if (!row) return sendJson(res, 404, { error: 'This business has not set up their page yet.' });
     const products = await db
@@ -1511,14 +1523,87 @@ on(
     const jobs = await db
       .prepare("SELECT * FROM job_postings WHERE business_id = ? AND status = 'active' ORDER BY created_at DESC")
       .all(bizUser.id);
+    const reviews = await db
+      .prepare(
+        `SELECT r.*, u.username FROM business_reviews r JOIN users u ON u.id = r.reviewer_id
+         WHERE r.business_id = ? ORDER BY r.created_at DESC LIMIT 200`
+      )
+      .all(bizUser.id);
+    const myReviewRow = reviews.find((r) => r.reviewer_id === user.id);
     sendJson(res, 200, {
       business: {
         ...businessProfilePublic(row),
         products: products.map(businessProductPublic),
         events: eventsPublic,
         jobs: jobs.map((j) => jobPostingPublic(j)),
+        reviews: reviews.map(businessReviewPublic),
+        myReview: myReviewRow ? businessReviewPublic(myReviewRow) : null,
+        isOwnBusiness: bizUser.id === user.id,
       },
     });
+  })
+);
+
+// A customer's star rating (1-5) and optional comment on a business's page
+// — see business_reviews in schema.sql. One review per (business, customer)
+// pair: submitting again updates the existing row (an upsert) rather than
+// adding a second one, so a business's average can't be padded by the same
+// person rating it repeatedly.
+function businessReviewPublic(row) {
+  return {
+    id: row.id,
+    reviewerUsername: row.username,
+    rating: row.rating,
+    comment: row.comment,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+on(
+  'POST',
+  '/api/business/directory/:handle/review',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    if (bizUser.id === user.id) return badRequest(res, "You can't rate your own business.");
+    const rating = Math.round(Number(body.rating));
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return badRequest(res, 'Choose a rating from 1 to 5 stars.');
+    }
+    const comment = (body.comment || '').trim().slice(0, 1000);
+    const profile = await db.prepare('SELECT user_id FROM business_profiles WHERE user_id = ?').get(bizUser.id);
+    if (!profile) return badRequest(res, "This business hasn't set up their page yet.");
+
+    const existing = await db
+      .prepare('SELECT id FROM business_reviews WHERE business_id = ? AND reviewer_id = ?')
+      .get(bizUser.id, user.id);
+    if (existing) {
+      await db.prepare(
+        `UPDATE business_reviews SET rating = ?, comment = ?, updated_at = ? WHERE id = ?`
+      ).run(rating, comment || null, now(), existing.id);
+    } else {
+      await db.prepare(
+        `INSERT INTO business_reviews (id, business_id, reviewer_id, rating, comment, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(crypto.randomUUID(), bizUser.id, user.id, rating, comment || null, now(), now());
+    }
+
+    const row = await db
+      .prepare('SELECT r.*, u.username FROM business_reviews r JOIN users u ON u.id = r.reviewer_id WHERE r.business_id = ? AND r.reviewer_id = ?')
+      .get(bizUser.id, user.id);
+    sendJson(res, 200, { review: businessReviewPublic(row) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/business/directory/:handle/review',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    await db.prepare('DELETE FROM business_reviews WHERE business_id = ? AND reviewer_id = ?').run(bizUser.id, user.id);
+    sendJson(res, 200, { ok: true });
   })
 );
 
@@ -1921,8 +2006,8 @@ function jobPostingPublic(row, business) {
     jobType: row.job_type,
     status: row.status,
     createdAt: row.created_at,
-    // 'pending' | 'approved' | 'rejected' — see review_status on
-    // business_profiles above for the same idea applied to job postings.
+    // Always 'approved' now — see the same field on businessProfilePublic
+    // above for why it's still here.
     reviewStatus: row.review_status || 'approved',
     business: business
       ? { username: business.username, name: business.business_name || business.username }
@@ -1952,14 +2037,12 @@ on(
     if (!title) return badRequest(res, 'Give the job a title.');
     if (!description) return badRequest(res, 'Add a short description of the job.');
 
-    // Starts 'pending' — won't show up on the public /api/jobs board until
-    // a staff member approves it from the staff portal's approvals queue.
-    // It's still visible on the business's own GET /api/business/jobs list
-    // above (with its reviewStatus) right away.
+    // Goes live on the public /api/jobs board immediately — no staff
+    // approval step.
     const id = crypto.randomUUID();
     await db.prepare(
-      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at, review_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 'pending')`
+      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
     ).run(id, user.id, title, description, location || null, payInfo || null, jobType, now());
 
     const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
@@ -2004,9 +2087,6 @@ on(
   requireAuth(async (req, res, params, query) => {
     const q = (query.q || '').trim();
     const jobType = (query.jobType || '').trim();
-    // Only approved postings show up on the public board — one still
-    // awaiting (or denied) staff review is only visible to its own
-    // business via GET /api/business/jobs above.
     let sql = `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id WHERE j.status = 'active' AND j.review_status = 'approved'`;
     const args = [];
     if (jobType) {
@@ -2465,16 +2545,13 @@ on(
   'GET',
   '/api/staff/summary',
   requireStaffAuth(async (req, res, params, query, body, staff) => {
-    const [openTickets, pendingCashouts, pendingBusinesses, pendingJobs] = await Promise.all([
+    const [openTickets, pendingCashouts] = await Promise.all([
       db.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE status = 'open'").get(),
       db.prepare("SELECT COUNT(*) AS n FROM cashout_requests WHERE status = 'pending'").get(),
-      db.prepare("SELECT COUNT(*) AS n FROM business_profiles WHERE review_status = 'pending'").get(),
-      db.prepare("SELECT COUNT(*) AS n FROM job_postings WHERE review_status = 'pending'").get(),
     ]);
     sendJson(res, 200, {
       openTickets: Number(openTickets.n),
       pendingCashouts: Number(pendingCashouts.n),
-      pendingApprovals: Number(pendingBusinesses.n) + Number(pendingJobs.n),
     });
   })
 );
@@ -2624,65 +2701,6 @@ on(
       note: `Refund for rejected cash-out ${params.id}`,
     });
     await logStaffAction(staff, 'cashout_rejected', params.id, `Rejected & refunded GYD ${amount_gyd} for user ${user_id}`);
-    sendJson(res, 200, { ok: true });
-  })
-);
-
-// ---- staff: business & job approvals ----
-
-on(
-  'GET',
-  '/api/staff/approvals',
-  requireStaffAuth(async (req, res, params, query) => {
-    const [businesses, jobs] = await Promise.all([
-      db
-        .prepare(
-          `SELECT u.username, u.cashtag, u.business_name, bp.* FROM business_profiles bp JOIN users u ON u.id = bp.user_id
-           WHERE bp.review_status = 'pending' ORDER BY bp.updated_at ASC LIMIT 100`
-        )
-        .all(),
-      db
-        .prepare(
-          `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id
-           WHERE j.review_status = 'pending' ORDER BY j.created_at ASC LIMIT 100`
-        )
-        .all(),
-    ]);
-    sendJson(res, 200, {
-      businesses: businesses.map(businessProfilePublic),
-      jobs: jobs.map((r) => jobPostingPublic(r, { username: r.username, business_name: r.business_name })),
-    });
-  })
-);
-
-on(
-  'POST',
-  '/api/staff/approvals/business/:userId/:decision',
-  requireStaffAuth(async (req, res, params, query, body, staff) => {
-    if (!['approve', 'reject'].includes(params.decision)) return sendJson(res, 404, { error: 'No such route.' });
-    const status = params.decision === 'approve' ? 'approved' : 'rejected';
-    const rows = await db.raw(
-      `UPDATE business_profiles SET review_status = $1 WHERE user_id = $2 AND review_status = 'pending' RETURNING user_id`,
-      [status, params.userId]
-    );
-    if (rows.length === 0) return badRequest(res, 'That business page is no longer awaiting review.');
-    await logStaffAction(staff, `business_${status}`, params.userId, `${status} business page for user ${params.userId}`);
-    sendJson(res, 200, { ok: true });
-  })
-);
-
-on(
-  'POST',
-  '/api/staff/approvals/job/:id/:decision',
-  requireStaffAuth(async (req, res, params, query, body, staff) => {
-    if (!['approve', 'reject'].includes(params.decision)) return sendJson(res, 404, { error: 'No such route.' });
-    const status = params.decision === 'approve' ? 'approved' : 'rejected';
-    const rows = await db.raw(
-      `UPDATE job_postings SET review_status = $1 WHERE id = $2 AND review_status = 'pending' RETURNING id`,
-      [status, params.id]
-    );
-    if (rows.length === 0) return badRequest(res, 'That job posting is no longer awaiting review.');
-    await logStaffAction(staff, `job_${status}`, params.id, `${status} job posting ${params.id}`);
     sendJson(res, 200, { ok: true });
   })
 );

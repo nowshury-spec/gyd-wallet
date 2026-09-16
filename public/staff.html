@@ -59,16 +59,11 @@
         <div class="staff-summary-num" id="summary-pending-cashouts">—</div>
         <div class="staff-summary-label">Pending cash-outs</div>
       </div>
-      <div class="staff-summary-card">
-        <div class="staff-summary-num" id="summary-pending-approvals">—</div>
-        <div class="staff-summary-label">Pending approvals</div>
-      </div>
     </div>
 
     <nav class="staff-tabs">
       <button class="staff-tab active" data-staff-tab="tickets">Support</button>
       <button class="staff-tab" data-staff-tab="cashouts">Cash-outs</button>
-      <button class="staff-tab" data-staff-tab="approvals">Approvals</button>
       <button class="staff-tab" data-staff-tab="employees">Employees</button>
       <button class="staff-tab hidden" id="tab-audit-log" data-staff-tab="audit">Audit log</button>
     </nav>
@@ -90,13 +85,6 @@
           <button class="btn small secondary staff-filter-btn" data-cashouts-status="rejected">Rejected</button>
         </div>
         <div id="cashouts-list"><p class="muted">Loading…</p></div>
-      </section>
-
-      <section id="staff-panel-approvals" class="staff-panel hidden">
-        <h2 class="section-title">Business pages awaiting review</h2>
-        <div id="approvals-businesses-list"><p class="muted">Loading…</p></div>
-        <h2 class="section-title" style="margin-top:22px;">Job postings awaiting review</h2>
-        <div id="approvals-jobs-list"><p class="muted">Loading…</p></div>
       </section>
 
       <section id="staff-panel-employees" class="staff-panel hidden">
@@ -126,7 +114,7 @@
       </section>
 
       <section id="staff-panel-audit" class="staff-panel hidden">
-        <p class="forgot-intro">A permanent record of every payout, approval, and employee account created — nothing
+        <p class="forgot-intro">A permanent record of every payout and employee account created — nothing
         here can be edited or deleted from the app.</p>
         <div id="audit-log-list"><p class="muted">Loading…</p></div>
       </section>

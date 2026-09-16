@@ -101,7 +101,6 @@
     document.querySelectorAll('.staff-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `staff-panel-${tab}`));
     if (tab === 'tickets') loadTickets();
     if (tab === 'cashouts') loadCashouts();
-    if (tab === 'approvals') loadApprovals();
     if (tab === 'employees') loadEmployees();
     if (tab === 'audit') loadAuditLog();
   }
@@ -111,7 +110,6 @@
       const data = await api('/api/staff/summary');
       document.getElementById('summary-open-tickets').textContent = data.openTickets;
       document.getElementById('summary-pending-cashouts').textContent = data.pendingCashouts;
-      document.getElementById('summary-pending-approvals').textContent = data.pendingApprovals;
     } catch {
       // Summary is a nice-to-have; a failure here shouldn't block the rest
       // of the dashboard from working.
@@ -285,99 +283,6 @@
     try {
       await api(`/api/staff/cashouts/${id}/reject`, 'POST');
       loadCashouts();
-      loadSummary();
-    } catch (err) {
-      alert(err.message);
-    }
-  }
-
-  // ---------- business & job approvals ----------
-
-  async function loadApprovals() {
-    const bizBox = document.getElementById('approvals-businesses-list');
-    const jobsBox = document.getElementById('approvals-jobs-list');
-    bizBox.innerHTML = '<p class="muted">Loading…</p>';
-    jobsBox.innerHTML = '<p class="muted">Loading…</p>';
-    try {
-      const data = await api('/api/staff/approvals');
-      renderBusinessApprovals(data.businesses);
-      renderJobApprovals(data.jobs);
-    } catch (err) {
-      bizBox.innerHTML = `<p class="muted">${err.message}</p>`;
-      jobsBox.innerHTML = '';
-    }
-  }
-
-  function renderBusinessApprovals(businesses) {
-    const box = document.getElementById('approvals-businesses-list');
-    box.innerHTML = '';
-    if (businesses.length === 0) {
-      box.innerHTML = '<p class="muted">Nothing waiting on review.</p>';
-      return;
-    }
-    businesses.forEach((b) => {
-      const card = document.createElement('div');
-      card.className = 'staff-item';
-      card.innerHTML = `
-        <div class="staff-item-top">
-          <strong>${b.businessName || b.username}</strong>
-          <span class="pill pending">pending</span>
-        </div>
-        <div class="staff-item-meta">@${b.username} · ${b.category || 'no category'}${b.location ? ' · ' + b.location : ''}</div>
-        <div class="staff-item-body">${b.tagline || ''}${b.description ? '<br>' + b.description : ''}</div>
-        <div class="staff-actions">
-          <button class="btn small biz-approve-btn">Approve</button>
-          <button class="btn small secondary biz-reject-btn">Reject</button>
-        </div>
-      `;
-      card.querySelector('.biz-approve-btn').onclick = () => decideBusiness(b.userId, 'approve');
-      card.querySelector('.biz-reject-btn').onclick = () => decideBusiness(b.userId, 'reject');
-      box.appendChild(card);
-    });
-  }
-
-  function renderJobApprovals(jobs) {
-    const box = document.getElementById('approvals-jobs-list');
-    box.innerHTML = '';
-    if (jobs.length === 0) {
-      box.innerHTML = '<p class="muted">Nothing waiting on review.</p>';
-      return;
-    }
-    jobs.forEach((j) => {
-      const card = document.createElement('div');
-      card.className = 'staff-item';
-      card.innerHTML = `
-        <div class="staff-item-top">
-          <strong>${j.title}</strong>
-          <span class="pill pending">pending</span>
-        </div>
-        <div class="staff-item-meta">${j.business ? j.business.name : ''}${j.location ? ' · ' + j.location : ''}${j.jobType ? ' · ' + j.jobType : ''}</div>
-        <div class="staff-item-body">${j.description || ''}</div>
-        <div class="staff-actions">
-          <button class="btn small job-approve-btn">Approve</button>
-          <button class="btn small secondary job-reject-btn">Reject</button>
-        </div>
-      `;
-      card.querySelector('.job-approve-btn').onclick = () => decideJob(j.id, 'approve');
-      card.querySelector('.job-reject-btn').onclick = () => decideJob(j.id, 'reject');
-      box.appendChild(card);
-    });
-  }
-
-  async function decideBusiness(userId, decision) {
-    try {
-      await api(`/api/staff/approvals/business/${encodeURIComponent(userId)}/${decision}`, 'POST');
-      loadApprovals();
-      loadSummary();
-    } catch (err) {
-      alert(err.message);
-    }
-  }
-
-  async function decideJob(id, decision) {
-    try {
-      await api(`/api/staff/approvals/job/${id}/${decision}`, 'POST');
-      loadApprovals();
       loadSummary();
     } catch (err) {
       alert(err.message);
