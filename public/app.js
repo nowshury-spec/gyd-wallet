@@ -123,8 +123,11 @@
     try {
       const data = await api('/api/auth/forgot-password', 'POST', { email });
       resetEmail = email;
-      document.getElementById('reset-code-display').innerHTML =
-        `Since GYD Wallet doesn't send real emails yet, here's your simulated reset code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+      // Real email delivery (see email.js) skips the on-screen code
+      // entirely — data.sent means it's on its way to the inbox instead.
+      document.getElementById('reset-code-display').innerHTML = data.sent
+        ? `We've emailed a reset code to <strong style="font-size:16px; letter-spacing:normal;">${email}</strong>. It expires in ${data.expiresInMinutes} minutes.`
+        : `Since GYD Wallet doesn't send real emails yet, here's your simulated reset code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
       document.getElementById('reset-code').value = '';
       document.getElementById('reset-new-password').value = '';
       document.getElementById('reset-error').textContent = '';
@@ -169,8 +172,9 @@
     errBox.textContent = '';
     try {
       const data = await api('/api/auth/forgot-username', 'POST', { email });
-      document.getElementById('username-result-display').innerHTML =
-        `Here's the username on that account:<strong class="username-value">${data.username}</strong>`;
+      document.getElementById('username-result-display').innerHTML = data.sent
+        ? `We've emailed your username to <strong class="username-value">${email}</strong>.`
+        : `Here's the username on that account:<strong class="username-value">${data.username}</strong>`;
       switchAuthTab('username-result');
     } catch (err) {
       errBox.textContent = err.message;
@@ -1846,11 +1850,27 @@
         <div class="review-row-top">
           <span class="star-glyphs">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
           <strong>@${r.reviewerUsername}</strong>
+          <button type="button" class="link-btn report-review-btn" style="margin-left:auto; font-size:11px;">Report</button>
         </div>
         ${r.comment ? `<div class="product-description" style="margin-top:4px;">${r.comment}</div>` : ''}
       `;
+      row.querySelector('.report-review-btn').onclick = () => reportReview(username, r.id);
       box.appendChild(row);
     });
+  }
+
+  // Opens a support ticket for staff to look at rather than hiding the
+  // review immediately — see the comment on the report endpoint in
+  // server.js for why. A staff member can remove it from their portal if
+  // it's actually spam or abuse.
+  async function reportReview(username, reviewId) {
+    const reason = prompt('Why are you reporting this review? (optional)') || '';
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(username)}/reviews/${reviewId}/report`, 'POST', { reason });
+      alert("Thanks — we've sent this to our support team to look at.");
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   document.getElementById('bizpage-review-submit-btn').onclick = async () => {

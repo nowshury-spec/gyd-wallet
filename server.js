@@ -19,6 +19,7 @@ const url = require('url');
 const db = require('./db');
 const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify } = require('./auth');
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
+const { emailEnabled, sendEmail, codeEmailHtml } = require('./email');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -107,7 +108,7 @@ async function getAuthedStaff(req) {
 }
 
 function publicStaff(s) {
-  return { id: s.id, username: s.username, role: s.role || 'employee', createdAt: s.created_at };
+  return { id: s.id, username: s.username, role: s.role || 'employee', createdAt: s.created_at, email: s.email || null };
 }
 
 // A permanent, append-only record of anything a staff member does that
@@ -122,6 +123,52 @@ async function logStaffAction(staff, action, target, details) {
     `INSERT INTO staff_audit_log (id, staff_id, staff_username, action, target, details, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(crypto.randomUUID(), staff.id, staff.username, action, target || null, details || null, now());
+
+  if (FRAUD_ALERT_ACTIONS.has(action)) {
+    await maybeSendFraudAlert(staff);
+  }
+}
+
+// Which audit-log actions count toward the real-time fraud check below —
+// the cash-out queue is the one place a single staff member's actions
+// directly move real money, so it's the one worth watching automatically.
+const FRAUD_ALERT_ACTIONS = new Set(['cashout_completed', 'cashout_rejected']);
+const FRAUD_ALERT_WINDOW_MINUTES = 15;
+const FRAUD_ALERT_WINDOW_MS = FRAUD_ALERT_WINDOW_MINUTES * 60 * 1000;
+const FRAUD_ALERT_THRESHOLD = 5; // this many cash-out actions by one staff member inside the window
+const FRAUD_ALERT_COOLDOWN_MS = 60 * 60 * 1000; // don't re-alert on the same staff member more than once per hour
+
+// A lightweight, real-time alternative to someone having to remember to
+// open the audit log: if one staff member races through an unusual number
+// of cash-out payouts/rejections in a short window, every owner with an
+// email on file (see PATCH /api/staff/me/email) gets a heads-up right
+// away. This app has no scheduler for a periodic digest (see README's
+// "Why no npm packages"), so this runs inline with the very request that
+// crosses the threshold instead — the check itself is cheap (one COUNT
+// query), and the cooldown below means it only actually sends mail the
+// first time a given staff member trips it in an hour.
+async function maybeSendFraudAlert(staff) {
+  if (!emailEnabled()) return; // nowhere to send it — same graceful no-op as everywhere else in email.js
+  const alertKey = `fraud-alert:${staff.id}`;
+  if (rateLimitPeek(alertKey).count > 0) return; // already alerted on this staff member recently
+  const cutoff = new Date(Date.now() - FRAUD_ALERT_WINDOW_MS).toISOString();
+  const recent = await db
+    .prepare(`SELECT COUNT(*) AS n FROM staff_audit_log WHERE staff_id = ? AND action LIKE 'cashout_%' AND created_at >= ?`)
+    .get(staff.id, cutoff);
+  if (Number(recent.n) < FRAUD_ALERT_THRESHOLD) return;
+
+  rateLimitRecord(alertKey, FRAUD_ALERT_COOLDOWN_MS);
+  const owners = await db.prepare(`SELECT email FROM staff_accounts WHERE role = 'owner' AND email IS NOT NULL`).all();
+  for (const owner of owners) {
+    await sendEmail(
+      owner.email,
+      'GYD Wallet: unusual staff activity',
+      `<div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto;">
+        <p><strong>${staff.username}</strong> has processed ${recent.n} cash-out payouts/rejections in the last ${FRAUD_ALERT_WINDOW_MINUTES} minutes.</p>
+        <p>This may be completely normal — a busy shift, a backlog getting cleared — but it's worth a look at the audit log if it isn't what you'd expect.</p>
+      </div>`
+    );
+  }
 }
 
 function publicUser(u) {
@@ -381,6 +428,7 @@ on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) =>
 
   const user = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
   const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  let sent = false;
 
   if (user) {
     // Only one active code per user at a time — clear out any earlier
@@ -391,9 +439,33 @@ on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) =>
     await db.prepare(
       `INSERT INTO password_resets (id, user_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
     ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt);
-  }
 
-  sendJson(res, 200, { code, expiresInMinutes: 15 });
+    // With real email delivery configured (see email.js), send the code
+    // there instead of handing it back in this response — see
+    // "Setting up real email delivery" in README.md for how to turn this
+    // on. Falls back to the old on-screen behavior if sending fails for
+    // any reason (bad key, provider outage), so this can never lock
+    // someone out of resetting their own password.
+    if (emailEnabled()) {
+      const result = await sendEmail(
+        email,
+        'Your GYD Wallet reset code',
+        codeEmailHtml('Here is your GYD Wallet password reset code:', code, 15)
+      );
+      sent = result.sent;
+    }
+  }
+  // NOTE: when email is configured, this response takes measurably longer
+  // for an email that has an account (it waits on the real send) than one
+  // that doesn't — a minor timing side-channel on top of the response-shape
+  // protection above. Not worth the complexity of an artificial delay for
+  // what's still a Phase 1 prototype, but worth knowing about.
+
+  if (sent) {
+    sendJson(res, 200, { sent: true, expiresInMinutes: 15 });
+  } else {
+    sendJson(res, 200, { code, expiresInMinutes: 15 });
+  }
 });
 
 // Forgotten password, step 2: spend the code from step 1 to set a new
@@ -485,6 +557,18 @@ on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) =>
 
   const user = await db.prepare('SELECT username FROM users WHERE LOWER(email) = ?').get(email);
   if (!user) return badRequest(res, 'No account found with that email.');
+
+  if (emailEnabled()) {
+    const result = await sendEmail(
+      email,
+      'Your GYD Wallet username',
+      `<div style="font-family: -apple-system, sans-serif; max-width: 420px; margin: 0 auto;">
+        <p>Your GYD Wallet username is:</p>
+        <p style="font-size: 22px; font-weight: 800; text-align: center; margin: 24px 0;">${user.username}</p>
+      </div>`
+    );
+    if (result.sent) return sendJson(res, 200, { sent: true });
+  }
 
   sendJson(res, 200, { username: user.username });
 });
@@ -1639,6 +1723,51 @@ on(
   })
 );
 
+// Reporting a review someone thinks is spam, abusive, or fake. This
+// doesn't hide or delete anything by itself — it just opens a normal
+// support ticket (same queue and UI staff already use for everything
+// else) with the review's details attached, including a machine-readable
+// "Review ID:" line the staff portal looks for to offer a one-click
+// "Remove this review" button (see /api/staff/reviews/:id below and
+// renderTickets in staff.js). Keeping this as a ticket rather than an
+// auto-hide means a report can't be used to yank a business's honest bad
+// review off their own page just by someone clicking a button.
+on(
+  'POST',
+  '/api/business/directory/:handle/reviews/:reviewId/report',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    const review = await db
+      .prepare('SELECT r.*, u.username AS reviewer_username FROM business_reviews r JOIN users u ON u.id = r.reviewer_id WHERE r.id = ? AND r.business_id = ?')
+      .get(params.reviewId, bizUser.id);
+    if (!review) return sendJson(res, 404, { error: 'That review no longer exists.' });
+
+    const ipKey = `report-review-ip:${getClientIp(req)}`;
+    const ipBucket = rateLimitPeek(ipKey);
+    if (ipBucket.count >= 10) {
+      return sendJson(res, 429, { error: `Too many reports. Try again in ${retryAfterMinutes(ipBucket)} minute(s).` });
+    }
+    rateLimitRecord(ipKey, 15 * 60 * 1000);
+
+    const reason = (body.reason || '').trim().slice(0, 500);
+    const message =
+      `A review was reported on ${bizUser.username}'s business page.\n\n` +
+      `Reviewer: @${review.reviewer_username}\n` +
+      `Rating: ${review.rating} star(s)\n` +
+      `Comment: ${review.comment || '(no comment)'}\n` +
+      (reason ? `Reporter's reason: ${reason}\n` : '') +
+      `\nReview ID: ${review.id}`;
+
+    await db.prepare(
+      `INSERT INTO support_tickets (id, user_id, name, email, subject, message, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`
+    ).run(crypto.randomUUID(), user.id, user.username, user.email || null, `Reported review on ${bizUser.username}`, message, now());
+
+    sendJson(res, 200, { ok: true });
+  })
+);
+
 // ---------- business products & prices ----------
 //
 // A simple price list attached to a business's page — not tied to payments
@@ -2537,7 +2666,27 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
     `INSERT INTO staff_login_codes (id, staff_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
   ).run(crypto.randomUUID(), staff.id, code, now(), new Date(Date.now() + STAFF_CODE_TTL_MS).toISOString());
 
-  sendJson(res, 200, { requiresCode: true, username: staff.username, code, expiresInMinutes: 10 });
+  // With an email on file AND real delivery configured (see email.js and
+  // PATCH /api/staff/me/email below), this is a genuine second factor —
+  // the code goes somewhere the password alone doesn't get you. Without
+  // either of those it falls back to the original "shown on screen"
+  // behavior, same as every other simulated code in this app.
+  let sent = false;
+  if (staff.email && emailEnabled()) {
+    const result = await sendEmail(
+      staff.email,
+      'Your GYD Wallet staff verification code',
+      codeEmailHtml('Here is your GYD Wallet staff login verification code:', code, 10)
+    );
+    sent = result.sent;
+  }
+
+  sendJson(res, 200, {
+    requiresCode: true,
+    username: staff.username,
+    expiresInMinutes: 10,
+    ...(sent ? { sent: true } : { code }),
+  });
 });
 
 // Step 2: spend the code from step 1 to actually get a session token.
@@ -2587,6 +2736,21 @@ on(
   '/api/staff/me',
   requireStaffAuth(async (req, res, params, query, body, staff) => {
     sendJson(res, 200, { staff: publicStaff(staff) });
+  })
+);
+
+// Lets a staff member set or change the email their own login codes and
+// (for an owner) fraud alerts go to — see email.js. Self-service only:
+// nobody else can set another account's delivery address for them.
+on(
+  'POST',
+  '/api/staff/me/email',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const email = (body.email || '').trim().toLowerCase();
+    if (email && !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address.');
+    await db.prepare('UPDATE staff_accounts SET email = ? WHERE id = ?').run(email || null, staff.id);
+    const updated = await db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(staff.id);
+    sendJson(res, 200, { staff: publicStaff(updated) });
   })
 );
 
@@ -2649,17 +2813,19 @@ on(
     const username = (body.username || '').trim();
     const password = body.password;
     const role = body.role === 'owner' ? 'owner' : 'employee';
+    const email = (body.email || '').trim().toLowerCase();
     if (!username || username.length < 3) return badRequest(res, 'Username must be at least 3 characters.');
     const passwordError = validateStaffPassword(username, password);
     if (passwordError) return badRequest(res, passwordError);
+    if (email && !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address, or leave it blank.');
     const existing = await db.prepare('SELECT id FROM staff_accounts WHERE username = ?').get(username);
     if (existing) return badRequest(res, 'That username is already taken.');
 
     const newId = crypto.randomUUID();
     const { salt, hash } = hashPassword(password);
     await db.prepare(
-      `INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(newId, username, hash, salt, role, now());
+      `INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(newId, username, hash, salt, role, now(), email || null);
     await logStaffAction(staff, 'staff_account_created', newId, `Created ${role} account "${username}"`);
 
     const rows = await db.prepare('SELECT * FROM staff_accounts ORDER BY created_at ASC').all();
@@ -2755,6 +2921,24 @@ on(
     const ticket = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
     if (!ticket) return sendJson(res, 404, { error: 'Ticket not found.' });
     await db.prepare("UPDATE support_tickets SET status = 'resolved', resolved_at = ? WHERE id = ?").run(now(), params.id);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+// Removing a reported business review — reached from the "Remove this
+// review" button staff.js shows on a "Reported review on ..." ticket (see
+// POST /api/business/directory/:handle/reviews/:reviewId/report above).
+// Any staff member can do this, not just an owner — it's ordinary content
+// moderation, not an account-access or money-moving action — but it's
+// still logged, same as everything else staff can do.
+on(
+  'DELETE',
+  '/api/staff/reviews/:id',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const review = await db.prepare('SELECT * FROM business_reviews WHERE id = ?').get(params.id);
+    if (!review) return sendJson(res, 404, { error: 'That review no longer exists.' });
+    await db.prepare('DELETE FROM business_reviews WHERE id = ?').run(params.id);
+    await logStaffAction(staff, 'review_removed', params.id, `Removed a ${review.rating}-star review on business ${review.business_id}`);
     sendJson(res, 200, { ok: true });
   })
 );

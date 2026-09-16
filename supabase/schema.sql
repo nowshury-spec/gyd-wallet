@@ -325,7 +325,14 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
   -- /api/staff/accounts/:id/revoke-sessions) — e.g. right after they're let
   -- go, or the moment their account is suspected compromised, without
   -- needing to know or reset their password first.
-  sessions_invalidated_at TEXT
+  sessions_invalidated_at TEXT,
+  -- Optional — set by the account itself (PATCH /api/staff/me/email) or by
+  -- an owner when creating the account. With this set AND real email
+  -- delivery configured (see email.js), the login verification code and
+  -- fraud-alert emails below go here instead of only showing on screen.
+  -- NULL just means "no real delivery for this account yet" — everything
+  -- still falls back to on-screen the same as before.
+  email TEXT
 );
 
 -- A one-time 6-digit code required after username+password to finish a

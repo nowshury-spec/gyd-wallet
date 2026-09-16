@@ -101,6 +101,21 @@
       </section>
 
       <section id="staff-panel-employees" class="staff-panel hidden">
+        <div class="panel" id="my-email-panel">
+          <h2 class="section-title" style="margin-top:0;">My email</h2>
+          <p class="forgot-intro">Add your email so your login verification code arrives there instead of showing on
+          this screen. Owners with an email on file also get an alert here if a staff member processes an unusual
+          number of cash-outs in a short time.</p>
+          <form id="my-email-form">
+            <div class="field">
+              <label>Email address</label>
+              <input type="email" id="my-email-input" placeholder="you@example.com" />
+            </div>
+            <button type="submit" class="btn full">Save email</button>
+            <div class="error-msg" id="my-email-error"></div>
+            <div class="muted" id="my-email-success" style="font-size:12px; margin-top:6px;"></div>
+          </form>
+        </div>
         <div class="panel hidden" id="add-employee-panel">
           <h2 class="section-title" style="margin-top:0;">Add an employee</h2>
           <p class="forgot-intro">Only an owner-level account can add employees or view the audit log — that's what
@@ -113,6 +128,10 @@
             <div class="field">
               <label>Temporary password</label>
               <input type="password" id="new-employee-password" required />
+            </div>
+            <div class="field">
+              <label>Email (optional)</label>
+              <input type="email" id="new-employee-email" placeholder="you@example.com" />
             </div>
             <div class="checkbox-field">
               <input type="checkbox" id="new-employee-is-owner" />

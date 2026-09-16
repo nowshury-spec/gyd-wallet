@@ -54,15 +54,15 @@
     try {
       const data = await api('/api/staff/login', 'POST', { username, password });
       // Username + password alone isn't enough to get in — a one-time code
-      // is required next (see /api/staff/login/verify-code). The code is
-      // shown right here for now since this prototype has no real
-      // email/SMS sending set up yet (same as the customer forgot-password
-      // flow) — see the comment on staff_login_codes in schema.sql for why
-      // that means this is a real second STEP today, on its way to being a
-      // real second FACTOR once real delivery exists.
+      // is required next (see /api/staff/login/verify-code). With an email
+      // on file (see the "My email" field on the dashboard) and real
+      // delivery configured, data.sent means the code actually went there
+      // instead of showing up right here — a genuine second factor rather
+      // than just a second step.
       pendingUsername = username;
-      document.getElementById('staff-code-display').innerHTML =
-        `Since this doesn't send real emails/SMS yet, here's your simulated verification code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+      document.getElementById('staff-code-display').innerHTML = data.sent
+        ? `We've emailed your verification code. It expires in ${data.expiresInMinutes} minutes.`
+        : `Since this doesn't send real emails/SMS yet, here's your simulated verification code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
       document.getElementById('staff-code-input').value = '';
       document.getElementById('staff-code-error').textContent = '';
       loginForm.classList.add('hidden');
@@ -128,11 +128,32 @@
     // regular employee never sees controls that would just 403 anyway.
     document.getElementById('add-employee-panel').classList.toggle('hidden', !isOwner);
     document.getElementById('tab-audit-log').classList.toggle('hidden', !isOwner);
+    document.getElementById('my-email-input').value = state.staff.email || '';
+    document.getElementById('my-email-success').textContent = '';
     loginScreen.classList.add('hidden');
     dashboardScreen.classList.remove('hidden');
     loadSummary();
     loadTickets();
   }
+
+  // Lets any staff member (not just owners) add their own email so their
+  // 2FA code — and, for owners, fraud alerts — can actually be delivered
+  // instead of only ever shown on this screen.
+  document.getElementById('my-email-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('my-email-input').value.trim();
+    const errBox = document.getElementById('my-email-error');
+    const successBox = document.getElementById('my-email-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    try {
+      const data = await api('/api/staff/me/email', 'POST', { email });
+      state.staff = data.staff;
+      successBox.textContent = email ? 'Saved.' : 'Email removed.';
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
 
   async function tryResumeSession() {
     if (!state.token) return;
@@ -204,6 +225,14 @@
       return;
     }
     tickets.forEach((t) => {
+      // Tickets created by the "Report" button on a business review (see
+      // reportReview in app.js) embed a machine-readable "Review ID: <uuid>"
+      // line so this dashboard can offer a one-click removal — without that,
+      // staff would have to go find the review on the business's page
+      // themselves. Any ticket without that line is an ordinary support
+      // request and gets no such button.
+      const reviewIdMatch = t.message.match(/Review ID:\s*([0-9a-f-]{10,})/i);
+      const reviewId = reviewIdMatch ? reviewIdMatch[1] : null;
       const card = document.createElement('div');
       card.className = 'staff-item';
       card.innerHTML = `
@@ -213,6 +242,11 @@
         </div>
         <div class="staff-item-meta">${t.name || 'Unknown'} · ${t.email || 'no email'} · ${timeAgo(t.createdAt)}</div>
         <div class="staff-item-body">${t.message}</div>
+        ${
+          reviewId
+            ? `<div class="staff-actions"><button class="btn small secondary remove-review-btn">Remove this review</button></div>`
+            : ''
+        }
         ${
           t.staffReply
             ? `<div class="staff-reply-box"><div class="muted" style="font-size:11px; font-weight:700; margin-bottom:4px;">REPLIED BY ${(t.repliedBy || '').toUpperCase()}</div>${t.staffReply}</div>`
@@ -231,6 +265,9 @@
             : ''
         }
       `;
+      if (reviewId) {
+        card.querySelector('.remove-review-btn').onclick = () => removeReportedReview(reviewId, card);
+      }
       if (t.status === 'open') {
         const textarea = card.querySelector('.ticket-reply-input');
         card.querySelector('.ticket-reply-btn').onclick = () => sendTicketReply(t.id, textarea.value, false);
@@ -239,6 +276,23 @@
       }
       box.appendChild(card);
     });
+  }
+
+  // Deliberately separate from resolving the ticket — removing a review is
+  // a bigger, harder-to-undo action, so it doesn't happen automatically
+  // just because a reply was sent. See DELETE /api/staff/reviews/:id.
+  async function removeReportedReview(reviewId, card) {
+    if (!confirm('Permanently remove this review from the business page? This cannot be undone.')) return;
+    try {
+      await api(`/api/staff/reviews/${reviewId}`, 'DELETE');
+      const btn = card.querySelector('.remove-review-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Review removed';
+      }
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   async function sendTicketReply(id, reply, resolve) {
@@ -350,11 +404,12 @@
     e.preventDefault();
     const username = document.getElementById('new-employee-username').value.trim();
     const password = document.getElementById('new-employee-password').value;
+    const email = document.getElementById('new-employee-email').value.trim();
     const role = document.getElementById('new-employee-is-owner').checked ? 'owner' : 'employee';
     const errBox = document.getElementById('add-employee-error');
     errBox.textContent = '';
     try {
-      await api('/api/staff/accounts', 'POST', { username, password, role });
+      await api('/api/staff/accounts', 'POST', { username, password, email, role });
       document.getElementById('add-employee-form').reset();
       loadEmployees();
     } catch (err) {
@@ -385,7 +440,7 @@
       const row = document.createElement('div');
       row.className = 'staff-employee-row';
       row.innerHTML = `
-        <span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}</span>
+        <span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}${a.email ? ` <span class="muted" style="font-size:11px;">${a.email}</span>` : ''}</span>
         <span class="muted">added ${timeAgo(a.createdAt)}</span>
         ${isOwner ? '<button class="btn small secondary revoke-sessions-btn" title="Signs this account out of every device it\'s logged into">Sign out everywhere</button>' : ''}
       `;
