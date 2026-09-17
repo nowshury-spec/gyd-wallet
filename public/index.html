@@ -12,107 +12,112 @@
 <body>
 
 <div id="auth-screen">
+  <div class="lang-switcher lang-switcher-auth">
+    <button type="button" class="lang-btn" data-lang="en">EN</button>
+    <button type="button" class="lang-btn" data-lang="es">ES</button>
+    <button type="button" class="lang-btn" data-lang="pt">PT</button>
+  </div>
   <div class="auth-wrapper">
     <div class="auth-hero">
       <div class="auth-hero-inner">
         <div class="hero-mark">🪙</div>
         <h1 class="hero-title">GYD Wallet</h1>
-        <p class="hero-sub">Load up, send money, play for coins, and cash out. All in one place.</p>
+        <p class="hero-sub" data-i18n="t236">Load up, send money, play for coins, and cash out. All in one place.</p>
         <ul class="hero-features">
-          <li><span class="hero-icon">🏢</span><div><strong>Business &amp; jobs</strong><span>Set up a public business page people can search and pay, or post and browse job listings — all built right in.</span></div></li>
-          <li><span class="hero-icon">➤</span><div><strong>Send &amp; request in a tap</strong><span>Pay or request money with a $Paytag, or send to anyone with a private reference code through GYD Direct — our own agent-free transfer network.</span></div></li>
-          <li><span class="hero-icon">🎮</span><div><strong>Play for free</strong><span>Flip coins and spin the slots, no purchase or wager needed — just for fun.</span></div></li>
+          <li><span class="hero-icon">🏢</span><div><strong data-i18n="t130">Business &amp; jobs</strong><span data-i18n="t273">Set up a public business page people can search and pay, or post and browse job listings — all built right in.</span></div></li>
+          <li><span class="hero-icon">➤</span><div><strong data-i18n="t131">Send &amp; request in a tap</strong><span data-i18n="t274">Pay or request money with a $Paytag, or send to anyone with a private reference code through GYD Direct — our own agent-free transfer network.</span></div></li>
+          <li><span class="hero-icon">🎮</span><div><strong data-i18n="t132">Play for free</strong><span data-i18n="t275">Flip coins and spin the slots, no purchase or wager needed — just for fun.</span></div></li>
         </ul>
-        <p class="hero-note">Phase 1 prototype — no real money is moved yet.</p>
+        <p class="hero-note" data-i18n="t237">Phase 1 prototype — no real money is moved yet.</p>
       </div>
     </div>
 
     <div class="auth-card">
     <div class="auth-tabs">
-      <button id="tab-login" class="active">Log in</button>
-      <button id="tab-register">Sign up</button>
+      <button id="tab-login" class="active" data-i18n="t147">Log in</button>
+      <button id="tab-register" data-i18n="t148">Sign up</button>
     </div>
 
     <form id="login-form">
       <div class="field">
-        <label>Username</label>
+        <label data-i18n="t51">Username</label>
         <input type="text" id="login-username" autocomplete="username" required />
       </div>
       <div class="field">
-        <label>Password</label>
+        <label data-i18n="t52">Password</label>
         <input type="password" id="login-password" autocomplete="current-password" required />
       </div>
-      <button type="submit" class="btn full">Log in</button>
-      <button type="button" class="link-btn" id="forgot-password-link">Forgot your password?</button>
-      <button type="button" class="link-btn" id="forgot-username-link">Forgot your username?</button>
+      <button type="submit" class="btn full" data-i18n="t149">Log in</button>
+      <button type="button" class="link-btn" id="forgot-password-link" data-i18n="t150">Forgot your password?</button>
+      <button type="button" class="link-btn" id="forgot-username-link" data-i18n="t151">Forgot your username?</button>
       <div class="error-msg" id="login-error"></div>
     </form>
 
     <form id="register-form" class="hidden">
       <div class="field">
-        <label>Username</label>
+        <label data-i18n="t53">Username</label>
         <input type="text" id="register-username" autocomplete="username" required />
       </div>
       <div class="field">
-        <label>Email</label>
+        <label data-i18n="t54">Email</label>
         <input type="email" id="register-email" autocomplete="email" required />
       </div>
       <div class="field">
-        <label>Password</label>
+        <label data-i18n="t55">Password</label>
         <input type="password" id="register-password" autocomplete="new-password" required />
       </div>
       <div class="checkbox-field">
         <input type="checkbox" id="register-is-business" />
-        <label for="register-is-business" style="margin:0;">This is a business account</label>
+        <label for="register-is-business" style="margin:0;" data-i18n="t56">This is a business account</label>
       </div>
       <div class="field hidden" id="business-name-field">
-        <label>Business name</label>
+        <label data-i18n="t57">Business name</label>
         <input type="text" id="register-business-name" />
       </div>
-      <button type="submit" class="btn full">Create account</button>
+      <button type="submit" class="btn full" data-i18n="t152">Create account</button>
       <div class="error-msg" id="register-error"></div>
     </form>
 
     <form id="forgot-form" class="hidden">
-      <p class="forgot-intro">Enter the email on your account and we'll show you a reset code.</p>
+      <p class="forgot-intro" data-i18n="t238">Enter the email on your account and we'll show you a reset code.</p>
       <div class="field">
-        <label>Email</label>
+        <label data-i18n="t58">Email</label>
         <input type="email" id="forgot-email" autocomplete="email" required />
       </div>
-      <button type="submit" class="btn full">Send reset code</button>
-      <button type="button" class="link-btn" id="forgot-back-link">Back to log in</button>
+      <button type="submit" class="btn full" data-i18n="t153">Send reset code</button>
+      <button type="button" class="link-btn" id="forgot-back-link" data-i18n="t154">Back to log in</button>
       <div class="error-msg" id="forgot-error"></div>
     </form>
 
     <form id="reset-form" class="hidden">
       <div class="reset-code-display" id="reset-code-display"></div>
       <div class="field">
-        <label>Reset code</label>
+        <label data-i18n="t59">Reset code</label>
         <input type="text" id="reset-code" inputmode="numeric" maxlength="6" required />
       </div>
       <div class="field">
-        <label>New password</label>
+        <label data-i18n="t60">New password</label>
         <input type="password" id="reset-new-password" autocomplete="new-password" required />
       </div>
-      <button type="submit" class="btn full">Reset password</button>
-      <button type="button" class="link-btn" id="reset-back-link">Back to log in</button>
+      <button type="submit" class="btn full" data-i18n="t155">Reset password</button>
+      <button type="button" class="link-btn" id="reset-back-link" data-i18n="t156">Back to log in</button>
       <div class="error-msg" id="reset-error"></div>
     </form>
 
     <form id="forgot-username-form" class="hidden">
-      <p class="forgot-intro">Enter the email on your account and we'll show you your username.</p>
+      <p class="forgot-intro" data-i18n="t239">Enter the email on your account and we'll show you your username.</p>
       <div class="field">
-        <label>Email</label>
+        <label data-i18n="t61">Email</label>
         <input type="email" id="forgot-username-email" autocomplete="email" required />
       </div>
-      <button type="submit" class="btn full">Find my username</button>
-      <button type="button" class="link-btn" id="forgot-username-back-link">Back to log in</button>
+      <button type="submit" class="btn full" data-i18n="t157">Find my username</button>
+      <button type="button" class="link-btn" id="forgot-username-back-link" data-i18n="t158">Back to log in</button>
       <div class="error-msg" id="forgot-username-error"></div>
     </form>
 
     <div id="username-result-panel" class="hidden">
       <div class="reset-code-display" id="username-result-display"></div>
-      <button type="button" class="btn full" id="username-result-login-btn">Back to log in</button>
+      <button type="button" class="btn full" id="username-result-login-btn" data-i18n="t159">Back to log in</button>
     </div>
     </div>
   </div>
@@ -130,44 +135,44 @@
         </div>
       </div>
       <div class="header-actions">
-        <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay">▦</button>
-        <button class="icon-btn" id="header-support-btn" title="Help &amp; Support">🛟</button>
-        <button class="icon-btn" id="logout-btn" title="Log out">⏻</button>
+        <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay" data-i18n-title="t317" data-i18n="t160">▦</button>
+        <button class="icon-btn" id="header-support-btn" title="Help &amp; Support" data-i18n-title="t318" data-i18n="t161">🛟</button>
+        <button class="icon-btn" id="logout-btn" title="Log out" data-i18n-title="t319" data-i18n="t162">⏻</button>
       </div>
     </header>
 
     <main class="app-main">
       <div class="banner">
         <span class="banner-icon">ℹ</span>
-        <span>Phase 1 demo: deposits are simulated (no real payment processor is connected) and cash-out only records a
+        <span data-i18n="t276">Phase 1 demo: deposits are simulated (no real payment processor is connected) and cash-out only records a
         request rather than paying out. Real money movement needs the licensing steps in the business plan first.</span>
       </div>
 
       <div class="hero-balance">
         <div class="hero-balance-top">
-          <span class="hero-balance-label">Available balance</span>
+          <span class="hero-balance-label" data-i18n="t281">Available balance</span>
           <button type="button" class="balance-visibility-btn" id="balance-visibility-btn" aria-label="Hide balance" title="Hide balance">👁</button>
         </div>
         <div class="hero-balance-value"><span id="balance-gyd">0.00</span><span class="hero-balance-unit">GYD</span></div>
       </div>
       <div class="hero-quick-actions">
         <button class="quick-action" data-focus="deposit-amount">
-          <span class="quick-action-icon qa-green">＋</span>Add
+          <span class="quick-action-icon qa-green">＋</span><span data-i18n="t326">Add</span>
         </button>
         <button class="quick-action" data-focus="cashout-amount">
-          <span class="quick-action-icon qa-blue">⇩</span>Cash Out
+          <span class="quick-action-icon qa-blue">⇩</span><span data-i18n="t327">Cash Out</span>
         </button>
         <button class="quick-action" data-tab-jump="games">
-          <span class="quick-action-icon qa-pink">🎮</span>Play
+          <span class="quick-action-icon qa-pink">🎮</span><span data-i18n="t328">Play</span>
         </button>
         <button class="quick-action" data-tab-jump="send">
-          <span class="quick-action-icon qa-orange">➤</span>Send
+          <span class="quick-action-icon qa-orange">➤</span><span data-i18n="t329">Send</span>
         </button>
       </div>
 
       <!-- WALLET TAB -->
       <section id="panel-wallet" class="tab-panel">
-        <h2 class="section-title">Your account</h2>
+        <h2 class="section-title" data-i18n="t1">Your account</h2>
         <div class="account-card">
           <div class="account-card-top">
             <span class="account-card-chip"></span>
@@ -175,57 +180,57 @@
           <div class="account-card-tag" id="account-card-paytag">$—</div>
           <div class="account-card-bottom">
             <div>
-              <span class="account-card-label">Holder</span>
+              <span class="account-card-label" data-i18n="t282">Holder</span>
               <span class="account-card-value" id="account-card-holder">—</span>
             </div>
             <span class="account-card-mark">GYD Wallet</span>
           </div>
         </div>
 
-        <h2 class="section-title" style="margin-top:22px;">Your $Paytag</h2>
+        <h2 class="section-title" style="margin-top:22px;" data-i18n="t2">Your $Paytag</h2>
         <div class="panel">
-          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Your $Paytag is your unique payment handle. Share it so people can pay or request money from you without needing your username.</p>
+          <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t240">Your $Paytag is your unique payment handle. Share it so people can pay or request money from you without needing your username.</p>
           <div class="panel-row">
             <div class="field">
-              <label>$Paytag</label>
-              <input type="text" id="paytag-input" placeholder="yourname" maxlength="20" />
+              <label data-i18n="t62">$Paytag</label>
+              <input type="text" id="paytag-input" placeholder="yourname" data-i18n-ph="t284" maxlength="20" />
             </div>
-            <button class="btn secondary" id="paytag-save-btn">Save</button>
+            <button class="btn secondary" id="paytag-save-btn" data-i18n="t164">Save</button>
           </div>
           <div class="error-msg" id="paytag-error"></div>
         </div>
 
-        <h2 class="section-title">Deposit real money (simulated)</h2>
+        <h2 class="section-title" data-i18n="t3">Deposit real money (simulated)</h2>
         <div class="panel">
           <div class="panel-row">
             <div class="field">
-              <label>Amount (GYD)</label>
+              <label data-i18n="t63">Amount (GYD)</label>
               <input type="number" id="deposit-amount" min="1" step="0.01" placeholder="5000.00" />
             </div>
-            <button class="btn" id="deposit-btn">Deposit</button>
+            <button class="btn" id="deposit-btn" data-i18n="t165">Deposit</button>
           </div>
           <div class="error-msg" id="deposit-error"></div>
         </div>
 
-        <h2 class="section-title">Cash out GYD</h2>
+        <h2 class="section-title" data-i18n="t4">Cash out GYD</h2>
         <div class="panel">
           <div class="panel-row">
             <div class="field">
-              <label>Amount to cash out</label>
+              <label data-i18n="t64">Amount to cash out</label>
               <input type="number" id="cashout-amount" min="0.01" step="0.01" placeholder="2000" />
             </div>
-            <button class="btn secondary" id="cashout-btn">Request cash-out</button>
+            <button class="btn secondary" id="cashout-btn" data-i18n="t166">Request cash-out</button>
           </div>
-          <p class="muted" style="font-size:12.5px; margin:10px 0 0;">
+          <p class="muted" style="font-size:12.5px; margin:10px 0 0;" data-i18n="t241">
             This deducts the GYD and files a pending request — it does not send real money in this prototype.
           </p>
           <div class="error-msg" id="cashout-error"></div>
         </div>
 
-        <h2 class="section-title">Recent activity</h2>
+        <h2 class="section-title" data-i18n="t5">Recent activity</h2>
         <div class="panel">
           <div class="table-scroll"><table>
-            <thead><tr><th>Type</th><th>Amount</th><th>Currency</th><th>Status</th><th>When</th></tr></thead>
+            <thead><tr><th data-i18n="t213">Type</th><th data-i18n="t214">Amount</th><th data-i18n="t215">Currency</th><th data-i18n="t216">Status</th><th data-i18n="t217">When</th></tr></thead>
             <tbody id="transactions-body"></tbody>
           </table></div>
         </div>
@@ -233,7 +238,7 @@
 
       <!-- SEND TAB -->
       <section id="panel-send" class="tab-panel hidden">
-        <h2 class="section-title">Pay or request</h2>
+        <h2 class="section-title" data-i18n="t6">Pay or request</h2>
         <div class="panel pay-panel">
           <div class="pay-amount-display" id="pay-amount-display">$0.00</div>
           <div class="pay-keypad">
@@ -248,45 +253,45 @@
             <button type="button" class="pay-key" data-key="9">9</button>
             <span class="pay-key pay-key-blank" aria-hidden="true"></span>
             <button type="button" class="pay-key" data-key="0">0</button>
-            <button type="button" class="pay-key pay-key-back" data-key="back" aria-label="Delete digit">⌫</button>
+            <button type="button" class="pay-key pay-key-back" data-key="back" aria-label="Delete digit" data-i18n-aria="t322">⌫</button>
           </div>
           <div class="field">
-            <label>To</label>
-            <input type="text" id="pay-to" placeholder="$friend or friend_username" autocomplete="off" />
+            <label data-i18n="t65">To</label>
+            <input type="text" id="pay-to" placeholder="$friend or friend_username" data-i18n-ph="t285" autocomplete="off" />
           </div>
           <div class="field">
-            <label>For (optional)</label>
-            <input type="text" id="pay-note" placeholder="What's this for?" />
+            <label data-i18n="t66">For (optional)</label>
+            <input type="text" id="pay-note" placeholder="What's this for?" data-i18n-ph="t286" />
           </div>
           <div class="pay-actions">
-            <button class="btn secondary" id="pay-request-btn" disabled>Request</button>
-            <button class="btn btn-play" id="pay-pay-btn" disabled>Pay</button>
+            <button class="btn secondary" id="pay-request-btn" disabled data-i18n="t167">Request</button>
+            <button class="btn btn-play" id="pay-pay-btn" disabled data-i18n="t168">Pay</button>
           </div>
           <div class="error-msg" id="pay-error"></div>
-          <p class="muted" style="font-size:12.5px; margin:10px 0 0;">Instant, no fee — for friends who already have an account here. Tap the keypad to enter an amount.</p>
+          <p class="muted" style="font-size:12.5px; margin:10px 0 0;" data-i18n="t242">Instant, no fee — for friends who already have an account here. Tap the keypad to enter an amount.</p>
         </div>
 
-        <h2 class="section-title">Requests waiting on you</h2>
-        <div class="panel" id="requests-incoming-list"><p class="muted">No requests right now.</p></div>
+        <h2 class="section-title" data-i18n="t7">Requests waiting on you</h2>
+        <div class="panel" id="requests-incoming-list"><p class="muted" data-i18n="t243">No requests right now.</p></div>
 
-        <h2 class="section-title">Requests you've sent</h2>
-        <div class="panel" id="requests-outgoing-list"><p class="muted">No requests sent yet.</p></div>
+        <h2 class="section-title" data-i18n="t8">Requests you've sent</h2>
+        <div class="panel" id="requests-outgoing-list"><p class="muted" data-i18n="t244">No requests sent yet.</p></div>
 
         <div class="panel arcade-panel arcade-panel-remit">
           <div class="arcade-header">
-            <h2 class="section-title" style="margin:0;">GYD Direct</h2>
-            <span class="arcade-tag arcade-tag-remit">No agents. No lines.</span>
+            <h2 class="section-title" style="margin:0;" data-i18n="t9">GYD Direct</h2>
+            <span class="arcade-tag arcade-tag-remit" data-i18n="t126">No agents. No lines.</span>
           </div>
-          <p class="remit-blurb">Send money to anyone by name and phone number — no account needed on their end. You get a private reference code to share with them; they use it to claim the money, in seconds.</p>
-          <button class="btn btn-play btn-remit" id="remit-open-btn">Send with GYD Direct</button>
+          <p class="remit-blurb" data-i18n="t245">Send money to anyone by name and phone number — no account needed on their end. You get a private reference code to share with them; they use it to claim the money, in seconds.</p>
+          <button class="btn btn-play btn-remit" id="remit-open-btn" data-i18n="t169">Send with GYD Direct</button>
         </div>
 
-        <h2 class="section-title">Other users</h2>
+        <h2 class="section-title" data-i18n="t10">Other users</h2>
         <div class="panel">
-          <input type="text" id="user-search" placeholder="Search usernames or $paytags…" />
-          <p class="muted" style="font-size:11.5px; margin:10px 0 0;">Tap a row to fill in "To" above.</p>
+          <input type="text" id="user-search" placeholder="Search usernames or $paytags…" data-i18n-ph="t287" />
+          <p class="muted" style="font-size:11.5px; margin:10px 0 0;" data-i18n="t246">Tap a row to fill in "To" above.</p>
           <div class="table-scroll"><table>
-            <thead><tr><th>$Paytag</th><th>Username</th><th>Type</th></tr></thead>
+            <thead><tr><th data-i18n="t218">$Paytag</th><th data-i18n="t219">Username</th><th data-i18n="t220">Type</th></tr></thead>
             <tbody id="users-body"></tbody>
           </table></div>
         </div>
@@ -295,114 +300,114 @@
       <!-- GYD DIRECT TAB (our own send-to-anyone transfer feature, reached from the Send tab) -->
       <section id="panel-remit" class="tab-panel hidden">
         <div class="remit-back-row">
-          <button class="btn secondary small" id="remit-back-btn">← Send</button>
-          <h2 class="section-title" style="margin:0;">GYD Direct</h2>
+          <button class="btn secondary small" id="remit-back-btn" data-i18n="t170">← Send</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t11">GYD Direct</h2>
         </div>
 
         <div id="remit-main-view">
           <div class="panel">
-            <h2 class="section-title">Send to someone new</h2>
+            <h2 class="section-title" data-i18n="t12">Send to someone new</h2>
             <div class="panel-row">
               <div class="field">
-                <label>Recipient full name</label>
-                <input type="text" id="remit-name" placeholder="As shown on their ID" />
+                <label data-i18n="t67">Recipient full name</label>
+                <input type="text" id="remit-name" placeholder="As shown on their ID" data-i18n-ph="t288" />
               </div>
               <div class="field">
-                <label>Recipient phone number</label>
+                <label data-i18n="t68">Recipient phone number</label>
                 <input type="text" id="remit-phone" placeholder="+592 600 0000" />
               </div>
             </div>
             <div class="panel-row">
               <div class="field">
-                <label>Amount to send (GYD)</label>
+                <label data-i18n="t69">Amount to send (GYD)</label>
                 <input type="number" id="remit-amount" min="0.01" step="0.01" placeholder="10000" />
               </div>
             </div>
             <p class="muted" id="remit-fee-preview" style="font-size:12.5px; margin:2px 0 14px;"></p>
-            <button class="btn btn-play btn-remit" id="remit-send-btn">Send with GYD Direct</button>
+            <button class="btn btn-play btn-remit" id="remit-send-btn" data-i18n="t171">Send with GYD Direct</button>
             <div class="error-msg" id="remit-send-error"></div>
           </div>
 
           <div class="panel" id="remit-receipt-panel" hidden>
-            <h2 class="section-title" style="margin-top:0;">Transfer sent</h2>
-            <p class="muted" style="font-size:12.5px;">Share this reference code with the recipient — they'll enter it (along with their name, exactly as you typed it) under "Receive money" to pick it up.</p>
+            <h2 class="section-title" style="margin-top:0;" data-i18n="t13">Transfer sent</h2>
+            <p class="muted" style="font-size:12.5px;" data-i18n="t247">Share this reference code with the recipient — they'll enter it (along with their name, exactly as you typed it) under "Receive money" to pick it up.</p>
             <div class="remit-reference-code" id="remit-receipt-code"></div>
             <div class="muted" id="remit-receipt-detail" style="font-size:12.5px; text-align:center;"></div>
-            <button class="btn secondary full" id="remit-receipt-done-btn" style="margin-top:14px;">Done</button>
+            <button class="btn secondary full" id="remit-receipt-done-btn" style="margin-top:14px;" data-i18n="t172">Done</button>
           </div>
 
           <div class="panel">
-            <h2 class="section-title" style="margin-top:0;">Receive money</h2>
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Got a reference code from someone? Enter it here, with your name exactly as they typed it, to collect the money into your balance.</p>
+            <h2 class="section-title" style="margin-top:0;" data-i18n="t14">Receive money</h2>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t248">Got a reference code from someone? Enter it here, with your name exactly as they typed it, to collect the money into your balance.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Reference code</label>
+                <label data-i18n="t70">Reference code</label>
                 <input type="text" id="remit-claim-code" placeholder="48210936" />
               </div>
               <div class="field">
-                <label>Your name (as the sender typed it)</label>
-                <input type="text" id="remit-claim-name" placeholder="Full name" />
+                <label data-i18n="t71">Your name (as the sender typed it)</label>
+                <input type="text" id="remit-claim-name" placeholder="Full name" data-i18n-ph="t289" />
               </div>
-              <button class="btn" id="remit-claim-btn">Receive money</button>
+              <button class="btn" id="remit-claim-btn" data-i18n="t173">Receive money</button>
             </div>
             <div class="error-msg" id="remit-claim-error"></div>
             <div id="remit-claim-success"></div>
           </div>
 
-          <h2 class="section-title">Transfers you've sent</h2>
-          <div class="panel" id="remit-sent-list"><p class="muted">No transfers sent yet.</p></div>
+          <h2 class="section-title" data-i18n="t15">Transfers you've sent</h2>
+          <div class="panel" id="remit-sent-list"><p class="muted" data-i18n="t249">No transfers sent yet.</p></div>
         </div>
       </section>
 
       <!-- SCAN & PAY TAB -->
       <section id="panel-qr" class="tab-panel hidden">
-        <h2 class="section-title">Your code</h2>
+        <h2 class="section-title" data-i18n="t16">Your code</h2>
         <div class="panel">
-          <p class="muted" style="font-size:12.5px; margin:0 0 16px;">
+          <p class="muted" style="font-size:12.5px; margin:0 0 16px;" data-i18n="t250">
             Show this to someone so they can scan it and send you money. Leave the amount blank to let them choose how much to send —
             or set a fixed amount to use it as a charge/checkout code.
           </p>
           <div class="panel-row" style="margin-bottom:16px;">
             <div class="field">
-              <label>Fixed amount (optional)</label>
-              <input type="number" id="qr-fixed-amount" min="0.01" step="0.01" placeholder="Any amount" />
+              <label data-i18n="t72">Fixed amount (optional)</label>
+              <input type="number" id="qr-fixed-amount" min="0.01" step="0.01" placeholder="Any amount" data-i18n-ph="t290" />
             </div>
             <div class="field">
-              <label>Memo (optional)</label>
-              <input type="text" id="qr-memo" placeholder="What's this for?" />
+              <label data-i18n="t73">Memo (optional)</label>
+              <input type="text" id="qr-memo" placeholder="What's this for?" data-i18n-ph="t291" />
             </div>
           </div>
           <div class="qr-display">
             <div class="qr-code-card">
-              <img id="qr-image" alt="Your payment QR code" width="220" height="220" />
+              <img id="qr-image" alt="Your payment QR code" data-i18n-alt="t323" width="220" height="220" />
             </div>
             <div class="qr-code-text">
-              <div class="muted" style="font-size:11.5px; margin-bottom:6px;">Can't scan? Share this code instead:</div>
+              <div class="muted" style="font-size:11.5px; margin-bottom:6px;" data-i18n="t272">Can't scan? Share this code instead:</div>
               <code id="qr-payload-text"></code>
-              <button class="btn secondary small" id="qr-copy-btn" style="margin-top:10px;">Copy code</button>
+              <button class="btn secondary small" id="qr-copy-btn" style="margin-top:10px;" data-i18n="t174">Copy code</button>
             </div>
           </div>
         </div>
 
-        <h2 class="section-title">Scan a code</h2>
+        <h2 class="section-title" data-i18n="t17">Scan a code</h2>
         <div class="panel">
           <div id="qr-scan-idle">
-            <button class="btn" id="qr-start-scan-btn">📷 Start camera</button>
-            <label class="btn secondary" for="qr-upload-input" style="margin-left:8px;">Upload QR image</label>
+            <button class="btn" id="qr-start-scan-btn" data-i18n="t175">📷 Start camera</button>
+            <label class="btn secondary" for="qr-upload-input" style="margin-left:8px;" data-i18n="t74">Upload QR image</label>
             <input type="file" id="qr-upload-input" accept="image/*" class="hidden" />
             <p class="muted" id="qr-support-note" style="font-size:12px; margin-top:12px;"></p>
           </div>
 
           <div id="qr-scan-active" class="hidden">
             <video id="qr-video" autoplay playsinline muted></video>
-            <button class="btn secondary small" id="qr-stop-scan-btn" style="margin-top:10px;">Cancel</button>
+            <button class="btn secondary small" id="qr-stop-scan-btn" style="margin-top:10px;" data-i18n="t176">Cancel</button>
           </div>
 
           <div class="qr-manual">
-            <label>Or paste a code / type a username</label>
+            <label data-i18n="t75">Or paste a code / type a username</label>
             <div class="panel-row">
-              <input type="text" id="qr-manual-input" placeholder="gydpay:pay?to=$paytag" style="flex:2;" />
-              <button class="btn secondary" id="qr-manual-btn">Use this</button>
+              <input type="text" id="qr-manual-input" placeholder="gydpay:pay?to=$paytag" data-i18n-ph="t292" style="flex:2;" />
+              <button class="btn secondary" id="qr-manual-btn" data-i18n="t177">Use this</button>
             </div>
           </div>
 
@@ -410,24 +415,24 @@
         </div>
 
         <div id="qr-pay-confirm" class="panel hidden">
-          <h2 class="section-title" style="margin-bottom:6px;">Confirm payment</h2>
+          <h2 class="section-title" style="margin-bottom:6px;" data-i18n="t18">Confirm payment</h2>
           <p style="margin:0 0 16px;">
             Paying <strong id="qr-confirm-username">—</strong>
             <span class="pill completed" id="qr-confirm-type"></span>
           </p>
           <div class="panel-row">
             <div class="field">
-              <label>Amount (GYD)</label>
+              <label data-i18n="t76">Amount (GYD)</label>
               <input type="number" id="qr-confirm-amount" min="0.01" step="0.01" />
             </div>
             <div class="field">
-              <label>Memo</label>
+              <label data-i18n="t77">Memo</label>
               <input type="text" id="qr-confirm-memo" />
             </div>
           </div>
           <div style="display:flex; gap:10px; margin-top:16px;">
-            <button class="btn" id="qr-confirm-send-btn">Send payment</button>
-            <button class="btn secondary" id="qr-confirm-cancel-btn">Cancel</button>
+            <button class="btn" id="qr-confirm-send-btn" data-i18n="t178">Send payment</button>
+            <button class="btn secondary" id="qr-confirm-cancel-btn" data-i18n="t179">Cancel</button>
           </div>
           <div class="error-msg" id="qr-confirm-error"></div>
         </div>
@@ -437,8 +442,8 @@
       <section id="panel-games" class="tab-panel hidden">
         <div class="panel arcade-panel">
           <div class="arcade-header">
-            <h2 class="section-title" style="margin:0;">Coin Flip</h2>
-            <span class="arcade-tag">Free to play</span>
+            <h2 class="section-title" style="margin:0;" data-i18n="t19">Coin Flip</h2>
+            <span class="arcade-tag" data-i18n="t127">Free to play</span>
           </div>
           <div class="coin-stage">
             <div class="flip-coin" id="flip-coin">
@@ -448,28 +453,28 @@
             <div class="coin-shadow" id="coin-shadow"></div>
           </div>
           <div class="game-choices">
-            <button class="game-choice" data-choice="heads">Heads</button>
-            <button class="game-choice" data-choice="tails">Tails</button>
+            <button class="game-choice" data-choice="heads" data-i18n="t180">Heads</button>
+            <button class="game-choice" data-choice="tails" data-i18n="t181">Tails</button>
           </div>
           <div style="text-align:center;">
-            <button class="btn btn-play" id="play-btn">Flip!</button>
+            <button class="btn btn-play" id="play-btn" data-i18n="t182">Flip!</button>
           </div>
           <div class="error-msg" id="game-error"></div>
           <div id="game-result-box"></div>
         </div>
 
-        <h2 class="section-title">Coin flip history</h2>
+        <h2 class="section-title" data-i18n="t20">Coin flip history</h2>
         <div class="panel">
           <div class="table-scroll"><table>
-            <thead><tr><th>Choice</th><th>Result</th><th>Outcome</th><th>When</th></tr></thead>
+            <thead><tr><th data-i18n="t221">Choice</th><th data-i18n="t222">Result</th><th data-i18n="t223">Outcome</th><th data-i18n="t224">When</th></tr></thead>
             <tbody id="rounds-body"></tbody>
           </table></div>
         </div>
 
         <div class="panel arcade-panel arcade-panel-slots">
           <div class="arcade-header">
-            <h2 class="section-title" style="margin:0;">Slot Machine</h2>
-            <span class="arcade-tag arcade-tag-gold">Free to play</span>
+            <h2 class="section-title" style="margin:0;" data-i18n="t21">Slot Machine</h2>
+            <span class="arcade-tag arcade-tag-gold" data-i18n="t128">Free to play</span>
           </div>
           <div class="slot-machine">
             <div class="slot-reel" id="slot-reel-0"><div class="slot-strip" id="slot-strip-0"><span class="slot-cell"><span class="slot-symbol">🍒</span></span></div></div>
@@ -477,33 +482,33 @@
             <div class="slot-reel" id="slot-reel-2"><div class="slot-strip" id="slot-strip-2"><span class="slot-cell"><span class="slot-symbol">🔔</span></span></div></div>
           </div>
           <div class="slot-paytable">
-            <span>🍒🍒🍒 Nice!</span>
-            <span>🍋🍋🍋 Great!</span>
-            <span>🔔🔔🔔 Awesome!</span>
-            <span>💎💎💎 JACKPOT!</span>
+            <span data-i18n="t277">🍒🍒🍒 Nice!</span>
+            <span data-i18n="t278">🍋🍋🍋 Great!</span>
+            <span data-i18n="t279">🔔🔔🔔 Awesome!</span>
+            <span data-i18n="t280">💎💎💎 JACKPOT!</span>
           </div>
           <div style="text-align:center;">
-            <button class="btn btn-play btn-slots" id="slot-play-btn">Spin!</button>
+            <button class="btn btn-play btn-slots" id="slot-play-btn" data-i18n="t183">Spin!</button>
           </div>
           <div class="error-msg" id="slot-error"></div>
           <div id="slot-result-box"></div>
         </div>
 
-        <h2 class="section-title">Slot machine history</h2>
+        <h2 class="section-title" data-i18n="t22">Slot machine history</h2>
         <div class="panel">
           <div class="table-scroll"><table>
-            <thead><tr><th>Reels</th><th>Outcome</th><th>When</th></tr></thead>
+            <thead><tr><th data-i18n="t225">Reels</th><th data-i18n="t226">Outcome</th><th data-i18n="t227">When</th></tr></thead>
             <tbody id="slot-rounds-body"></tbody>
           </table></div>
         </div>
 
         <div class="panel arcade-panel arcade-panel-ludo">
           <div class="arcade-header">
-            <h2 class="section-title" style="margin:0;">Ludo</h2>
-            <span class="arcade-tag arcade-tag-ludo">Free to play · 2 or 4 players</span>
+            <h2 class="section-title" style="margin:0;" data-i18n="t23">Ludo</h2>
+            <span class="arcade-tag arcade-tag-ludo" data-i18n="t129">Free to play · 2 or 4 players</span>
           </div>
-          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Race your pieces around the board head-to-head against other players — no wager, just for fun.</p>
-          <button class="btn btn-play full" id="ludo-open-btn">Play Ludo</button>
+          <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t251">Race your pieces around the board head-to-head against other players — no wager, just for fun.</p>
+          <button class="btn btn-play full" id="ludo-open-btn" data-i18n="t184">Play Ludo</button>
         </div>
 
       </section>
@@ -511,32 +516,32 @@
       <!-- LUDO TAB (reached from the Games tab) -->
       <section id="panel-ludo" class="tab-panel hidden">
         <div class="remit-back-row">
-          <button class="btn secondary small" id="ludo-back-btn">← Games</button>
-          <h2 class="section-title" style="margin:0;">Ludo</h2>
+          <button class="btn secondary small" id="ludo-back-btn" data-i18n="t185">← Games</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t24">Ludo</h2>
         </div>
 
         <!-- LOBBY: create/join a table -->
         <div id="ludo-lobby-view">
           <div class="panel">
-            <h2 class="section-title">Start a table</h2>
+            <h2 class="section-title" data-i18n="t25">Start a table</h2>
             <div class="panel-row">
               <div class="field">
-                <label>Players</label>
+                <label data-i18n="t78">Players</label>
                 <select id="ludo-players-select">
-                  <option value="2">2</option>
-                  <option value="4">4</option>
+                  <option value="2" data-i18n="t133">2</option>
+                  <option value="4" data-i18n="t134">4</option>
                 </select>
               </div>
-              <button class="btn" id="ludo-create-btn">Create table</button>
+              <button class="btn" id="ludo-create-btn" data-i18n="t186">Create table</button>
             </div>
             <div class="error-msg" id="ludo-create-error"></div>
           </div>
 
-          <h2 class="section-title">Your tables</h2>
-          <div class="panel" id="ludo-your-tables"><p class="muted">No Ludo tables yet.</p></div>
+          <h2 class="section-title" data-i18n="t26">Your tables</h2>
+          <div class="panel" id="ludo-your-tables"><p class="muted" data-i18n="t252">No Ludo tables yet.</p></div>
 
-          <h2 class="section-title">Open tables to join</h2>
-          <div class="panel" id="ludo-open-tables"><p class="muted">No open tables right now.</p></div>
+          <h2 class="section-title" data-i18n="t27">Open tables to join</h2>
+          <div class="panel" id="ludo-open-tables"><p class="muted" data-i18n="t253">No open tables right now.</p></div>
         </div>
 
         <!-- TABLE: waiting room + active match, share the same board -->
@@ -555,257 +560,257 @@
       <!-- BUSINESS TAB -->
       <section id="panel-business" class="tab-panel hidden">
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:-4px;">
-          <button class="btn secondary small" id="jobs-board-btn">💼 Jobs</button>
-          <button class="btn secondary small" id="my-tickets-btn">🎟️ My tickets</button>
+          <button class="btn secondary small" id="jobs-board-btn" data-i18n="t187">💼 Jobs</button>
+          <button class="btn secondary small" id="my-tickets-btn" data-i18n="t188">🎟️ My tickets</button>
         </div>
-        <h2 class="section-title">Find a business</h2>
+        <h2 class="section-title" data-i18n="t28">Find a business</h2>
         <div class="panel">
           <div class="panel-row">
             <div class="field">
-              <label>Search</label>
-              <input type="text" id="directory-search" placeholder="Try “cake”, “haircut”, “mechanic”…" />
+              <label data-i18n="t79">Search</label>
+              <input type="text" id="directory-search" placeholder="Try “cake”, “haircut”, “mechanic”…" data-i18n-ph="t293" />
             </div>
             <div class="field">
-              <label>Category</label>
+              <label data-i18n="t80">Category</label>
               <select id="directory-category">
-                <option value="">All categories</option>
+                <option value="" data-i18n="t135">All categories</option>
               </select>
             </div>
           </div>
-          <div id="directory-results"><p class="muted">Loading businesses…</p></div>
+          <div id="directory-results"><p class="muted" data-i18n="t254">Loading businesses…</p></div>
         </div>
 
         <div id="business-owner-panel" class="hidden">
-          <h2 class="section-title">Your business wallet</h2>
+          <h2 class="section-title" data-i18n="t29">Your business wallet</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t255">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
             <div class="biz-wallet-balance">
-              <span class="biz-wallet-label">Business balance</span>
+              <span class="biz-wallet-label" data-i18n="t283">Business balance</span>
               <span class="biz-wallet-value">GYD <span id="biz-wallet-balance">0.00</span></span>
             </div>
             <div class="panel-row" style="margin-top:16px;">
               <div class="field">
-                <label>Move to personal wallet</label>
+                <label data-i18n="t81">Move to personal wallet</label>
                 <input type="number" id="biz-wallet-move-amount" min="0.01" step="0.01" placeholder="1000" />
               </div>
-              <button class="btn secondary" id="biz-wallet-move-btn">Move</button>
+              <button class="btn secondary" id="biz-wallet-move-btn" data-i18n="t189">Move</button>
             </div>
             <div class="error-msg" id="biz-wallet-move-error"></div>
             <p class="muted" id="biz-wallet-move-success" style="font-size:12.5px; margin-top:2px;"></p>
           </div>
 
-          <h2 class="section-title">Your business page</h2>
+          <h2 class="section-title" data-i18n="t30">Your business page</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Set this up so customers can find you — by category, or by searching what you sell, like searching "cake" and seeing every bakery that listed it.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t256">Set this up so customers can find you — by category, or by searching what you sell, like searching "cake" and seeing every bakery that listed it.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Category</label>
+                <label data-i18n="t82">Category</label>
                 <select id="bizpage-category">
-                  <option value="">Choose a category…</option>
+                  <option value="" data-i18n="t136">Choose a category…</option>
                 </select>
               </div>
               <div class="field">
-                <label>Logo emoji</label>
-                <input type="text" id="bizpage-logo" maxlength="8" placeholder="🍰" />
+                <label data-i18n="t83">Logo emoji</label>
+                <input type="text" id="bizpage-logo" maxlength="8" placeholder="🍰" data-i18n-ph="t294" />
               </div>
             </div>
             <div class="field">
-              <label>Tagline</label>
-              <input type="text" id="bizpage-tagline" maxlength="140" placeholder="Fresh cakes baked daily in Georgetown" />
+              <label data-i18n="t84">Tagline</label>
+              <input type="text" id="bizpage-tagline" maxlength="140" placeholder="Fresh cakes baked daily in Georgetown" data-i18n-ph="t295" />
             </div>
             <div class="field">
-              <label>Description</label>
-              <input type="text" id="bizpage-description" maxlength="1000" placeholder="Tell customers about your business…" />
+              <label data-i18n="t85">Description</label>
+              <input type="text" id="bizpage-description" maxlength="1000" placeholder="Tell customers about your business…" data-i18n-ph="t296" />
             </div>
             <div class="field">
-              <label>What you offer (comma-separated — this is what search matches)</label>
-              <input type="text" id="bizpage-keywords" maxlength="300" placeholder="wedding cakes, cupcakes, birthday cakes" />
+              <label data-i18n="t86">What you offer (comma-separated — this is what search matches)</label>
+              <input type="text" id="bizpage-keywords" maxlength="300" placeholder="wedding cakes, cupcakes, birthday cakes" data-i18n-ph="t297" />
             </div>
             <div class="panel-row">
               <div class="field">
-                <label>Phone (optional)</label>
+                <label data-i18n="t87">Phone (optional)</label>
                 <input type="text" id="bizpage-phone" placeholder="+592 600 0000" />
               </div>
               <div class="field">
-                <label>Location (optional)</label>
-                <input type="text" id="bizpage-location" placeholder="Georgetown, Guyana" />
+                <label data-i18n="t88">Location (optional)</label>
+                <input type="text" id="bizpage-location" placeholder="Georgetown, Guyana" data-i18n-ph="t298" />
               </div>
             </div>
             <div class="field">
-              <label>Page color</label>
+              <label data-i18n="t89">Page color</label>
               <div class="swatch-row" id="bizpage-swatches"></div>
               <input type="hidden" id="bizpage-theme-color" value="#4954e6" />
             </div>
             <div class="checkbox-field">
               <input type="checkbox" id="bizpage-offers-delivery" />
-              <label for="bizpage-offers-delivery" style="margin:0;">I offer delivery</label>
+              <label for="bizpage-offers-delivery" style="margin:0;" data-i18n="t90">I offer delivery</label>
             </div>
             <div class="field hidden" id="bizpage-delivery-fee-field">
-              <label>Delivery fee (GYD) — 0 means free delivery</label>
+              <label data-i18n="t91">Delivery fee (GYD) — 0 means free delivery</label>
               <input type="number" id="bizpage-delivery-fee" min="0" step="0.01" placeholder="500" />
             </div>
-            <button class="btn" id="bizpage-save-btn">Save my page</button>
+            <button class="btn" id="bizpage-save-btn" data-i18n="t190">Save my page</button>
             <div class="error-msg" id="bizpage-save-error"></div>
             <p class="muted" id="bizpage-save-success" style="font-size:12.5px; margin-top:8px;"></p>
           </div>
 
-          <h2 class="section-title">Products &amp; prices</h2>
+          <h2 class="section-title" data-i18n="t31">Products &amp; prices</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Shown on your page, and searchable — someone searching a product name finds you even if it's not in your keywords.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t257">Shown on your page, and searchable — someone searching a product name finds you even if it's not in your keywords.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Product or service name</label>
-                <input type="text" id="product-name" placeholder="Chocolate cake (8-inch)" />
+                <label data-i18n="t92">Product or service name</label>
+                <input type="text" id="product-name" placeholder="Chocolate cake (8-inch)" data-i18n-ph="t299" />
               </div>
               <div class="field">
-                <label>Price (GYD)</label>
+                <label data-i18n="t93">Price (GYD)</label>
                 <input type="number" id="product-price" min="0.01" step="0.01" placeholder="3000" />
               </div>
             </div>
             <div class="field">
-              <label>Description (optional)</label>
-              <input type="text" id="product-description" placeholder="Rich chocolate sponge with ganache" />
+              <label data-i18n="t94">Description (optional)</label>
+              <input type="text" id="product-description" placeholder="Rich chocolate sponge with ganache" data-i18n-ph="t300" />
             </div>
             <div class="field">
-              <label>Photo (optional)</label>
-              <label class="btn secondary" for="product-image-input" style="display:inline-flex;">Choose photo</label>
+              <label data-i18n="t95">Photo (optional)</label>
+              <label class="btn secondary" for="product-image-input" style="display:inline-flex;" data-i18n="t96">Choose photo</label>
               <input type="file" id="product-image-input" accept="image/*" class="hidden" />
               <div class="product-image-preview hidden" id="product-image-preview">
-                <img id="product-image-preview-img" alt="Preview" />
-                <button type="button" class="btn secondary small" id="product-image-remove-btn">Remove photo</button>
+                <img id="product-image-preview-img" alt="Preview" data-i18n-alt="t324" />
+                <button type="button" class="btn secondary small" id="product-image-remove-btn" data-i18n="t191">Remove photo</button>
               </div>
             </div>
-            <button class="btn secondary" id="product-add-btn">Add product</button>
+            <button class="btn secondary" id="product-add-btn" data-i18n="t192">Add product</button>
             <div class="error-msg" id="product-error"></div>
-            <div id="my-products-list" style="margin-top:16px;"><p class="muted">No products added yet.</p></div>
+            <div id="my-products-list" style="margin-top:16px;"><p class="muted" data-i18n="t258">No products added yet.</p></div>
           </div>
 
-          <h2 class="section-title">Events &amp; tickets</h2>
+          <h2 class="section-title" data-i18n="t32">Events &amp; tickets</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Post a concert, sale, class, or anything else with a date — it shows up on your page so people can buy tickets right in the app. The platform keeps 3.5% of each ticket; you get the rest in your business wallet.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t259">Post a concert, sale, class, or anything else with a date — it shows up on your page so people can buy tickets right in the app. The platform keeps 3.5% of each ticket; you get the rest in your business wallet.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Event title</label>
-                <input type="text" id="event-title" placeholder="Live at the Seawall" />
+                <label data-i18n="t97">Event title</label>
+                <input type="text" id="event-title" placeholder="Live at the Seawall" data-i18n-ph="t301" />
               </div>
               <div class="field">
-                <label>Date</label>
+                <label data-i18n="t98">Date</label>
                 <input type="datetime-local" id="event-date" />
               </div>
             </div>
             <div class="panel-row">
               <div class="field">
-                <label>Location (optional)</label>
-                <input type="text" id="event-location" placeholder="Seawall Bandstand, Georgetown" />
+                <label data-i18n="t99">Location (optional)</label>
+                <input type="text" id="event-location" placeholder="Seawall Bandstand, Georgetown" data-i18n-ph="t302" />
               </div>
               <div class="field">
-                <label>Ticket price (GYD)</label>
+                <label data-i18n="t100">Ticket price (GYD)</label>
                 <input type="number" id="event-price" min="0.01" step="0.01" placeholder="4000" />
               </div>
               <div class="field">
-                <label>Capacity (optional)</label>
-                <input type="number" id="event-capacity" min="1" step="1" placeholder="Leave blank for unlimited" />
+                <label data-i18n="t101">Capacity (optional)</label>
+                <input type="number" id="event-capacity" min="1" step="1" placeholder="Leave blank for unlimited" data-i18n-ph="t303" />
               </div>
             </div>
             <div class="field">
-              <label>Description (optional)</label>
-              <input type="text" id="event-description" placeholder="Tell people what to expect…" />
+              <label data-i18n="t102">Description (optional)</label>
+              <input type="text" id="event-description" placeholder="Tell people what to expect…" data-i18n-ph="t304" />
             </div>
-            <button class="btn secondary" id="event-add-btn">Post event</button>
+            <button class="btn secondary" id="event-add-btn" data-i18n="t193">Post event</button>
             <div class="error-msg" id="event-error"></div>
-            <div id="my-events-list" style="margin-top:16px;"><p class="muted">No events posted yet.</p></div>
+            <div id="my-events-list" style="margin-top:16px;"><p class="muted" data-i18n="t260">No events posted yet.</p></div>
           </div>
 
-          <h2 class="section-title">Jobs</h2>
+          <h2 class="section-title" data-i18n="t33">Jobs</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Post an opening — it shows on your page and in the site-wide Jobs board. Someone interested applies by messaging you right in the app.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t261">Post an opening — it shows on your page and in the site-wide Jobs board. Someone interested applies by messaging you right in the app.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Job title</label>
-                <input type="text" id="job-title" placeholder="Delivery driver" />
+                <label data-i18n="t103">Job title</label>
+                <input type="text" id="job-title" placeholder="Delivery driver" data-i18n-ph="t305" />
               </div>
               <div class="field">
-                <label>Job type (optional)</label>
+                <label data-i18n="t104">Job type (optional)</label>
                 <select id="job-type">
-                  <option value="">Not specified</option>
-                  <option value="Full-time">Full-time</option>
-                  <option value="Part-time">Part-time</option>
-                  <option value="Contract">Contract</option>
-                  <option value="Temporary">Temporary</option>
+                  <option value="" data-i18n="t137">Not specified</option>
+                  <option value="Full-time" data-i18n="t138">Full-time</option>
+                  <option value="Part-time" data-i18n="t139">Part-time</option>
+                  <option value="Contract" data-i18n="t140">Contract</option>
+                  <option value="Temporary" data-i18n="t141">Temporary</option>
                 </select>
               </div>
             </div>
             <div class="panel-row">
               <div class="field">
-                <label>Location (optional)</label>
-                <input type="text" id="job-location" placeholder="Georgetown, Guyana" />
+                <label data-i18n="t105">Location (optional)</label>
+                <input type="text" id="job-location" placeholder="Georgetown, Guyana" data-i18n-ph="t306" />
               </div>
               <div class="field">
-                <label>Pay (optional)</label>
-                <input type="text" id="job-pay" placeholder="GYD 80,000/month" />
+                <label data-i18n="t106">Pay (optional)</label>
+                <input type="text" id="job-pay" placeholder="GYD 80,000/month" data-i18n-ph="t307" />
               </div>
             </div>
             <div class="field">
-              <label>Description</label>
-              <input type="text" id="job-description" placeholder="What's the job, and what are you looking for?" />
+              <label data-i18n="t107">Description</label>
+              <input type="text" id="job-description" placeholder="What's the job, and what are you looking for?" data-i18n-ph="t308" />
             </div>
-            <button class="btn secondary" id="job-add-btn">Post job</button>
+            <button class="btn secondary" id="job-add-btn" data-i18n="t194">Post job</button>
             <div class="error-msg" id="job-error"></div>
-            <div id="my-jobs-list" style="margin-top:16px;"><p class="muted">No jobs posted yet.</p></div>
+            <div id="my-jobs-list" style="margin-top:16px;"><p class="muted" data-i18n="t262">No jobs posted yet.</p></div>
           </div>
 
-          <h2 class="section-title">Check a ticket in</h2>
+          <h2 class="section-title" data-i18n="t34">Check a ticket in</h2>
           <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Enter or scan the code from a customer's ticket QR code at the door.</p>
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t263">Enter or scan the code from a customer's ticket QR code at the door.</p>
             <div class="panel-row">
               <div class="field">
-                <label>Ticket code</label>
-                <input type="text" id="checkin-code" placeholder="A1B2C3D4E5" style="text-transform:uppercase;" />
+                <label data-i18n="t108">Ticket code</label>
+                <input type="text" id="checkin-code" placeholder="A1B2C3D4E5" data-i18n-ph="t309" style="text-transform:uppercase;" />
               </div>
-              <button class="btn" id="checkin-btn">Check in</button>
-              <button class="btn secondary" id="checkin-scan-btn">📷 Scan</button>
+              <button class="btn" id="checkin-btn" data-i18n="t195">Check in</button>
+              <button class="btn secondary" id="checkin-scan-btn" data-i18n="t196">📷 Scan</button>
             </div>
             <div id="checkin-camera" class="hidden" style="margin-top:10px;">
               <video id="checkin-video" autoplay playsinline muted style="width:100%; max-width:320px; border-radius:12px;"></video>
-              <div style="margin-top:8px;"><button class="btn secondary small" id="checkin-stop-scan-btn">Stop camera</button></div>
+              <div style="margin-top:8px;"><button class="btn secondary small" id="checkin-stop-scan-btn" data-i18n="t197">Stop camera</button></div>
             </div>
             <div class="error-msg" id="checkin-error"></div>
             <div id="checkin-result" style="margin-top:10px;"></div>
           </div>
 
-          <h2 class="section-title">Request a payment from a customer</h2>
+          <h2 class="section-title" data-i18n="t35">Request a payment from a customer</h2>
           <div class="panel">
             <div class="panel-row">
               <div class="field">
-                <label>Customer username</label>
-                <input type="text" id="charge-username" placeholder="customer_username" />
+                <label data-i18n="t109">Customer username</label>
+                <input type="text" id="charge-username" placeholder="customer_username" data-i18n-ph="t310" />
               </div>
               <div class="field">
-                <label>Amount (GYD)</label>
+                <label data-i18n="t110">Amount (GYD)</label>
                 <input type="number" id="charge-amount" min="0.01" step="0.01" placeholder="1500" />
               </div>
               <div class="field">
-                <label>Memo</label>
-                <input type="text" id="charge-memo" placeholder="What's this for?" />
+                <label data-i18n="t111">Memo</label>
+                <input type="text" id="charge-memo" placeholder="What's this for?" data-i18n-ph="t311" />
               </div>
-              <button class="btn" id="charge-btn">Send charge request</button>
+              <button class="btn" id="charge-btn" data-i18n="t198">Send charge request</button>
             </div>
             <div class="error-msg" id="charge-error"></div>
           </div>
 
-          <h2 class="section-title">Requests you've sent</h2>
+          <h2 class="section-title" data-i18n="t36">Requests you've sent</h2>
           <div class="panel">
             <div class="table-scroll"><table>
-              <thead><tr><th>Customer</th><th>Amount</th><th>Memo</th><th>Status</th></tr></thead>
+              <thead><tr><th data-i18n="t228">Customer</th><th data-i18n="t229">Amount</th><th data-i18n="t230">Memo</th><th data-i18n="t231">Status</th></tr></thead>
               <tbody id="sent-charges-body"></tbody>
             </table></div>
           </div>
         </div>
 
-        <h2 class="section-title">Payment requests to you</h2>
+        <h2 class="section-title" data-i18n="t37">Payment requests to you</h2>
         <div class="panel">
           <div class="table-scroll"><table>
-            <thead><tr><th>Business</th><th>Amount</th><th>Memo</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th data-i18n="t232">Business</th><th data-i18n="t233">Amount</th><th data-i18n="t234">Memo</th><th data-i18n="t235">Status</th><th></th></tr></thead>
             <tbody id="incoming-charges-body"></tbody>
           </table></div>
         </div>
@@ -814,8 +819,8 @@
       <!-- BUSINESS PAGE (reached from the "Find a business" directory) -->
       <section id="panel-bizpage" class="tab-panel hidden">
         <div class="remit-back-row">
-          <button class="btn secondary small" id="bizpage-back-btn">← Business</button>
-          <h2 class="section-title" style="margin:0;">Business page</h2>
+          <button class="btn secondary small" id="bizpage-back-btn" data-i18n="t199">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t38">Business page</h2>
         </div>
         <div class="panel bizpage-banner">
           <div class="bizpage-logo" id="bizpage-view-logo">🏢</div>
@@ -829,24 +834,24 @@
           <p class="muted" id="bizpage-view-description"></p>
           <div class="chip-row" id="bizpage-view-keywords"></div>
           <p class="muted" id="bizpage-view-contact" style="margin-top:12px;"></p>
-          <p class="muted" id="bizpage-view-delivery" style="margin-top:8px; display:none;">🚚 Delivery available</p>
+          <p class="muted" id="bizpage-view-delivery" style="margin-top:8px; display:none;" data-i18n="t264">🚚 Delivery available</p>
         </div>
 
-        <h2 class="section-title">Products &amp; prices</h2>
-        <div class="panel" id="bizpage-view-products"><p class="muted">No products listed yet.</p></div>
+        <h2 class="section-title" data-i18n="t39">Products &amp; prices</h2>
+        <div class="panel" id="bizpage-view-products"><p class="muted" data-i18n="t265">No products listed yet.</p></div>
 
         <div class="panel hidden" id="bizpage-view-events-panel">
-          <h2 class="section-title" style="margin-top:0;">Events</h2>
+          <h2 class="section-title" style="margin-top:0;" data-i18n="t40">Events</h2>
           <div id="bizpage-view-events"></div>
         </div>
 
         <div class="panel hidden" id="bizpage-view-jobs-panel">
-          <h2 class="section-title" style="margin-top:0;">Jobs</h2>
+          <h2 class="section-title" style="margin-top:0;" data-i18n="t41">Jobs</h2>
           <div id="bizpage-view-jobs"></div>
         </div>
 
         <div class="panel" id="bizpage-review-form-panel">
-          <h2 class="section-title" style="margin-top:0;">Rate this business</h2>
+          <h2 class="section-title" style="margin-top:0;" data-i18n="t42">Rate this business</h2>
           <div class="star-picker" id="bizpage-review-star-picker">
             <button type="button" class="star-picker-btn" data-value="1">★</button>
             <button type="button" class="star-picker-btn" data-value="2">★</button>
@@ -855,95 +860,95 @@
             <button type="button" class="star-picker-btn" data-value="5">★</button>
           </div>
           <div class="field" style="margin-top:12px;">
-            <label>Comment (optional)</label>
-            <textarea id="bizpage-review-comment" rows="3" placeholder="What was your experience like?" maxlength="1000"></textarea>
+            <label data-i18n="t112">Comment (optional)</label>
+            <textarea id="bizpage-review-comment" rows="3" placeholder="What was your experience like?" data-i18n-ph="t312" maxlength="1000"></textarea>
           </div>
           <div style="display:flex; gap:10px;">
-            <button class="btn" id="bizpage-review-submit-btn">Submit rating</button>
-            <button class="btn secondary hidden" id="bizpage-review-remove-btn">Remove my rating</button>
+            <button class="btn" id="bizpage-review-submit-btn" data-i18n="t200">Submit rating</button>
+            <button class="btn secondary hidden" id="bizpage-review-remove-btn" data-i18n="t201">Remove my rating</button>
           </div>
           <div class="error-msg" id="bizpage-review-error"></div>
           <p class="muted" id="bizpage-review-success" style="font-size:12.5px; margin-top:6px;"></p>
         </div>
 
-        <h2 class="section-title">Ratings &amp; reviews</h2>
-        <div class="panel" id="bizpage-view-reviews"><p class="muted">No reviews yet.</p></div>
+        <h2 class="section-title" data-i18n="t43">Ratings &amp; reviews</h2>
+        <div class="panel" id="bizpage-view-reviews"><p class="muted" data-i18n="t266">No reviews yet.</p></div>
 
         <div class="panel hidden" id="bizpage-checkout-panel">
-          <h2 class="section-title" style="margin-top:0;">Checkout</h2>
+          <h2 class="section-title" style="margin-top:0;" data-i18n="t44">Checkout</h2>
           <div class="field">
-            <label>Amount (GYD)</label>
+            <label data-i18n="t113">Amount (GYD)</label>
             <input type="number" id="checkout-amount" min="0.01" step="0.01" placeholder="1500" />
           </div>
           <div class="field hidden" id="checkout-fulfillment-field">
-            <label>How would you like to receive this?</label>
+            <label data-i18n="t114">How would you like to receive this?</label>
             <div class="fulfillment-row">
-              <button type="button" class="fulfillment-btn selected" data-fulfillment="pickup">Pickup</button>
-              <button type="button" class="fulfillment-btn" data-fulfillment="delivery">Delivery</button>
+              <button type="button" class="fulfillment-btn selected" data-fulfillment="pickup" data-i18n="t202">Pickup</button>
+              <button type="button" class="fulfillment-btn" data-fulfillment="delivery" data-i18n="t203">Delivery</button>
             </div>
           </div>
           <div class="field hidden" id="checkout-address-field">
-            <label>Delivery address</label>
-            <input type="text" id="checkout-address" placeholder="Street, city" />
+            <label data-i18n="t115">Delivery address</label>
+            <input type="text" id="checkout-address" placeholder="Street, city" data-i18n-ph="t313" />
           </div>
           <p class="muted" id="checkout-total-preview" style="font-size:12.5px; min-height:16px;"></p>
-          <button class="btn full" id="checkout-pay-btn">Confirm &amp; pay</button>
+          <button class="btn full" id="checkout-pay-btn" data-i18n="t204">Confirm &amp; pay</button>
           <div class="error-msg" id="checkout-error"></div>
           <p class="muted" id="checkout-success" style="font-size:12.5px; margin-top:6px;"></p>
         </div>
 
         <div style="display:flex; gap:10px;">
-          <button class="btn full" id="bizpage-view-message-btn">Message</button>
-          <button class="btn secondary full" id="bizpage-view-pay-btn">Pay</button>
+          <button class="btn full" id="bizpage-view-message-btn" data-i18n="t205">Message</button>
+          <button class="btn secondary full" id="bizpage-view-pay-btn" data-i18n="t206">Pay</button>
         </div>
       </section>
 
       <!-- MY TICKETS (reached from the "My tickets" button on the Business tab) -->
       <section id="panel-mytickets" class="tab-panel hidden">
         <div class="remit-back-row">
-          <button class="btn secondary small" id="mytickets-back-btn">← Business</button>
-          <h2 class="section-title" style="margin:0;">My tickets</h2>
+          <button class="btn secondary small" id="mytickets-back-btn" data-i18n="t207">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t45">My tickets</h2>
         </div>
-        <div id="my-tickets-list"><p class="muted">Loading your tickets…</p></div>
+        <div id="my-tickets-list"><p class="muted" data-i18n="t267">Loading your tickets…</p></div>
       </section>
 
       <!-- JOBS BOARD (reached from the "💼 Jobs" button on the Business tab) -->
       <section id="panel-jobs" class="tab-panel hidden">
         <div class="remit-back-row">
-          <button class="btn secondary small" id="jobs-back-btn">← Business</button>
-          <h2 class="section-title" style="margin:0;">Jobs</h2>
+          <button class="btn secondary small" id="jobs-back-btn" data-i18n="t208">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t46">Jobs</h2>
         </div>
         <div class="panel">
           <div class="panel-row">
             <div class="field">
-              <label>Search</label>
-              <input type="text" id="jobs-search" placeholder="Try “driver”, “cashier”, “Georgetown”…" />
+              <label data-i18n="t116">Search</label>
+              <input type="text" id="jobs-search" placeholder="Try “driver”, “cashier”, “Georgetown”…" data-i18n-ph="t314" />
             </div>
             <div class="field">
-              <label>Job type</label>
+              <label data-i18n="t117">Job type</label>
               <select id="jobs-type-filter">
-                <option value="">All types</option>
-                <option value="Full-time">Full-time</option>
-                <option value="Part-time">Part-time</option>
-                <option value="Contract">Contract</option>
-                <option value="Temporary">Temporary</option>
+                <option value="" data-i18n="t142">All types</option>
+                <option value="Full-time" data-i18n="t143">Full-time</option>
+                <option value="Part-time" data-i18n="t144">Part-time</option>
+                <option value="Contract" data-i18n="t145">Contract</option>
+                <option value="Temporary" data-i18n="t146">Temporary</option>
               </select>
             </div>
           </div>
         </div>
-        <div id="jobs-board-list"><p class="muted">Loading jobs…</p></div>
+        <div id="jobs-board-list"><p class="muted" data-i18n="t268">Loading jobs…</p></div>
       </section>
 
       <!-- MESSAGES TAB -->
       <section id="panel-messages" class="tab-panel hidden">
-        <h2 class="section-title">Messages</h2>
+        <h2 class="section-title" data-i18n="t47">Messages</h2>
         <div class="panel">
           <div class="panel-row" style="margin-bottom:16px;">
             <div class="field">
-              <label>Start a new conversation with</label>
-              <input type="text" id="new-thread-username" placeholder="username" />
+              <label data-i18n="t118">Start a new conversation with</label>
+              <input type="text" id="new-thread-username" placeholder="username" data-i18n-ph="t315" />
             </div>
-            <button class="btn secondary" id="new-thread-btn">Open</button>
+            <button class="btn secondary" id="new-thread-btn" data-i18n="t209">Open</button>
           </div>
           <div class="threads-list">
             <div class="thread-list" id="thread-list"></div>
@@ -953,8 +958,8 @@
                 <h3 id="thread-title" style="margin:0 0 12px;"></h3>
                 <div class="messages-scroll" id="messages-scroll"></div>
                 <div class="compose-row">
-                  <input type="text" id="compose-input" placeholder="Type a message…" />
-                  <button class="btn" id="compose-send-btn">Send</button>
+                  <input type="text" id="compose-input" placeholder="Type a message…" data-i18n-ph="t316" />
+                  <button class="btn" id="compose-send-btn" data-i18n="t210">Send</button>
                 </div>
               </div>
             </div>
@@ -963,31 +968,40 @@
       </section>
 
       <section id="panel-support" class="tab-panel hidden">
-        <h2 class="section-title">Help &amp; Support</h2>
+        <h2 class="section-title" data-i18n="t330">Language</h2>
         <div class="panel">
-          <p class="forgot-intro" style="margin-bottom:16px;">Having a problem with your account, a payment, or a
+          <div class="lang-switcher">
+            <button type="button" class="lang-btn" data-lang="en">English</button>
+            <button type="button" class="lang-btn" data-lang="es">Español</button>
+            <button type="button" class="lang-btn" data-lang="pt">Português</button>
+          </div>
+        </div>
+
+        <h2 class="section-title" style="margin-top:22px;" data-i18n="t48">Help &amp; Support</h2>
+        <div class="panel">
+          <p class="forgot-intro" style="margin-bottom:16px;" data-i18n="t269">Having a problem with your account, a payment, or a
           cash-out? Send us a note below and someone on our team will reply here.</p>
           <form id="support-form">
             <div class="field">
-              <label>Subject</label>
+              <label data-i18n="t119">Subject</label>
               <input type="text" id="support-subject" maxlength="140" required />
             </div>
             <div class="field">
-              <label>What's going on?</label>
+              <label data-i18n="t120">What's going on?</label>
               <textarea id="support-message" rows="4" maxlength="2000" required></textarea>
             </div>
-            <button type="submit" class="btn full">Send to support</button>
+            <button type="submit" class="btn full" data-i18n="t211">Send to support</button>
             <div class="error-msg" id="support-error"></div>
           </form>
         </div>
-        <h3 class="section-title" style="margin-top:22px;">Your requests</h3>
-        <div class="panel" id="support-tickets-list"><p class="muted">No requests sent yet.</p></div>
+        <h3 class="section-title" style="margin-top:22px;" data-i18n="t49">Your requests</h3>
+        <div class="panel" id="support-tickets-list"><p class="muted" data-i18n="t270">No requests sent yet.</p></div>
 
-        <h3 class="section-title" style="margin-top:22px;">Account security</h3>
+        <h3 class="section-title" style="margin-top:22px;" data-i18n="t50">Account security</h3>
         <div class="panel">
-          <p class="forgot-intro" style="margin-bottom:12px;">If you think someone else might have gotten into your
+          <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t271">If you think someone else might have gotten into your
           account — a lost phone, a shared device — sign out everywhere at once.</p>
-          <button class="btn secondary full" id="logout-all-btn">Log out of all devices</button>
+          <button class="btn secondary full" id="logout-all-btn" data-i18n="t212">Log out of all devices</button>
         </div>
       </section>
     </main>
@@ -995,28 +1009,29 @@
     <nav class="bottom-nav">
       <button class="nav-item active" data-tab="wallet">
         <span class="nav-icon-badge badge-green">🏠</span>
-        <span class="nav-label">Home</span>
+        <span class="nav-label" data-i18n="t121">Home</span>
       </button>
       <button class="nav-item" data-tab="send">
         <span class="nav-icon-badge badge-blue">➤</span>
-        <span class="nav-label">Send</span>
+        <span class="nav-label" data-i18n="t122">Send</span>
       </button>
       <button class="nav-item nav-item-elevated" data-tab="games">
         <span class="nav-icon-badge badge-pink badge-elevated">🎮</span>
-        <span class="nav-label">Play</span>
+        <span class="nav-label" data-i18n="t123">Play</span>
       </button>
       <button class="nav-item" data-tab="business">
         <span class="nav-icon-badge badge-orange">🏢</span>
-        <span class="nav-label">Business</span>
+        <span class="nav-label" data-i18n="t124">Business</span>
       </button>
       <button class="nav-item" data-tab="messages">
         <span class="nav-icon-badge badge-teal">💬</span>
-        <span class="nav-label">Chat</span>
+        <span class="nav-label" data-i18n="t125">Chat</span>
       </button>
     </nav>
   </div>
 </div>
 
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

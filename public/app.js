@@ -299,12 +299,28 @@
     document.getElementById('account-card-holder').textContent = state.user.username;
   }
 
+  // Title/aria-label text for this toggle is translated directly here (via
+  // window.i18n, when loaded) rather than through static data-i18n attributes,
+  // since its value depends on the current hidden/shown state and would
+  // otherwise get stomped by a language switch.
+  function updateBalanceVisibilityLabel() {
+    const label = window.i18n
+      ? window.i18n.t(balanceHidden ? 't325' : 't320')
+      : (balanceHidden ? 'Show balance' : 'Hide balance');
+    const btn = document.getElementById('balance-visibility-btn');
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+
   document.getElementById('balance-visibility-btn').onclick = () => {
     balanceHidden = !balanceHidden;
     document.getElementById('balance-visibility-btn').textContent = balanceHidden ? '🙈' : '👁';
-    document.getElementById('balance-visibility-btn').title = balanceHidden ? 'Show balance' : 'Hide balance';
+    updateBalanceVisibilityLabel();
     document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(state.user.gydBalance);
   };
+
+  window.addEventListener('gyd-lang-changed', updateBalanceVisibilityLabel);
+  updateBalanceVisibilityLabel();
 
   document.getElementById('paytag-save-btn').onclick = async () => {
     const val = document.getElementById('paytag-input').value.trim();
