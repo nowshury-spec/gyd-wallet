@@ -281,22 +281,22 @@
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
-    document.getElementById('who-tag').textContent = `$${state.user.cashtag}` + (state.user.isBusiness ? ` · Business` : '');
+    document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
     document.getElementById('balance-gyd').textContent = fmt(state.user.gydBalance);
     document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
     if (state.user.isBusiness) {
       document.getElementById('biz-wallet-balance').textContent = fmt(state.user.businessGydBalance);
     }
-    const cashtagInput = document.getElementById('cashtag-input');
-    if (document.activeElement !== cashtagInput) cashtagInput.value = state.user.cashtag || '';
+    const paytagInput = document.getElementById('paytag-input');
+    if (document.activeElement !== paytagInput) paytagInput.value = state.user.paytag || '';
   }
 
-  document.getElementById('cashtag-save-btn').onclick = async () => {
-    const val = document.getElementById('cashtag-input').value.trim();
-    const errBox = document.getElementById('cashtag-error');
+  document.getElementById('paytag-save-btn').onclick = async () => {
+    const val = document.getElementById('paytag-input').value.trim();
+    const errBox = document.getElementById('paytag-error');
     errBox.textContent = '';
     try {
-      const data = await api('/api/me/cashtag', 'POST', { cashtag: val });
+      const data = await api('/api/me/paytag', 'POST', { paytag: val });
       state.user = data.user;
       renderWho();
     } catch (err) {
@@ -385,14 +385,13 @@
     }
   }
 
-  // ---------- pay / request (Cash App-style keypad) / users ----------
+  // ---------- pay / request (keypad) / users ----------
   //
-  // One panel now does both jobs, the way Cash App's own "$" tab works: a
-  // big amount display fed by a numeric keypad (cents-first entry — typing
-  // 5 then 0 then 0 builds "$5.00", just like tapping out an amount on a
-  // real Cash App screen), a single "To" field, and two buttons — Pay sends
-  // the money immediately, Request asks for it — instead of two separate
-  // forms with their own amount/recipient fields.
+  // One panel now does both jobs: a big amount display fed by a numeric
+  // keypad (cents-first entry — typing 5 then 0 then 0 builds "$5.00"), a
+  // single "To" field, and two buttons — Pay sends the money immediately,
+  // Request asks for it — instead of two separate forms with their own
+  // amount/recipient fields.
 
   let payDigits = ''; // raw digits typed so far; the rightmost two are cents
 
@@ -468,10 +467,10 @@
     tbody.innerHTML = '';
     for (const u of data.users) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>$${u.cashtag}</td><td>${u.username}</td><td class="muted">${u.isBusiness ? `Business · ${u.businessName}` : 'Personal'}</td>`;
+      tr.innerHTML = `<td>$${u.paytag}</td><td>${u.username}</td><td class="muted">${u.isBusiness ? `Business · ${u.businessName}` : 'Personal'}</td>`;
       tr.style.cursor = 'pointer';
       tr.onclick = () => {
-        document.getElementById('pay-to').value = u.cashtag ? `$${u.cashtag}` : u.username;
+        document.getElementById('pay-to').value = u.paytag ? `$${u.paytag}` : u.username;
         renderPayAmount();
       };
       tbody.appendChild(tr);
@@ -507,7 +506,7 @@
         const row = document.createElement('div');
         row.className = 'remit-list-row';
         const label = document.createElement('div');
-        label.innerHTML = `<div><strong>$${r.fromCashtag}</strong> wants GYD ${fmt(r.amount)}</div>${
+        label.innerHTML = `<div><strong>$${r.fromPaytag}</strong> wants GYD ${fmt(r.amount)}</div>${
           r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${r.note}</div>` : ''
         }`;
         row.appendChild(label);
@@ -540,7 +539,7 @@
         row.className = 'remit-list-row';
         const pillClass = r.status === 'paid' ? 'completed' : r.status === 'pending' ? 'pending' : 'declined';
         const label = document.createElement('div');
-        label.innerHTML = `<div><strong>$${r.toCashtag}</strong> · GYD ${fmt(r.amount)} <span class="pill ${pillClass}">${requestStatusLabel(r.status)}</span></div>${
+        label.innerHTML = `<div><strong>$${r.toPaytag}</strong> · GYD ${fmt(r.amount)} <span class="pill ${pillClass}">${requestStatusLabel(r.status)}</span></div>${
           r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${r.note}</div>` : ''
         }`;
         row.appendChild(label);
@@ -580,7 +579,7 @@
   });
 
   function triggerConfetti(big = false) {
-    const colors = ['#00d964', '#ffce54', '#2f8fff', '#ff3d81', '#22d3c7'];
+    const colors = ['#4954e6', '#ffce54', '#2f8fff', '#ff3d81', '#22d3c7'];
     const container = document.createElement('div');
     container.className = 'confetti-container';
     document.body.appendChild(container);
@@ -905,7 +904,7 @@
   // color as text/border (like the app's existing pill/tag treatment), never
   // as a solid fill behind white text, so it stays legible no matter which
   // swatch is picked.
-  const THEME_SWATCHES = ['#00d964', '#2f8fff', '#ff3d81', '#ff9f43', '#22d3c7', '#ffce54', '#a855f7', '#ff5470'];
+  const THEME_SWATCHES = ['#4954e6', '#2f8fff', '#ff3d81', '#ff9f43', '#22d3c7', '#ffce54', '#a855f7', '#ff5470'];
 
   function hexToRgba(hex, alpha) {
     const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
@@ -1741,7 +1740,7 @@
       logoEl.style.background = hexToRgba(b.themeColor, 0.18);
       logoEl.style.border = `1px solid ${hexToRgba(b.themeColor, 0.4)}`;
       document.getElementById('bizpage-view-name').textContent = b.businessName;
-      document.getElementById('bizpage-view-cashtag').textContent = `$${b.cashtag}`;
+      document.getElementById('bizpage-view-paytag').textContent = `$${b.paytag}`;
       const categoryEl = document.getElementById('bizpage-view-category');
       categoryEl.textContent = b.category;
       categoryEl.style.background = hexToRgba(b.themeColor, 0.16);
@@ -2185,7 +2184,7 @@
   function refreshMyQrCode() {
     const amount = document.getElementById('qr-fixed-amount').value.trim();
     const memo = document.getElementById('qr-memo').value.trim();
-    const payload = buildPayPayload({ to: state.user.cashtag, amount, memo });
+    const payload = buildPayPayload({ to: state.user.paytag, amount, memo });
     document.getElementById('qr-image').src = qrImageUrl(payload);
     document.getElementById('qr-payload-text').textContent = payload;
   }
@@ -2301,7 +2300,7 @@
       errBox.textContent = "That doesn't look like a valid GYD Wallet payment code.";
       return;
     }
-    if (parsed.to === state.user.username || parsed.to.replace(/^\$/, '') === state.user.cashtag) {
+    if (parsed.to === state.user.username || parsed.to.replace(/^\$/, '') === state.user.paytag) {
       errBox.textContent = "That's your own code — have someone else scan it to pay you.";
       return;
     }
@@ -2315,7 +2314,7 @@
       return;
     }
 
-    document.getElementById('qr-confirm-username').textContent = recipientInfo.cashtag ? `$${recipientInfo.cashtag}` : recipientInfo.username;
+    document.getElementById('qr-confirm-username').textContent = recipientInfo.paytag ? `$${recipientInfo.paytag}` : recipientInfo.username;
     document.getElementById('qr-confirm-type').textContent = recipientInfo.isBusiness
       ? `Business · ${recipientInfo.businessName}`
       : 'Personal';

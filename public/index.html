@@ -20,7 +20,7 @@
         <p class="hero-sub">Load up, send money, play for coins, and cash out. All in one place.</p>
         <ul class="hero-features">
           <li><span class="hero-icon">💸</span><div><strong>Wallet &amp; coins</strong><span>Load Guyana dollars, play with coins, cash out when you're ready.</span></div></li>
-          <li><span class="hero-icon">➤</span><div><strong>Send &amp; request, Cash App-style</strong><span>Pay or request money with a $cashtag, or send to anyone with a private reference code through GYD Direct — our own agent-free transfer network.</span></div></li>
+          <li><span class="hero-icon">➤</span><div><strong>Send &amp; request in a tap</strong><span>Pay or request money with a $Paytag, or send to anyone with a private reference code through GYD Direct — our own agent-free transfer network.</span></div></li>
           <li><span class="hero-icon">🎮</span><div><strong>Play for free</strong><span>Flip coins and spin the slots, no purchase or wager needed — just for fun.</span></div></li>
         </ul>
         <p class="hero-note">Phase 1 prototype — no real money is moved yet.</p>
@@ -164,17 +164,17 @@
 
       <!-- WALLET TAB -->
       <section id="panel-wallet" class="tab-panel">
-        <h2 class="section-title">Your $Cashtag</h2>
+        <h2 class="section-title">Your $Paytag</h2>
         <div class="panel">
-          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Your $Cashtag is your unique payment handle — like on Cash App. Share it so people can pay or request money from you without needing your username.</p>
+          <p class="muted" style="font-size:12.5px; margin:0 0 14px;">Your $Paytag is your unique payment handle. Share it so people can pay or request money from you without needing your username.</p>
           <div class="panel-row">
             <div class="field">
-              <label>$Cashtag</label>
-              <input type="text" id="cashtag-input" placeholder="yourname" maxlength="20" />
+              <label>$Paytag</label>
+              <input type="text" id="paytag-input" placeholder="yourname" maxlength="20" />
             </div>
-            <button class="btn secondary" id="cashtag-save-btn">Save</button>
+            <button class="btn secondary" id="paytag-save-btn">Save</button>
           </div>
-          <div class="error-msg" id="cashtag-error"></div>
+          <div class="error-msg" id="paytag-error"></div>
         </div>
 
         <h2 class="section-title">Deposit real money (simulated)</h2>
@@ -265,10 +265,10 @@
 
         <h2 class="section-title">Other users</h2>
         <div class="panel">
-          <input type="text" id="user-search" placeholder="Search usernames or $cashtags…" />
+          <input type="text" id="user-search" placeholder="Search usernames or $paytags…" />
           <p class="muted" style="font-size:11.5px; margin:10px 0 0;">Tap a row to fill in "To" above.</p>
           <div class="table-scroll"><table>
-            <thead><tr><th>$Cashtag</th><th>Username</th><th>Type</th></tr></thead>
+            <thead><tr><th>$Paytag</th><th>Username</th><th>Type</th></tr></thead>
             <tbody id="users-body"></tbody>
           </table></div>
         </div>
@@ -383,7 +383,7 @@
           <div class="qr-manual">
             <label>Or paste a code / type a username</label>
             <div class="panel-row">
-              <input type="text" id="qr-manual-input" placeholder="gydpay:pay?to=$cashtag" style="flex:2;" />
+              <input type="text" id="qr-manual-input" placeholder="gydpay:pay?to=$paytag" style="flex:2;" />
               <button class="btn secondary" id="qr-manual-btn">Use this</button>
             </div>
           </div>
@@ -616,7 +616,7 @@
             <div class="field">
               <label>Page color</label>
               <div class="swatch-row" id="bizpage-swatches"></div>
-              <input type="hidden" id="bizpage-theme-color" value="#00d964" />
+              <input type="hidden" id="bizpage-theme-color" value="#4954e6" />
             </div>
             <div class="checkbox-field">
               <input type="checkbox" id="bizpage-offers-delivery" />
@@ -802,7 +802,7 @@
         <div class="panel bizpage-banner">
           <div class="bizpage-logo" id="bizpage-view-logo">🏢</div>
           <div class="bizpage-name" id="bizpage-view-name">—</div>
-          <div class="bizpage-cashtag" id="bizpage-view-cashtag"></div>
+          <div class="bizpage-paytag" id="bizpage-view-paytag"></div>
           <span class="pill" id="bizpage-view-category"></span>
           <p class="bizpage-tagline" id="bizpage-view-tagline"></p>
           <div class="star-summary" id="bizpage-view-rating-summary" style="margin-top:10px;"></div>

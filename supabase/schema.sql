@@ -21,7 +21,19 @@
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
+  -- Deprecated, unused by the app — kept only because renaming a column
+  -- outright would have broken the already-deployed app the moment this
+  -- migration ran (see the add_paytag_column_rebrand migration). `paytag`
+  -- below is the real, current column; this one is safe to drop in a later
+  -- migration once the app has been running on `paytag` for a while.
   cashtag TEXT UNIQUE,
+  -- A short, unique, user-changeable public payment handle, separate from
+  -- the login username — e.g. so people can pay you without knowing your
+  -- username. Auto-generated at signup, editable any time from the Wallet
+  -- tab. Called "paytag" (not "cashtag") on purpose: this app's own name,
+  -- not a competitor's trademarked term — see the add_paytag_column_rebrand
+  -- migration for why this exists as its own column instead of a rename.
+  paytag TEXT UNIQUE,
   -- Required for every new signup (enforced in server.js's /api/register,
   -- not by a NOT NULL here) so a sender always has a way to reach the
   -- account a payment landed in, and so a lost-password recovery flow has

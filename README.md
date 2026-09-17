@@ -2,7 +2,7 @@
 
 A working prototype of the app concept: a wallet denominated directly in
 Guyana dollars (GYD) funded by (simulated) real money, free-to-play games,
-a cash-out flow, Cash App-style payments (unique $Cashtag handles, instant
+a cash-out flow, fast peer-to-peer payments (unique $Paytag handles, instant
 pay-a-username transfers, and a Request Money flow), GYD Direct — our own
 send-to-anyone feature with a private reference code — a business payment
 portal, and person-to-person messaging.
@@ -20,9 +20,9 @@ experience without touching real money or requiring any license. Nothing
 here is connected to a real bank, card processor, or payment rail.
 
 The look is deliberately built to feel like something you'd want to open and
-play with — a Cash-App-style dark, vivid-green, phone-shaped app shell with a
-bottom icon bar (complete with an elevated "Play" button), a big animated
-coin flip, and a confetti burst on a win — rather than a business dashboard.
+play with — a dark, indigo-accented, phone-shaped app shell with a bottom
+icon bar (complete with an elevated "Play" button), a big animated coin
+flip, and a confetti burst on a win — rather than a business dashboard.
 
 ## Running it
 
@@ -86,10 +86,10 @@ flight against the same account at once.
 - **Wallet** — "deposit" GYD (simulated — no payment processor is wired up), and a cash-out flow that escrows GYD and files a pending request.
 - **Games** — a coin-flip game, a 3-reel slot machine, and a head-to-head Ludo board game, all completely free to play: no wager, no cost, no balance requirement, open to any logged-in user (see **Why the games are free to play** below).
 - **Ludo** — a real 2- or 4-player board game played turn-by-turn against other people (not the house), reached from the Games tab: create a table (choosing 2 or 4 seats) or join someone else's open one from the lobby, and the match starts the moment the last seat fills. Roll the dice, tap a highlighted piece to move it, race all 4 of your pieces around the board and home before anyone else — landing on an opponent outside a safe square sends their piece back to base, and rolling a 6, capturing, or getting a piece home all earn another roll. See **How Ludo works** below for the exact rules and why it has no wager either.
-- **$Cashtag handles** — every account gets a unique, auto-generated `$cashtag` at signup (edit it any time from the Wallet tab), separate from the login username. Anywhere you'd type a username — sending, requesting, searching, QR pay — a `$cashtag` (with or without the leading `$`) works too, the same way Cash App treats a $Cashtag as your public payment handle.
-- **Pay or request, Cash App-style** — one screen does both: a big amount display driven by a numeric keypad (cents-first entry, exactly like tapping out an amount on Cash App's own "$" tab — typing 2-5-0-0 builds "$25.00"), a single "To" field for a username or $cashtag, and a Pay/Request button pair that only enable once both an amount and a recipient are set. Pay sends an instant, no-fee transfer to another user who already has an account here; Request asks them to pay you that amount, with an optional note — they see it as a pending request they can pay (debiting their balance, crediting yours) or decline, and you can cancel a request you sent as long as it's still pending.
+- **$Paytag handles** — every account gets a unique, auto-generated `$paytag` at signup (edit it any time from the Wallet tab), separate from the login username. Anywhere you'd type a username — sending, requesting, searching, QR pay — a `$paytag` (with or without the leading `$`) works too, so a sender can use whichever one they actually know.
+- **Pay or request in a tap** — one screen does both: a big amount display driven by a numeric keypad (cents-first entry — typing 2-5-0-0 builds "$25.00"), a single "To" field for a username or $paytag, and a Pay/Request button pair that only enable once both an amount and a recipient are set. Pay sends an instant, no-fee transfer to another user who already has an account here; Request asks them to pay you that amount, with an optional note — they see it as a pending request they can pay (debiting their balance, crediting yours) or decline, and you can cancel a request you sent as long as it's still pending.
 - **GYD Direct** — our own send-to-anyone transfer feature: send GYD to anyone by name and phone number, no account required on their end, for a transfer fee (see **How GYD Direct pricing works** below). You get back a private reference code; the recipient enters that code plus the recipient name you typed to claim it into their own balance, registering for an account first if they don't have one. A pending transfer can be cancelled by the sender for a full refund (amount + fee) any time before it's claimed.
-- **QR code pay ("Scan & Pay" tab)** — every account has a personal QR code encoding `gydpay:pay?to=$cashtag` (optionally with a fixed amount/memo baked in, so a business can generate a "charge code" for a specific bill). Scanning someone's code — via the device camera, by uploading a photo of it, or by pasting the code manually — opens a confirm screen (editable amount/memo) and pays them through the same transfer endpoint used elsewhere. See **How QR pay actually works** below before relying on this for a real demo.
+- **QR code pay ("Scan & Pay" tab)** — every account has a personal QR code encoding `gydpay:pay?to=$paytag` (optionally with a fixed amount/memo baked in, so a business can generate a "charge code" for a specific bill). Scanning someone's code — via the device camera, by uploading a photo of it, or by pasting the code manually — opens a confirm screen (editable amount/memo) and pays them through the same transfer endpoint used elsewhere. See **How QR pay actually works** below before relying on this for a real demo.
 - **Business directory ("Find a business")** — a business account can set up a public page (category, tagline, description, freeform keywords for what they sell, a logo emoji, a page color, phone/location) from the Business tab. Once saved, that page is searchable by anyone: free-text search matches the business name, tagline, description, category, keywords, AND their listed products — so searching "cake" finds every business that listed "cake" as a keyword or a product name, even if their category is just "Bakery & Desserts" and their name doesn't mention cake — plus a category dropdown to browse by type. Opening a result shows the full page with a **Products & prices** list and **Message** (opens a conversation with that business) and **Pay** (opens the inline checkout described below) buttons. A business account with no page saved yet simply doesn't appear in the directory — having a business account and having a page are separate steps.
 - **Products & prices** — from the same "Your business page" area, a business can list individual products or services with a name, a price in GYD, and an optional description — shown on their public page as a simple menu/catalog, and folded into directory search the same way keywords are (searching a product name finds the business even if that exact phrase never made it into the keywords field). This is purely informational — it doesn't create a way to buy a specific line item; the amount is still typed in at checkout, same as reading a menu before telling the cashier what you owe.
 - **Ratings & reviews** — any customer viewing a business's page can leave a 1–5 star rating with an optional comment; the directory listing and the business's own page both show the average rating and how many reviews it's based on. Rating again just updates your existing review instead of adding a second one (one rating per customer per business), and you can remove your own rating at any time. A business can't rate its own page. A "Report" button on each review lets a viewer flag one for staff — see **How the staff portal works** for what happens after that.
@@ -271,7 +271,7 @@ something a customer buys straight through the app:
 
 ## How the business wallet works
 
-A business account actually has two GYD balances under the hood, even though the app only ever calls the everyday one "your balance": a personal one (used for deposits, cashing out, and sending money — exactly like a personal account) and a separate business balance that only a business account has any use for. The business balance is what fills up when a customer pays the business — a plain transfer or QR-code pay to their $cashtag, business checkout, an approved charge request from the payment portal, or a money request the business itself sent out to be paid. None of those touch the owner's personal balance at all.
+A business account actually has two GYD balances under the hood, even though the app only ever calls the everyday one "your balance": a personal one (used for deposits, cashing out, and sending money — exactly like a personal account) and a separate business balance that only a business account has any use for. The business balance is what fills up when a customer pays the business — a plain transfer or QR-code pay to their $paytag, business checkout, an approved charge request from the payment portal, or a money request the business itself sent out to be paid. None of those touch the owner's personal balance at all.
 
 That split is deliberate: it keeps the business's takings visibly separate from the owner's own spending money, the same reason a shop keeps a till separate from the owner's wallet. To actually spend or cash out what the business has earned, the owner uses **Move to personal wallet** on their business wallet panel — an instant, no-fee internal transfer from the business balance into their personal one. There's no path the other direction (personal money funding the business wallet) since nothing here needs it — the business wallet only ever fills from customer payments. One deliberate exception: a GYD Direct claim always lands in the personal wallet, even for a business account, since claiming a transfer sent to you by name and phone isn't "a customer buying something" — it's just picking up money addressed to you personally.
 
@@ -379,6 +379,14 @@ to have any claim over. Worth having a Guyanese lawyer confirm this
 reasoning before it matters for real, but it's a much easier position to
 defend than either earlier design, precisely because there's nothing left
 to argue about.
+
+## Why this isn't styled like Cash App anymore
+
+Earlier drafts of this prototype leaned explicitly on Cash App as a design reference — a "$Cashtag" handle feature (Cash App's own trademarked term for exactly this), marketing copy that said "Cash App-style," and a near-identical vivid green as the brand color. That combination is the kind of thing a company actually polices — usually starting with a cease-and-desist rather than a lawsuit out of nowhere, but cheaper to avoid than to deal with either way. None of this is legal advice (talk to an actual trademark attorney before a real public launch), but as a matter of reducing obvious risk:
+
+- The payment-handle feature is now called **$Paytag**, this app's own name for it. The database column behind it is `paytag` (see `add_paytag_column_rebrand` in the Supabase migration history) — the old `cashtag` column still exists but is unused, kept only so the still-deployed old code didn't break the moment this migration ran; it's safe to drop once the new code has been live a while.
+- The primary brand color is now a distinct indigo-blue (`--accent: #4954e6` in `styles.css`), not the old vivid green.
+- Marketing copy and code comments that named Cash App directly have been reworded to describe what the feature does instead of what it resembles.
 
 ## What's deliberately NOT implemented (see the business plan)
 

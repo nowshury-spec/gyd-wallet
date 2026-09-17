@@ -10,11 +10,14 @@
   --muted: #a3a89e;
   --muted-2: #7d8278;
 
-  /* Cash-App-style vivid green as the primary accent */
-  --accent: #00d964;
-  --accent-2: #00a851;
-  --accent-soft: rgba(0, 217, 100, 0.16);
-  --accent-glow: rgba(0, 217, 100, 0.4);
+  /* GYD Wallet's own primary accent — a distinct indigo-blue, deliberately
+     not modeled on any other payment app's brand color. Dark/saturated
+     enough that white text sits on top of it (see .btn, .auth-hero, etc.)
+     rather than the near-black text the old bright-green accent used. */
+  --accent: #4954e6;
+  --accent-2: #3a44c2;
+  --accent-soft: rgba(73, 84, 230, 0.16);
+  --accent-glow: rgba(73, 84, 230, 0.4);
 
   --gold: #ffce54;
   --gold-soft: rgba(255, 206, 84, 0.16);
@@ -25,7 +28,7 @@
   --bad-soft: rgba(255, 84, 112, 0.15);
 
   /* playful badge colors for the bottom nav / quick actions */
-  --badge-green: #00d964;
+  --badge-green: #1fae63;
   --badge-blue: #2f8fff;
   --badge-pink: #ff3d81;
   --badge-orange: #ff9f43;
@@ -37,7 +40,7 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-glow: 0 0 0 1px rgba(0, 217, 100, 0.25), 0 8px 30px rgba(0, 217, 100, 0.18);
+  --shadow-glow: 0 0 0 1px rgba(73, 84, 230, 0.25), 0 8px 30px rgba(73, 84, 230, 0.18);
 
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -73,7 +76,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
   justify-content: center;
   padding: 32px;
   background:
-    radial-gradient(1100px 560px at 12% -10%, rgba(0, 217, 100, 0.18), transparent 60%),
+    radial-gradient(1100px 560px at 12% -10%, rgba(73, 84, 230, 0.18), transparent 60%),
     radial-gradient(900px 500px at 100% 100%, rgba(255, 206, 84, 0.08), transparent 55%),
     var(--bg);
 }
@@ -92,9 +95,9 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .auth-hero {
   background:
     radial-gradient(600px 420px at 0% 0%, rgba(255, 255, 255, 0.14), transparent 60%),
-    linear-gradient(155deg, var(--accent) 0%, var(--accent-2) 65%, #007a3b 100%);
+    linear-gradient(155deg, var(--accent) 0%, var(--accent-2) 65%, #1c2166 100%);
   padding: 44px 38px;
-  color: #04140a;
+  color: #ffffff;
   display: flex;
   align-items: center;
 }
@@ -105,8 +108,8 @@ input, button, select { font-size: 14px; font-family: inherit; }
   width: 52px;
   height: 52px;
   border-radius: 16px;
-  background: rgba(4, 20, 10, 0.18);
-  border: 1px solid rgba(4, 20, 10, 0.22);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -120,13 +123,13 @@ input, button, select { font-size: 14px; font-family: inherit; }
   font-weight: 800;
   margin: 0 0 10px;
   letter-spacing: -0.02em;
-  color: #04180c;
+  color: #ffffff;
 }
 
 .hero-sub {
   font-size: 14px;
   line-height: 1.55;
-  color: rgba(4, 24, 12, 0.78);
+  color: rgba(255, 255, 255, 0.78);
   margin: 0 0 28px;
 }
 
@@ -138,22 +141,22 @@ input, button, select { font-size: 14px; font-family: inherit; }
   height: 32px;
   flex-shrink: 0;
   border-radius: 10px;
-  background: rgba(4, 20, 10, 0.16);
+  background: rgba(255, 255, 255, 0.16);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 15px;
 }
 
-.hero-features strong { display: block; font-size: 13.5px; font-weight: 800; margin-bottom: 2px; color: #04180c; }
-.hero-features span { display: block; font-size: 12.5px; color: rgba(4, 24, 12, 0.7); line-height: 1.4; }
+.hero-features strong { display: block; font-size: 13.5px; font-weight: 800; margin-bottom: 2px; color: #ffffff; }
+.hero-features span { display: block; font-size: 12.5px; color: rgba(255, 255, 255, 0.7); line-height: 1.4; }
 
 .hero-note {
   font-size: 11.5px;
-  color: rgba(4, 24, 12, 0.62);
+  color: rgba(255, 255, 255, 0.62);
   margin: 0;
   padding-top: 18px;
-  border-top: 1px solid rgba(4, 20, 10, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .auth-card { background: var(--surface); padding: 40px 38px; display: flex; flex-direction: column; justify-content: center; }
@@ -165,7 +168,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
   color: var(--muted); font-weight: 700; font-size: 13.5px; transition: background 0.15s ease, color 0.15s ease;
 }
 
-.auth-tabs button.active { background: var(--accent); color: #04180c; box-shadow: 0 2px 10px var(--accent-glow); }
+.auth-tabs button.active { background: var(--accent); color: #ffffff; box-shadow: 0 2px 10px var(--accent-glow); }
 
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; }
@@ -187,7 +190,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 12px 18px; border-radius: 999px; border: none;
   background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #04180c; font-weight: 800; font-size: 13.5px;
+  color: #ffffff; font-weight: 800; font-size: 13.5px;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 4px 16px var(--accent-glow);
   transition: transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
@@ -235,14 +238,14 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .reset-code-display strong { font-size: 22px; letter-spacing: 4px; color: var(--accent); display: block; margin: 6px 0 2px; }
 .reset-code-display strong.username-value { letter-spacing: normal; word-break: break-word; }
 
-/* ---------- app shell: a centered "phone" like Cash App's own web layout ---------- */
+/* ---------- app shell: a centered "phone" frame for the web layout ---------- */
 
 #app-screen {
   min-height: 100vh;
   display: flex;
   justify-content: center;
   background:
-    radial-gradient(700px 500px at 50% -10%, rgba(0, 217, 100, 0.12), transparent 60%),
+    radial-gradient(700px 500px at 50% -10%, rgba(73, 84, 230, 0.12), transparent 60%),
     var(--bg);
 }
 
@@ -335,7 +338,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
 
 .quick-action:active .quick-action-icon { transform: scale(0.92); }
 
-.qa-green { background: linear-gradient(160deg, var(--badge-green), #00a851); }
+.qa-green { background: linear-gradient(160deg, var(--badge-green), #147a45); }
 .qa-blue { background: linear-gradient(160deg, var(--badge-blue), #1f6fd1); }
 .qa-pink { background: linear-gradient(160deg, var(--badge-pink), #d41a5f); }
 .qa-orange { background: linear-gradient(160deg, var(--badge-orange), #d9781f); }
@@ -354,7 +357,7 @@ h2.section-title { font-size: 14.5px; font-weight: 800; margin: 0 0 14px; color:
 .panel-row { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
 .panel-row .field { margin-bottom: 0; flex: 1; min-width: 140px; }
 
-/* Cash App-style keypad pay/request panel */
+/* Numeric-keypad pay/request panel */
 .pay-panel { display: flex; flex-direction: column; align-items: stretch; }
 .pay-amount-display {
   text-align: center;
@@ -585,7 +588,7 @@ tbody tr:last-child td { border-bottom: none; }
 .messages-scroll { flex: 1; min-height: 220px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; margin-bottom: 14px; padding: 4px 4px 0; }
 
 .bubble { max-width: 78%; padding: 9px 13px; border-radius: 16px; font-size: 13px; line-height: 1.4; }
-.bubble.mine { align-self: flex-end; background: linear-gradient(160deg, var(--accent), var(--accent-2)); color: #04180c; border-bottom-right-radius: 4px; font-weight: 600; }
+.bubble.mine { align-self: flex-end; background: linear-gradient(160deg, var(--accent), var(--accent-2)); color: #ffffff; border-bottom-right-radius: 4px; font-weight: 600; }
 .bubble.theirs { align-self: flex-start; background: var(--surface-3); border-bottom-left-radius: 4px; }
 
 .compose-row { display: flex; gap: 10px; }
@@ -659,7 +662,7 @@ label.btn { display: inline-flex; }
   transition: opacity 0.15s ease, filter 0.15s ease, transform 0.15s ease;
 }
 
-.badge-green { background: linear-gradient(160deg, var(--badge-green), #00a851); }
+.badge-green { background: linear-gradient(160deg, var(--badge-green), #147a45); }
 .badge-blue { background: linear-gradient(160deg, var(--badge-blue), #1f6fd1); }
 .badge-pink { background: linear-gradient(160deg, var(--badge-pink), #d41a5f); }
 .badge-orange { background: linear-gradient(160deg, var(--badge-orange), #d9781f); }
@@ -691,9 +694,9 @@ label.btn { display: inline-flex; }
 
 .arcade-panel-remit {
   background:
-    radial-gradient(400px 260px at 50% -20%, rgba(0, 217, 100, 0.16), transparent 60%),
+    radial-gradient(400px 260px at 50% -20%, rgba(73, 84, 230, 0.16), transparent 60%),
     var(--surface);
-  border-color: rgba(0, 217, 100, 0.25);
+  border-color: rgba(73, 84, 230, 0.25);
 }
 
 .arcade-tag-remit { color: var(--accent); background: var(--accent-soft); }
@@ -760,7 +763,7 @@ label.btn { display: inline-flex; }
   display: flex; align-items: center; justify-content: center; font-size: 30px;
 }
 .bizpage-name { font-weight: 800; font-size: 17px; margin-bottom: 2px; }
-.bizpage-cashtag { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.bizpage-paytag { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .bizpage-tagline { font-size: 13px; color: var(--muted); margin: 12px 0 0; line-height: 1.5; }
 
 .product-row {

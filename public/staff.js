@@ -353,7 +353,7 @@
       card.className = 'staff-item';
       card.innerHTML = `
         <div class="staff-item-top">
-          <strong>$${c.cashtag || c.username} · GYD ${fmt(c.amountGyd)}</strong>
+          <strong>$${c.paytag || c.username} · GYD ${fmt(c.amountGyd)}</strong>
           <span class="pill ${c.status}">${c.status}</span>
         </div>
         <div class="staff-item-meta">@${c.username} · requested ${timeAgo(c.createdAt)}${

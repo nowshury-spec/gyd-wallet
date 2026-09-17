@@ -175,7 +175,7 @@ function publicUser(u) {
   return {
     id: u.id,
     username: u.username,
-    cashtag: u.cashtag,
+    paytag: u.paytag,
     email: u.email || null,
     isBusiness: !!u.is_business,
     businessName: u.business_name || null,
@@ -190,12 +190,11 @@ function publicUser(u) {
 // obvious typos without rejecting real addresses.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Cash App-style $Cashtag: a short, unique, user-changeable payment handle
-// that's separate from (but defaults to) the login username. Looking
-// someone up by "handle" below accepts either their username or their
-// $cashtag (with or without a leading $), the same way Cash App lets you
-// pay a $Cashtag OR a full name/phone lookup.
-function slugifyCashtag(base) {
+// $Paytag: a short, unique, user-changeable payment handle that's separate
+// from (but defaults to) the login username. Looking someone up by "handle"
+// below accepts either their username or their $paytag (with or without a
+// leading $), so a sender can use whichever one they actually know.
+function slugifyPaytag(base) {
   let slug = (base || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
   if (slug.length < 3) slug = slug + 'user' + crypto.randomInt(1000);
   // Capped shorter than the 20-char max so a numeric de-dupe suffix below
@@ -205,11 +204,11 @@ function slugifyCashtag(base) {
   return slug.slice(0, 16);
 }
 
-async function generateUniqueCashtag(base) {
-  const slug = slugifyCashtag(base);
+async function generateUniquePaytag(base) {
+  const slug = slugifyPaytag(base);
   let candidate = slug;
   let n = 0;
-  while (await db.prepare('SELECT id FROM users WHERE LOWER(cashtag) = LOWER(?)').get(candidate)) {
+  while (await db.prepare('SELECT id FROM users WHERE LOWER(paytag) = LOWER(?)').get(candidate)) {
     n += 1;
     candidate = `${slug}${n}`;
   }
@@ -219,7 +218,7 @@ async function generateUniqueCashtag(base) {
 async function findUserByHandle(raw) {
   const handle = (raw || '').trim().replace(/^\$/, '');
   if (!handle) return null;
-  return db.prepare('SELECT * FROM users WHERE username = ? OR LOWER(cashtag) = LOWER(?)').get(handle, handle);
+  return db.prepare('SELECT * FROM users WHERE username = ? OR LOWER(paytag) = LOWER(?)').get(handle, handle);
 }
 
 async function isBusinessAccount(userId) {
@@ -349,11 +348,11 @@ on('POST', '/api/register', async (req, res, params, query, body) => {
 
   const { salt, hash } = hashPassword(password);
   const id = crypto.randomUUID();
-  const cashtag = await generateUniqueCashtag(username);
+  const paytag = await generateUniquePaytag(username);
   await db.prepare(
-    `INSERT INTO users (id, username, cashtag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
+    `INSERT INTO users (id, username, paytag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
-  ).run(id, username, cashtag, email, hash, salt, isBusiness ? 1 : 0, isBusiness ? (businessName || username) : null, now());
+  ).run(id, username, paytag, email, hash, salt, isBusiness ? 1 : 0, isBusiness ? (businessName || username) : null, now());
 
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   const token = makeSessionToken(id);
@@ -599,15 +598,15 @@ on(
 
 on(
   'POST',
-  '/api/me/cashtag',
+  '/api/me/paytag',
   requireAuth(async (req, res, params, query, body, user) => {
-    const raw = (body.cashtag || '').trim().replace(/^\$/, '');
+    const raw = (body.paytag || '').trim().replace(/^\$/, '');
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(raw)) {
-      return badRequest(res, '$Cashtag must be 3-20 letters, numbers, or underscores.');
+      return badRequest(res, '$Paytag must be 3-20 letters, numbers, or underscores.');
     }
-    const existing = await db.prepare('SELECT id FROM users WHERE LOWER(cashtag) = LOWER(?) AND id != ?').get(raw, user.id);
-    if (existing) return badRequest(res, 'That $cashtag is already taken.');
-    await db.prepare('UPDATE users SET cashtag = ? WHERE id = ?').run(raw, user.id);
+    const existing = await db.prepare('SELECT id FROM users WHERE LOWER(paytag) = LOWER(?) AND id != ?').get(raw, user.id);
+    if (existing) return badRequest(res, 'That $paytag is already taken.');
+    await db.prepare('UPDATE users SET paytag = ? WHERE id = ?').run(raw, user.id);
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     sendJson(res, 200, { user: publicUser(updated) });
   })
@@ -621,15 +620,15 @@ on(
     let rows;
     if (q) {
       rows = await db
-        .prepare('SELECT id, username, cashtag, is_business, business_name FROM users WHERE (username LIKE ? OR cashtag LIKE ?) AND id != ? LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE (username LIKE ? OR paytag LIKE ?) AND id != ? LIMIT 20')
         .all(`%${q}%`, `%${q}%`, user.id);
     } else {
       rows = await db
-        .prepare('SELECT id, username, cashtag, is_business, business_name FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 20')
         .all(user.id);
     }
     sendJson(res, 200, {
-      users: rows.map((r) => ({ id: r.id, username: r.username, cashtag: r.cashtag, isBusiness: !!r.is_business, businessName: r.business_name })),
+      users: rows.map((r) => ({ id: r.id, username: r.username, paytag: r.paytag, isBusiness: !!r.is_business, businessName: r.business_name })),
     });
   })
 );
@@ -639,10 +638,10 @@ on(
   '/api/users/:username',
   requireAuth(async (req, res, params) => {
     // Despite the route's :username param name (kept stable for callers),
-    // this accepts either a username or a $cashtag — see findUserByHandle.
+    // this accepts either a username or a $paytag — see findUserByHandle.
     const other = await findUserByHandle(params.username);
-    if (!other) return sendJson(res, 404, { error: 'No user with that username or $cashtag.' });
-    sendJson(res, 200, { id: other.id, username: other.username, cashtag: other.cashtag, isBusiness: !!other.is_business, businessName: other.business_name });
+    if (!other) return sendJson(res, 404, { error: 'No user with that username or $paytag.' });
+    sendJson(res, 200, { id: other.id, username: other.username, paytag: other.paytag, isBusiness: !!other.is_business, businessName: other.business_name });
   })
 );
 
@@ -723,7 +722,7 @@ on(
   'POST',
   '/api/transfer',
   requireAuth(async (req, res, params, query, body, user) => {
-    // toUsername accepts either a username or a $cashtag (with or without
+    // toUsername accepts either a username or a $paytag (with or without
     // the leading $) — see findUserByHandle.
     const { memo } = body;
     const toHandle = body.toUsername || body.to;
@@ -731,7 +730,7 @@ on(
     if (!toHandle) return badRequest(res, 'Choose who to send to.');
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount.');
     const recipient = await findUserByHandle(toHandle);
-    if (!recipient) return badRequest(res, 'No user with that username or $cashtag.');
+    if (!recipient) return badRequest(res, 'No user with that username or $paytag.');
     if (recipient.id === user.id) return badRequest(res, "You can't send money to yourself.");
     if (user.gyd_balance < amount) return badRequest(res, 'Not enough GYD.');
 
@@ -907,19 +906,20 @@ on(
   })
 );
 
-// ---------- request money (Cash App-style pay/request) ----------
+// ---------- request money (pay/request) ----------
 //
-// Cash App lets you either pay someone or request money from them; this is
-// the request half. Unlike GYD Direct above, this only ever moves money
-// between two existing accounts — from_user is the person asking to be
-// paid, to_user is the person being asked to pay, and paying it is just a
-// transfer gated behind the payer's approval instead of happening instantly.
+// The pay/request panel lets you either pay someone or request money from
+// them; this is the request half. Unlike GYD Direct above, this only ever
+// moves money between two existing accounts — from_user is the person
+// asking to be paid, to_user is the person being asked to pay, and paying
+// it is just a transfer gated behind the payer's approval instead of
+// happening instantly.
 
 function moneyRequestPublicIncoming(r) {
   return {
     id: r.id,
     fromUsername: r.from_username,
-    fromCashtag: r.from_cashtag,
+    fromPaytag: r.from_paytag,
     amount: r.amount,
     note: r.note,
     status: r.status,
@@ -932,7 +932,7 @@ function moneyRequestPublicOutgoing(r) {
   return {
     id: r.id,
     toUsername: r.to_username,
-    toCashtag: r.to_cashtag,
+    toPaytag: r.to_paytag,
     amount: r.amount,
     note: r.note,
     status: r.status,
@@ -948,10 +948,10 @@ on(
     const toHandle = (body.toHandle || body.toUsername || '').trim();
     const amount = Number(body.amount);
     const note = (body.note || '').trim().slice(0, 300);
-    if (!toHandle) return badRequest(res, "Enter a username or $cashtag to request from.");
+    if (!toHandle) return badRequest(res, "Enter a username or $paytag to request from.");
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount to request.');
     const payer = await findUserByHandle(toHandle);
-    if (!payer) return badRequest(res, 'No user with that username or $cashtag.');
+    if (!payer) return badRequest(res, 'No user with that username or $paytag.');
     if (payer.id === user.id) return badRequest(res, "You can't request money from yourself.");
 
     const id = crypto.randomUUID();
@@ -969,14 +969,14 @@ on(
   requireAuth(async (req, res, params, query, body, user) => {
     const incoming = await db
       .prepare(
-        `SELECT r.*, u.username AS from_username, u.cashtag AS from_cashtag
+        `SELECT r.*, u.username AS from_username, u.paytag AS from_paytag
          FROM money_requests r JOIN users u ON u.id = r.from_user
          WHERE r.to_user = ? ORDER BY r.created_at DESC LIMIT 50`
       )
       .all(user.id);
     const outgoing = await db
       .prepare(
-        `SELECT r.*, u.username AS to_username, u.cashtag AS to_cashtag
+        `SELECT r.*, u.username AS to_username, u.paytag AS to_paytag
          FROM money_requests r JOIN users u ON u.id = r.to_user
          WHERE r.from_user = ? ORDER BY r.created_at DESC LIMIT 50`
       )
@@ -1487,7 +1487,7 @@ function businessProfilePublic(row) {
     // every join that builds one of these rows includes bp.*).
     userId: row.user_id,
     username: row.username,
-    cashtag: row.cashtag,
+    paytag: row.paytag,
     businessName: row.business_name,
     category: row.category,
     tagline: row.tagline,
@@ -1536,7 +1536,7 @@ on(
     const tagline = (body.tagline || '').trim().slice(0, 140);
     const description = (body.description || '').trim().slice(0, 1000);
     const keywords = (body.keywords || '').trim().slice(0, 300);
-    const themeColor = /^#[0-9a-fA-F]{6}$/.test(body.themeColor || '') ? body.themeColor : '#00d964';
+    const themeColor = /^#[0-9a-fA-F]{6}$/.test(body.themeColor || '') ? body.themeColor : '#4954e6';
     const logoEmoji = (body.logoEmoji || '').trim().slice(0, 8);
     const phone = (body.phone || '').trim().slice(0, 40);
     const location = (body.location || '').trim().slice(0, 140);
@@ -1619,7 +1619,7 @@ on(
   '/api/business/directory/:handle',
   requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(params.handle);
-    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
     const row = await db
       .prepare(
         `SELECT u.*, bp.*,
@@ -1681,7 +1681,7 @@ on(
   '/api/business/directory/:handle/review',
   requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(params.handle);
-    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
     if (bizUser.id === user.id) return badRequest(res, "You can't rate your own business.");
     const rating = Math.round(Number(body.rating));
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
@@ -1717,7 +1717,7 @@ on(
   '/api/business/directory/:handle/review',
   requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(params.handle);
-    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
     await db.prepare('DELETE FROM business_reviews WHERE business_id = ? AND reviewer_id = ?').run(bizUser.id, user.id);
     sendJson(res, 200, { ok: true });
   })
@@ -1737,7 +1737,7 @@ on(
   '/api/business/directory/:handle/reviews/:reviewId/report',
   requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(params.handle);
-    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $cashtag.' });
+    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
     const review = await db
       .prepare('SELECT r.*, u.username AS reviewer_username FROM business_reviews r JOIN users u ON u.id = r.reviewer_id WHERE r.id = ? AND r.business_id = ?')
       .get(params.reviewId, bizUser.id);
@@ -1771,7 +1771,7 @@ on(
 // ---------- business products & prices ----------
 //
 // A simple price list attached to a business's page — not tied to payments
-// (paying still just moves GYD to a business by username/$cashtag/QR/charge
+// (paying still just moves GYD to a business by username/$paytag/QR/charge
 // request, same as before); this is purely informational, like a printed
 // menu or catalog a customer reads before deciding to buy or message.
 
@@ -2283,7 +2283,7 @@ on(
   '/api/business/checkout',
   requireAuth(async (req, res, params, query, body, user) => {
     const bizUser = await findUserByHandle(body.businessHandle || '');
-    if (!bizUser || !bizUser.is_business) return badRequest(res, 'No business with that username or $cashtag.');
+    if (!bizUser || !bizUser.is_business) return badRequest(res, 'No business with that username or $paytag.');
     if (bizUser.id === user.id) return badRequest(res, "You can't check out with your own business.");
 
     const profileRow = await db.prepare('SELECT * FROM business_profiles WHERE user_id = ?').get(bizUser.id);
@@ -2960,7 +2960,7 @@ on(
     const status = ['pending', 'completed', 'rejected'].includes(query.status) ? query.status : 'pending';
     const rows = await db
       .prepare(
-        `SELECT c.*, u.username, u.cashtag FROM cashout_requests c JOIN users u ON u.id = c.user_id
+        `SELECT c.*, u.username, u.paytag FROM cashout_requests c JOIN users u ON u.id = c.user_id
          WHERE c.status = ? ORDER BY c.created_at ASC LIMIT 200`
       )
       .all(status);
@@ -2968,7 +2968,7 @@ on(
       cashouts: rows.map((r) => ({
         id: r.id,
         username: r.username,
-        cashtag: r.cashtag,
+        paytag: r.paytag,
         amountGyd: r.amount_gyd,
         status: r.status,
         createdAt: r.created_at,
