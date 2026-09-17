@@ -1,48 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap');
+
 :root {
-  --bg: #1b1f1c;
-  --sidebar-bg: #232733;
-  --surface: #262a26;
-  --surface-2: #2e332e;
-  --surface-3: #383d38;
-  --border: #484d47;
-  --border-soft: #383d37;
-  --text: #f8faf8;
-  --muted: #a3a89e;
-  --muted-2: #7d8278;
+  /* A warm paper-and-banknote palette: cream/paper surfaces, deep forest
+     green as the brand color, a gold accent, dark ink text. Deliberately
+     its own thing rather than a copy of any other payment app's look. */
+  --bg: #ede9db;
+  --sidebar-bg: #f1eee3;
+  --surface: #faf7ef;
+  --surface-2: #f1eee3;
+  --surface-3: #e8e2d0;
+  --border: #e6e0ce;
+  --border-soft: #efe9d9;
+  --text: #16241d;
+  --muted: #5c6b60;
+  --muted-2: #8b9690;
 
-  /* GYD Wallet's own primary accent — a distinct indigo-blue, deliberately
-     not modeled on any other payment app's brand color. Dark/saturated
-     enough that white text sits on top of it (see .btn, .auth-hero, etc.)
-     rather than the near-black text the old bright-green accent used. */
-  --accent: #4954e6;
-  --accent-2: #3a44c2;
-  --accent-soft: rgba(73, 84, 230, 0.16);
-  --accent-glow: rgba(73, 84, 230, 0.4);
+  --accent: #1f6e43;
+  --accent-2: #123b26;
+  --accent-soft: rgba(31, 110, 67, 0.14);
+  --accent-glow: rgba(31, 110, 67, 0.38);
 
-  --gold: #ffce54;
-  --gold-soft: rgba(255, 206, 84, 0.16);
+  --gold: #c9a227;
+  --gold-soft: rgba(201, 162, 39, 0.18);
+  /* a solid, light gold — for text/labels sitting on a dark green surface,
+     where the translucent --gold-soft above (meant for pill backgrounds)
+     would read as too faint */
+  --gold-light: #f1e4b8;
 
-  --good: #34d399;
-  --good-soft: rgba(52, 211, 153, 0.14);
-  --bad: #ff5470;
-  --bad-soft: rgba(255, 84, 112, 0.15);
+  --good: #1f6e43;
+  --good-soft: rgba(31, 110, 67, 0.12);
+  --bad: #b3451d;
+  --bad-soft: rgba(179, 69, 29, 0.14);
 
-  /* playful badge colors for the bottom nav / quick actions */
-  --badge-green: #1fae63;
-  --badge-blue: #2f8fff;
-  --badge-pink: #ff3d81;
-  --badge-orange: #ff9f43;
-  --badge-teal: #22d3c7;
+  /* badge colors for the bottom nav / quick actions — kept to the same
+     earthy family (two greens, gold, rust, a muted teal) instead of a
+     rainbow of candy colors */
+  --badge-green: #1f6e43;
+  --badge-blue: #123b26;
+  --badge-pink: #b3451d;
+  --badge-orange: #c9a227;
+  --badge-teal: #3a7a68;
 
   --radius-sm: 10px;
   --radius-md: 16px;
   --radius-lg: 24px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-glow: 0 0 0 1px rgba(73, 84, 230, 0.25), 0 8px 30px rgba(73, 84, 230, 0.18);
+  --shadow-sm: 0 1px 2px rgba(22, 36, 29, 0.08);
+  --shadow-md: 0 8px 24px rgba(22, 36, 29, 0.14);
+  --shadow-glow: 0 0 0 1px rgba(31, 110, 67, 0.22), 0 8px 30px rgba(31, 110, 67, 0.16);
 
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "Work Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -76,8 +83,8 @@ input, button, select { font-size: 14px; font-family: inherit; }
   justify-content: center;
   padding: 32px;
   background:
-    radial-gradient(1100px 560px at 12% -10%, rgba(73, 84, 230, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 100% 100%, rgba(255, 206, 84, 0.08), transparent 55%),
+    radial-gradient(1100px 560px at 12% -10%, rgba(31, 110, 67, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 100% 100%, rgba(201, 162, 39, 0.08), transparent 55%),
     var(--bg);
 }
 
@@ -95,7 +102,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .auth-hero {
   background:
     radial-gradient(600px 420px at 0% 0%, rgba(255, 255, 255, 0.14), transparent 60%),
-    linear-gradient(155deg, var(--accent) 0%, var(--accent-2) 65%, #1c2166 100%);
+    linear-gradient(155deg, var(--accent) 0%, var(--accent-2) 65%, #0d2417 100%);
   padding: 44px 38px;
   color: #ffffff;
   display: flex;
@@ -245,7 +252,7 @@ input, button, select { font-size: 14px; font-family: inherit; }
   display: flex;
   justify-content: center;
   background:
-    radial-gradient(700px 500px at 50% -10%, rgba(73, 84, 230, 0.12), transparent 60%),
+    radial-gradient(700px 500px at 50% -10%, rgba(31, 110, 67, 0.12), transparent 60%),
     var(--bg);
 }
 
@@ -302,26 +309,45 @@ input, button, select { font-size: 14px; font-family: inherit; }
 
 /* ---------- hero balance ---------- */
 
+/* A dark banknote-green card with a fine engraved-line texture (a nod to
+   currency printing, fitting for a GYD-denominated wallet) rather than a
+   plain text balance — the same treatment carries onto the account card
+   and the send/request keypad panel below. */
 .hero-balance {
-  text-align: center;
-  padding: 22px 10px 10px;
-  margin-bottom: 22px;
+  position: relative;
+  text-align: left;
+  padding: 24px 22px;
+  margin: 4px 0 20px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-2);
+  background-image: repeating-linear-gradient(115deg, rgba(201, 162, 39, 0.16) 0px, rgba(201, 162, 39, 0.16) 1px, transparent 1px, transparent 11px);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
 }
 
-.hero-balance-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.hero-balance-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+
+.hero-balance-label { font-size: 11.5px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.1em; }
+
+.balance-visibility-btn {
+  background: rgba(255, 255, 255, 0.14); border: none; border-radius: 50%;
+  width: 30px; height: 30px; font-size: 14px; color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
 
 .hero-balance-value {
-  font-family: "Manrope", "Inter", sans-serif;
-  font-size: 46px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
   line-height: 1.1;
 }
 
-.hero-balance-unit { font-size: 16px; font-weight: 700; color: var(--accent); margin-left: 8px; vertical-align: middle; }
+.hero-balance-unit { font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.72); margin-left: 8px; vertical-align: middle; }
 
-.hero-quick-actions { display: flex; justify-content: center; gap: 22px; margin-top: 22px; flex-wrap: wrap; }
+.hero-quick-actions { display: flex; justify-content: center; gap: 22px; margin: 0 0 22px; flex-wrap: wrap; }
 
 .quick-action {
   display: flex; flex-direction: column; align-items: center; gap: 7px;
@@ -338,10 +364,47 @@ input, button, select { font-size: 14px; font-family: inherit; }
 
 .quick-action:active .quick-action-icon { transform: scale(0.92); }
 
-.qa-green { background: linear-gradient(160deg, var(--badge-green), #147a45); }
-.qa-blue { background: linear-gradient(160deg, var(--badge-blue), #1f6fd1); }
-.qa-pink { background: linear-gradient(160deg, var(--badge-pink), #d41a5f); }
-.qa-orange { background: linear-gradient(160deg, var(--badge-orange), #d9781f); }
+.qa-green { background: linear-gradient(160deg, var(--badge-green), #123b26); }
+.qa-blue { background: linear-gradient(160deg, var(--badge-blue), #0b2116); }
+.qa-pink { background: linear-gradient(160deg, var(--badge-pink), #8a3315); }
+.qa-orange { background: linear-gradient(160deg, var(--badge-orange), #a3821f); }
+
+/* ---------- account card (Wallet tab) ---------- */
+
+.account-card {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius-lg);
+  background: var(--accent-2);
+  background-image: repeating-linear-gradient(115deg, rgba(201, 162, 39, 0.16) 0px, rgba(201, 162, 39, 0.16) 1px, transparent 1px, transparent 11px);
+  color: #fff;
+  padding: 22px;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 150px;
+}
+
+.account-card-top { display: flex; }
+
+.account-card-chip {
+  width: 34px; height: 24px; border-radius: 5px; background: var(--gold);
+  background-image: linear-gradient(rgba(18, 59, 38, 0.5), rgba(18, 59, 38, 0.5));
+  background-size: 100% 1px; background-repeat: no-repeat; background-position: center;
+}
+
+.account-card-tag { font-family: "Space Grotesk", sans-serif; font-size: 20px; letter-spacing: 0.04em; margin: 18px 0; }
+
+.account-card-bottom { display: flex; align-items: flex-end; justify-content: space-between; }
+
+.account-card-label { display: block; font-size: 9px; letter-spacing: 0.1em; color: var(--gold-light); text-transform: uppercase; }
+
+.account-card-value { display: block; font-size: 13px; font-weight: 600; margin-top: 2px; }
+
+.account-card-mark { font-family: "Space Grotesk", sans-serif; font-size: 15px; font-weight: 700; }
 
 h2.section-title { font-size: 14.5px; font-weight: 800; margin: 0 0 14px; color: var(--text); letter-spacing: -0.005em; }
 
@@ -361,8 +424,9 @@ h2.section-title { font-size: 14.5px; font-weight: 800; margin: 0 0 14px; color:
 .pay-panel { display: flex; flex-direction: column; align-items: stretch; }
 .pay-amount-display {
   text-align: center;
-  font-size: 42px;
-  font-weight: 800;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 46px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
   margin: 4px 0 18px;
@@ -370,24 +434,25 @@ h2.section-title { font-size: 14.5px; font-weight: 800; margin: 0 0 14px; color:
 .pay-keypad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 6px;
   max-width: 300px;
   margin: 0 auto 20px;
   width: 100%;
 }
 .pay-key {
   border: none;
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
-  font-size: 20px;
-  font-weight: 700;
-  border-radius: var(--radius-sm);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
   padding: 16px 0;
   cursor: pointer;
   transition: background 0.12s ease, transform 0.08s ease;
 }
-.pay-key:hover { background: var(--surface-3); }
-.pay-key:active { transform: scale(0.95); }
+.pay-key:hover { background: var(--surface-2); }
+.pay-key:active { transform: scale(0.95); background: var(--surface-3); }
 .pay-key-blank { background: transparent; cursor: default; pointer-events: none; }
 .pay-key-back { font-size: 17px; color: var(--muted); }
 .pay-actions { display: flex; gap: 12px; margin-top: 4px; }
@@ -413,16 +478,16 @@ tbody tr:last-child td { border-bottom: none; }
 
 .arcade-panel {
   background:
-    radial-gradient(400px 260px at 50% -20%, rgba(255, 61, 129, 0.16), transparent 60%),
+    radial-gradient(400px 260px at 50% -20%, rgba(179, 69, 29, 0.16), transparent 60%),
     var(--surface);
-  border-color: rgba(255, 61, 129, 0.25);
+  border-color: rgba(179, 69, 29, 0.25);
 }
 
 .arcade-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 
 .arcade-tag {
   font-size: 10.5px; font-weight: 800; color: var(--badge-pink);
-  background: rgba(255, 61, 129, 0.14); padding: 4px 10px; border-radius: 999px;
+  background: rgba(179, 69, 29, 0.14); padding: 4px 10px; border-radius: 999px;
 }
 
 .coin-stage {
@@ -442,7 +507,7 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 32px; font-weight: 900; color: #7a5a12; font-family: Georgia, serif;
   background: radial-gradient(circle at 35% 28%, #fff6da, var(--gold) 55%, #c9971f 100%);
   border: 3px solid #a9791a;
-  box-shadow: 0 6px 16px rgba(255, 206, 84, 0.35), inset 0 2px 4px rgba(255, 255, 255, 0.55);
+  box-shadow: 0 6px 16px rgba(201, 162, 39, 0.35), inset 0 2px 4px rgba(255, 255, 255, 0.55);
   backface-visibility: hidden;
 }
 
@@ -465,7 +530,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .game-choice:hover { border-color: var(--muted-2); }
 .game-choice:active { transform: scale(0.97); }
-.game-choice.selected { border-color: var(--badge-pink); background: rgba(255, 61, 129, 0.14); box-shadow: 0 0 0 3px rgba(255, 61, 129, 0.16); }
+.game-choice.selected { border-color: var(--badge-pink); background: rgba(179, 69, 29, 0.14); box-shadow: 0 0 0 3px rgba(179, 69, 29, 0.16); }
 
 .game-result { margin-top: 16px; padding: 15px 16px; border-radius: var(--radius-sm); font-weight: 800; font-size: 13.5px; animation: pop-in 0.25s ease; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -477,9 +542,9 @@ tbody tr:last-child td { border-bottom: none; }
 
 .arcade-panel-slots {
   background:
-    radial-gradient(400px 260px at 50% -20%, rgba(255, 206, 84, 0.18), transparent 60%),
+    radial-gradient(400px 260px at 50% -20%, rgba(201, 162, 39, 0.18), transparent 60%),
     var(--surface);
-  border-color: rgba(255, 206, 84, 0.28);
+  border-color: rgba(201, 162, 39, 0.28);
 }
 
 .arcade-tag-gold { color: var(--gold); background: var(--gold-soft); }
@@ -612,6 +677,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .qr-code-card {
   background: #ffffff; border-radius: var(--radius-md); padding: 14px; box-shadow: var(--shadow-sm);
+  border: 3px solid var(--gold);
   width: 200px; height: 200px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 
@@ -635,6 +701,32 @@ tbody tr:last-child td { border-bottom: none; }
 .qr-manual input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 label.btn { display: inline-flex; }
 
+/* Scan & Pay goes fully dark-green + gold, unlike the rest of the (light,
+   paper-toned) app — a deliberate one-off "torch mode" for the screen you'd
+   actually be pointing a camera from, echoing the account/balance cards'
+   banknote treatment. Scoped to #panel-qr so nothing else is affected. */
+#panel-qr {
+  background: var(--accent-2);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin: -4px -2px 20px;
+}
+#panel-qr h2.section-title { color: #fff; }
+#panel-qr .muted { color: rgba(255, 255, 255, 0.68); }
+#panel-qr .panel {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+#panel-qr .field label { color: rgba(255, 255, 255, 0.72); }
+#panel-qr .field input[type="text"], #panel-qr .field input[type="number"] {
+  background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); color: #fff;
+}
+#panel-qr .field input::placeholder { color: rgba(255, 255, 255, 0.45); }
+#panel-qr .qr-code-text code { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.18); color: rgba(255, 255, 255, 0.85); }
+#panel-qr .qr-manual { border-top-color: rgba(255, 255, 255, 0.16); }
+#panel-qr .qr-manual label { color: rgba(255, 255, 255, 0.72); }
+
 /* ---------- bottom nav (the "gaming icons") ---------- */
 
 .bottom-nav {
@@ -643,7 +735,7 @@ label.btn { display: inline-flex; }
   justify-content: space-around;
   align-items: flex-end;
   padding: 10px 8px calc(10px + env(safe-area-inset-bottom, 0px));
-  background: rgba(19, 21, 19, 0.92);
+  background: rgba(250, 247, 239, 0.92);
   backdrop-filter: blur(14px);
   border-top: 1px solid var(--border-soft);
   position: relative;
@@ -662,11 +754,11 @@ label.btn { display: inline-flex; }
   transition: opacity 0.15s ease, filter 0.15s ease, transform 0.15s ease;
 }
 
-.badge-green { background: linear-gradient(160deg, var(--badge-green), #147a45); }
-.badge-blue { background: linear-gradient(160deg, var(--badge-blue), #1f6fd1); }
-.badge-pink { background: linear-gradient(160deg, var(--badge-pink), #d41a5f); }
-.badge-orange { background: linear-gradient(160deg, var(--badge-orange), #d9781f); }
-.badge-teal { background: linear-gradient(160deg, var(--badge-teal), #189b91); }
+.badge-green { background: linear-gradient(160deg, var(--badge-green), #123b26); }
+.badge-blue { background: linear-gradient(160deg, var(--badge-blue), #0b2116); }
+.badge-pink { background: linear-gradient(160deg, var(--badge-pink), #8a3315); }
+.badge-orange { background: linear-gradient(160deg, var(--badge-orange), #a3821f); }
+.badge-teal { background: linear-gradient(160deg, var(--badge-teal), #245a4c); }
 
 .nav-label { font-size: 10px; font-weight: 700; }
 
@@ -677,7 +769,7 @@ label.btn { display: inline-flex; }
 
 .nav-item-elevated .nav-icon-badge {
   width: 56px; height: 56px; border-radius: 50%; font-size: 24px;
-  box-shadow: 0 6px 18px rgba(255, 61, 129, 0.45), 0 0 0 4px var(--bg);
+  box-shadow: 0 6px 18px rgba(179, 69, 29, 0.45), 0 0 0 4px var(--bg);
   opacity: 1; filter: none;
 }
 
@@ -694,9 +786,9 @@ label.btn { display: inline-flex; }
 
 .arcade-panel-remit {
   background:
-    radial-gradient(400px 260px at 50% -20%, rgba(73, 84, 230, 0.16), transparent 60%),
+    radial-gradient(400px 260px at 50% -20%, rgba(31, 110, 67, 0.16), transparent 60%),
     var(--surface);
-  border-color: rgba(73, 84, 230, 0.25);
+  border-color: rgba(31, 110, 67, 0.25);
 }
 
 .arcade-tag-remit { color: var(--accent); background: var(--accent-soft); }

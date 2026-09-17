@@ -278,18 +278,33 @@
   document.getElementById('jobs-board-btn').onclick = () => switchTab('jobs');
   document.getElementById('jobs-back-btn').onclick = () => switchTab('business');
 
+  // Hidden by the eye button on the balance card — a real "don't show this
+  // number over someone's shoulder" toggle, not a decorative one. Only the
+  // displayed text changes; state.user.gydBalance (and everything computed
+  // from it) is untouched.
+  let balanceHidden = false;
+
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
     document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
-    document.getElementById('balance-gyd').textContent = fmt(state.user.gydBalance);
+    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(state.user.gydBalance);
     document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
     if (state.user.isBusiness) {
       document.getElementById('biz-wallet-balance').textContent = fmt(state.user.businessGydBalance);
     }
     const paytagInput = document.getElementById('paytag-input');
     if (document.activeElement !== paytagInput) paytagInput.value = state.user.paytag || '';
+    document.getElementById('account-card-paytag').textContent = `$${state.user.paytag || ''}`;
+    document.getElementById('account-card-holder').textContent = state.user.username;
   }
+
+  document.getElementById('balance-visibility-btn').onclick = () => {
+    balanceHidden = !balanceHidden;
+    document.getElementById('balance-visibility-btn').textContent = balanceHidden ? '🙈' : '👁';
+    document.getElementById('balance-visibility-btn').title = balanceHidden ? 'Show balance' : 'Hide balance';
+    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(state.user.gydBalance);
+  };
 
   document.getElementById('paytag-save-btn').onclick = async () => {
     const val = document.getElementById('paytag-input').value.trim();
