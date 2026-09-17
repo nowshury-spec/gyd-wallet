@@ -55,13 +55,14 @@
       const data = await api('/api/staff/login', 'POST', { username, password });
       // Username + password alone isn't enough to get in — a one-time code
       // is required next (see /api/staff/login/verify-code). With an email
-      // on file (see the "My email" field on the dashboard) and real
-      // delivery configured, data.sent means the code actually went there
-      // instead of showing up right here — a genuine second factor rather
-      // than just a second step.
+      // or phone on file (see the "My email" / "My phone" fields on the
+      // dashboard) and real delivery configured, data.sent means the code
+      // actually went there instead of showing up right here — a genuine
+      // second factor rather than just a second step. data.sentVia says
+      // which channel it went out on.
       pendingUsername = username;
       document.getElementById('staff-code-display').innerHTML = data.sent
-        ? `We've emailed your verification code. It expires in ${data.expiresInMinutes} minutes.`
+        ? `We've ${data.sentVia === 'sms' ? 'texted' : 'emailed'} your verification code. It expires in ${data.expiresInMinutes} minutes.`
         : `Since this doesn't send real emails/SMS yet, here's your simulated verification code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
       document.getElementById('staff-code-input').value = '';
       document.getElementById('staff-code-error').textContent = '';
@@ -130,6 +131,8 @@
     document.getElementById('tab-audit-log').classList.toggle('hidden', !isOwner);
     document.getElementById('my-email-input').value = state.staff.email || '';
     document.getElementById('my-email-success').textContent = '';
+    document.getElementById('my-phone-input').value = state.staff.phone || '';
+    document.getElementById('my-phone-success').textContent = '';
     loginScreen.classList.add('hidden');
     dashboardScreen.classList.remove('hidden');
     loadSummary();
@@ -150,6 +153,24 @@
       const data = await api('/api/staff/me/email', 'POST', { email });
       state.staff = data.staff;
       successBox.textContent = email ? 'Saved.' : 'Email removed.';
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  // Same idea as the email form above, but for a phone number — see
+  // POST /api/staff/me/phone in server.js.
+  document.getElementById('my-phone-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const phone = document.getElementById('my-phone-input').value.trim();
+    const errBox = document.getElementById('my-phone-error');
+    const successBox = document.getElementById('my-phone-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    try {
+      const data = await api('/api/staff/me/phone', 'POST', { phone });
+      state.staff = data.staff;
+      successBox.textContent = phone ? 'Saved.' : 'Phone number removed.';
     } catch (err) {
       errBox.textContent = err.message;
     }

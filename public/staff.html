@@ -116,6 +116,20 @@
             <div class="muted" id="my-email-success" style="font-size:12px; margin-top:6px;"></div>
           </form>
         </div>
+        <div class="panel" id="my-phone-panel">
+          <h2 class="section-title" style="margin-top:0;">My phone</h2>
+          <p class="forgot-intro">Add your phone number so your login verification code can be texted instead —
+          used when there's no email on file, or the email couldn't be delivered.</p>
+          <form id="my-phone-form">
+            <div class="field">
+              <label>Phone number</label>
+              <input type="tel" id="my-phone-input" placeholder="+592 600 0000" />
+            </div>
+            <button type="submit" class="btn full">Save phone</button>
+            <div class="error-msg" id="my-phone-error"></div>
+            <div class="muted" id="my-phone-success" style="font-size:12px; margin-top:6px;"></div>
+          </form>
+        </div>
         <div class="panel hidden" id="add-employee-panel">
           <h2 class="section-title" style="margin-top:0;">Add an employee</h2>
           <p class="forgot-intro">Only an owner-level account can add employees or view the audit log — that's what

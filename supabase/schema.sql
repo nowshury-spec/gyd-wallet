@@ -344,19 +344,26 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
   -- fraud-alert emails below go here instead of only showing on screen.
   -- NULL just means "no real delivery for this account yet" — everything
   -- still falls back to on-screen the same as before.
-  email TEXT
+  email TEXT,
+  -- Same idea as email above, but for SMS delivery of the login
+  -- verification code (see sms.js and PATCH /api/staff/me/phone) — tried
+  -- as a fallback when email isn't on file, isn't configured, or fails to
+  -- send. Added via the add_staff_phone_column migration.
+  phone TEXT
 );
 
 -- A one-time 6-digit code required after username+password to finish a
 -- staff login — see POST /api/staff/login and /api/staff/login/verify-code
--- in server.js. Same "simulated" pattern as password_resets below (the code
--- comes straight back in the API response and is shown on screen, since
--- this Phase 1 prototype has no real email/SMS sending set up yet — see
--- README's "Why no npm packages"). Until real delivery exists this is
--- mostly a structural second step rather than a true second factor, since
--- anyone who already has the password can see the code too; it becomes a
--- real second factor the moment the code is actually sent somewhere only
--- the real staff member can see, with no other code changes needed.
+-- in server.js. Same "simulated" pattern as password_resets below when
+-- nothing is configured (the code comes straight back in the API response
+-- and is shown on screen). Real delivery (email.js and/or sms.js) is
+-- optional and per-account — without an email or phone on file for this
+-- staff account, or without RESEND_API_KEY/the Twilio env vars set at all
+-- (see README's "Setting up real email delivery" and "Setting up real SMS
+-- delivery"), this stays a structural second step rather than a true
+-- second factor, since anyone who already has the password can see the
+-- code too. It becomes a real second factor the moment the code is
+-- actually sent somewhere only the real staff member can see.
 CREATE TABLE IF NOT EXISTS staff_login_codes (
   id TEXT PRIMARY KEY,
   staff_id TEXT NOT NULL,

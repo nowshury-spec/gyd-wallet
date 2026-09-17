@@ -20,6 +20,7 @@ const db = require('./db');
 const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify } = require('./auth');
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
 const { emailEnabled, sendEmail, codeEmailHtml } = require('./email');
+const { smsEnabled, sendSms } = require('./sms');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -108,7 +109,7 @@ async function getAuthedStaff(req) {
 }
 
 function publicStaff(s) {
-  return { id: s.id, username: s.username, role: s.role || 'employee', createdAt: s.created_at, email: s.email || null };
+  return { id: s.id, username: s.username, role: s.role || 'employee', createdAt: s.created_at, email: s.email || null, phone: s.phone || null };
 }
 
 // A permanent, append-only record of anything a staff member does that
@@ -815,9 +816,25 @@ on(
 
     await logTx({ type: 'remit_send', fromUser: user.id, amount: total, currency: 'GYD', note: `To ${recipientName}, ref ${referenceCode}` });
 
+    // With real SMS delivery configured (see sms.js), text the reference
+    // code straight to the recipient instead of leaving the sender to
+    // relay it by hand — see "Setting up real SMS delivery" in README.md
+    // for how to turn this on. Never blocks the transfer itself: if the
+    // text fails to send for any reason, the transfer still went through
+    // and the sender can still share the code themselves (the UI shows
+    // that instruction either way).
+    let smsSent = false;
+    if (smsEnabled()) {
+      const result = await sendSms(
+        recipientPhone,
+        `${user.username} sent you GYD ${fmtNum(amount)} via GYD Direct. Your reference code is ${referenceCode}. Enter it, with your name exactly as "${recipientName}", under "Receive money" in the GYD Wallet app to collect it.`
+      );
+      smsSent = result.sent;
+    }
+
     const row = await db.prepare('SELECT * FROM remittances WHERE id = ?').get(id);
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 201, { remittance: remittancePublic(row), user: publicUser(updated) });
+    sendJson(res, 201, { remittance: { ...remittancePublic(row), smsSent }, user: publicUser(updated) });
   })
 );
 
@@ -2666,12 +2683,16 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
     `INSERT INTO staff_login_codes (id, staff_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
   ).run(crypto.randomUUID(), staff.id, code, now(), new Date(Date.now() + STAFF_CODE_TTL_MS).toISOString());
 
-  // With an email on file AND real delivery configured (see email.js and
-  // PATCH /api/staff/me/email below), this is a genuine second factor —
-  // the code goes somewhere the password alone doesn't get you. Without
-  // either of those it falls back to the original "shown on screen"
+  // With an email or phone on file AND real delivery configured (see
+  // email.js, sms.js, PATCH /api/staff/me/email, and PATCH
+  // /api/staff/me/phone), this is a genuine second factor — the code goes
+  // somewhere the password alone doesn't get you. Email is tried first
+  // when both are on file (it was the first channel this app supported);
+  // SMS is the fallback. Without either configured, or without delivery
+  // set up at all, this falls back to the original "shown on screen"
   // behavior, same as every other simulated code in this app.
   let sent = false;
+  let sentVia = null;
   if (staff.email && emailEnabled()) {
     const result = await sendEmail(
       staff.email,
@@ -2679,13 +2700,19 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
       codeEmailHtml('Here is your GYD Wallet staff login verification code:', code, 10)
     );
     sent = result.sent;
+    if (sent) sentVia = 'email';
+  }
+  if (!sent && staff.phone && smsEnabled()) {
+    const result = await sendSms(staff.phone, `Your GYD Wallet staff login verification code is ${code}. It expires in 10 minutes.`);
+    sent = result.sent;
+    if (sent) sentVia = 'sms';
   }
 
   sendJson(res, 200, {
     requiresCode: true,
     username: staff.username,
     expiresInMinutes: 10,
-    ...(sent ? { sent: true } : { code }),
+    ...(sent ? { sent: true, sentVia } : { code }),
   });
 });
 
@@ -2749,6 +2776,25 @@ on(
     const email = (body.email || '').trim().toLowerCase();
     if (email && !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address.');
     await db.prepare('UPDATE staff_accounts SET email = ? WHERE id = ?').run(email || null, staff.id);
+    const updated = await db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(staff.id);
+    sendJson(res, 200, { staff: publicStaff(updated) });
+  })
+);
+
+// Same idea as POST /api/staff/me/email above, but for a phone number —
+// lets a staff member receive their login verification code by text (see
+// sms.js) instead of, or in addition to, email. Self-service only.
+// Deliberately permissive validation (digits, spaces, +, -, parens): phone
+// number formats vary too much internationally to validate strictly, and
+// Twilio itself is the real check when a code actually gets sent.
+const PHONE_RE = /^[+()\d][\d\s()+-]{5,19}$/;
+on(
+  'POST',
+  '/api/staff/me/phone',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const phone = (body.phone || '').trim();
+    if (phone && !PHONE_RE.test(phone)) return badRequest(res, 'Enter a valid phone number.');
+    await db.prepare('UPDATE staff_accounts SET phone = ? WHERE id = ?').run(phone || null, staff.id);
     const updated = await db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(staff.id);
     sendJson(res, 200, { staff: publicStaff(updated) });
   })

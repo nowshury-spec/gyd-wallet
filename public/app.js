@@ -2479,6 +2479,9 @@
       document.getElementById('remit-receipt-code').textContent = data.remittance.referenceCode;
       document.getElementById('remit-receipt-detail').textContent =
         `GYD ${fmt(data.remittance.amount)} to ${data.remittance.recipientName} · fee GYD ${fmt(data.remittance.fee)} · total charged GYD ${fmt(data.remittance.total)}`;
+      document.getElementById('remit-receipt-sms-status').textContent = data.remittance.smsSent
+        ? `✓ We've also texted this code to ${recipientPhone}.`
+        : '';
       document.getElementById('remit-receipt-panel').hidden = false;
 
       loadRemitSentList();
