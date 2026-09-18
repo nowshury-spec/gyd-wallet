@@ -2768,7 +2768,32 @@ on(
     if (bizUser.id === user.id) return badRequest(res, "You can't check out with your own business.");
 
     const profileRow = await db.prepare('SELECT * FROM business_profiles WHERE user_id = ?').get(bizUser.id);
-    const amount = Number(body.amount);
+
+    // Checking out from the product cart (tap products, they add up) sends
+    // { productId, quantity } pairs rather than a typed-in amount. When
+    // that's present, the total is always computed here from this
+    // business's own stored prices — never trusted from the client — so a
+    // tampered request can't check out for less than the real menu price.
+    // The plain "type an amount and pay" flow (tips, custom quotes, a
+    // business with no product catalog) still works exactly as before when
+    // no items are sent.
+    let amount;
+    let resolvedItems = null;
+    if (Array.isArray(body.items) && body.items.length > 0) {
+      const productRows = await db.prepare('SELECT * FROM business_products WHERE business_id = ?').all(bizUser.id);
+      const productsById = new Map(productRows.map((p) => [p.id, p]));
+      resolvedItems = [];
+      for (const entry of body.items) {
+        const product = productsById.get(entry.productId);
+        if (!product) return badRequest(res, 'One of the items in your cart is no longer available — please review your order.');
+        const quantity = Math.floor(Number(entry.quantity));
+        if (!Number.isFinite(quantity) || quantity < 1) return badRequest(res, 'Invalid quantity in your cart.');
+        resolvedItems.push({ productId: product.id, name: product.name, price: product.price, quantity });
+      }
+      amount = Math.round(resolvedItems.reduce((sum, i) => sum + i.price * i.quantity, 0) * 100) / 100;
+    } else {
+      amount = Number(body.amount);
+    }
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount.');
 
     const wantsDelivery = body.fulfillment === 'delivery';
@@ -2782,15 +2807,18 @@ on(
     const total = Math.round((amount + deliveryFee) * 100) / 100;
     if (user.gyd_balance < total) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
 
+    const itemsSummary = resolvedItems ? resolvedItems.map((i) => `${i.quantity}x ${i.name}`).join(', ') : '';
+
     if (wantsDelivery) {
       const newBalance = await db.atomicTransfer(user.id, total, bizUser.id, true);
       if (newBalance === null) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
       await logTx({
         type: 'business_payment', fromUser: user.id, toUser: bizUser.id, amount: total, currency: 'GYD',
-        note: `Delivery to ${deliveryAddress} (delivery fee GYD ${fmtNum(deliveryFee)})`,
+        note: `Delivery to ${deliveryAddress} (delivery fee GYD ${fmtNum(deliveryFee)})`
+          + (itemsSummary ? ` — ${itemsSummary}` : ''),
       });
       const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-      return sendJson(res, 200, { user: publicUser(updated), total, fulfillment: 'delivery', deliveryFee });
+      return sendJson(res, 200, { user: publicUser(updated), total, fulfillment: 'delivery', deliveryFee, items: resolvedItems });
     }
 
     // Pickup: debit the customer now (same as a real charge) but hold the
@@ -2803,21 +2831,23 @@ on(
     const pickupCode = await generatePickupCode();
     const createdAt = now();
     const expiresAt = new Date(Date.now() + PICKUP_HOLD_HOURS * 3600 * 1000).toISOString();
+    const itemsJson = resolvedItems ? JSON.stringify(resolvedItems) : null;
     const rows = await db.raw(
       `WITH debit AS (
          UPDATE users SET gyd_balance = gyd_balance - $1 WHERE id = $2 AND gyd_balance >= $1 RETURNING gyd_balance
        ), ins AS (
-         INSERT INTO business_orders (id, business_id, customer_id, amount, pickup_code, status, created_at, expires_at)
-         SELECT $3, $4, $2, $1, $5, 'pending', $6, $7 WHERE EXISTS (SELECT 1 FROM debit)
+         INSERT INTO business_orders (id, business_id, customer_id, amount, pickup_code, status, created_at, expires_at, items)
+         SELECT $3, $4, $2, $1, $5, 'pending', $6, $7, $8 WHERE EXISTS (SELECT 1 FROM debit)
        )
        SELECT gyd_balance FROM debit`,
-      [total, user.id, orderId, bizUser.id, pickupCode, createdAt, expiresAt]
+      [total, user.id, orderId, bizUser.id, pickupCode, createdAt, expiresAt, itemsJson]
     );
     if (rows.length === 0) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
 
     await logTx({
       type: 'business_order_hold', fromUser: user.id, toUser: null, amount: total, currency: 'GYD', status: 'pending',
-      note: `Pickup order ${pickupCode} — held until pickup or ${PICKUP_HOLD_HOURS}h`,
+      note: `Pickup order ${pickupCode} — held until pickup or ${PICKUP_HOLD_HOURS}h`
+        + (itemsSummary ? ` — ${itemsSummary}` : ''),
     });
 
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
@@ -2825,6 +2855,7 @@ on(
       user: publicUser(updated),
       total,
       fulfillment: 'pickup',
+      items: resolvedItems,
       deliveryFee: 0,
       order: {
         id: orderId, pickupCode, amount: total, status: 'pending', releaseReason: null,
@@ -2851,6 +2882,14 @@ on(
 const PICKUP_HOLD_HOURS = 24;
 
 function businessOrderPublic(row) {
+  let items = null;
+  if (row.items) {
+    try {
+      items = JSON.parse(row.items);
+    } catch (e) {
+      items = null;
+    }
+  }
   return {
     id: row.id,
     pickupCode: row.pickup_code,
@@ -2864,6 +2903,7 @@ function businessOrderPublic(row) {
     businessUsername: row.business_username || undefined,
     businessName: row.business_display_name || undefined,
     customerUsername: row.customer_username || undefined,
+    items,
   };
 }
 

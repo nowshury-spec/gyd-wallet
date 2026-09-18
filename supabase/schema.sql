@@ -575,6 +575,14 @@ CREATE TABLE IF NOT EXISTS business_orders (
 );
 ALTER TABLE business_orders ENABLE ROW LEVEL SECURITY;
 
+-- What was actually in the cart at checkout — [{productId, name, price,
+-- quantity}] as a JSON string, same "structured data as plain TEXT"
+-- storage style as keywords/dietary_tags above (no JSONB column type
+-- needed just to round-trip this through JSON.stringify/parse in
+-- server.js). Null for a generic "pay this amount" checkout with no
+-- cart (the amount field predates the cart and still works standalone).
+ALTER TABLE business_orders ADD COLUMN IF NOT EXISTS items TEXT;
+
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter

@@ -1237,6 +1237,73 @@
   // vegan/halal/gluten-free tags cluttering their page editor).
   const DIETARY_RELEVANT_CATEGORIES = ['Bakery & Desserts', 'Restaurant & Food', 'Groceries & Markets'];
 
+  // Ready-made items a business can tap to add to "What you offer" instead
+  // of typing everything by hand — a bakery gets cake-related suggestions,
+  // a mechanic gets auto-repair ones, and so on. No entry for 'Other' since
+  // there's no useful generic list for a catch-all category; that field
+  // just stays hidden until a real category is picked.
+  const CATEGORY_OFFERINGS = {
+    'Bakery & Desserts': ['Wedding cakes', 'Birthday cakes', 'Cupcakes', 'Custom cookies', 'Cake pops', 'Pastries', 'Pies'],
+    'Restaurant & Food': ['Curry chicken', 'Roti', 'Pepperpot', 'Cook-up rice', 'Fried rice', 'Catering', 'Delivery'],
+    'Groceries & Markets': ['Rice', 'Cooking oil', 'Fresh vegetables', 'Fresh fruit', 'Canned goods', 'Household items', 'Snacks'],
+    'Retail & Shopping': ['Dresses', 'Sneakers', 'Handbags', "Men's clothing", "Women's clothing", 'Kids clothing', 'Accessories'],
+    'Beauty & Wellness': ['Haircuts', 'Manicures', 'Pedicures', 'Facials', 'Braiding', 'Makeup', 'Massage'],
+    Automotive: ['Oil change', 'Brake repair', 'Tire rotation', 'Engine diagnostics', 'AC repair', 'Battery replacement', 'Car wash'],
+    'Home & Repair Services': ['Plumbing', 'Electrical work', 'AC repair', 'Painting', 'Carpentry', 'Appliance repair', 'Cleaning services'],
+    'Professional Services': ['Bookkeeping', 'Tax filing', 'Notary services', 'Legal consulting', 'Accounting', 'Translation', 'Graphic design'],
+    'Health & Fitness': ['Personal training', 'Yoga classes', 'Meal plans', 'Gym membership', 'Nutrition coaching', 'Massage therapy'],
+    'Events & Entertainment': ['DJ services', 'Event decor', 'Photography', 'Videography', 'Catering', 'Sound system rental', 'MC hosting'],
+  };
+
+  // "What you offer" is just a comma-separated string, so the suggestion
+  // chips work by reading it into a list, adding/removing one item, then
+  // writing it back — never touching anything else the business typed in.
+  function readOfferingsList() {
+    return document.getElementById('bizpage-keywords').value.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  function toggleOffering(item, shouldInclude) {
+    const list = readOfferingsList();
+    const lower = list.map((s) => s.toLowerCase());
+    const idx = lower.indexOf(item.toLowerCase());
+    if (shouldInclude && idx === -1) list.push(item);
+    else if (!shouldInclude && idx !== -1) list.splice(idx, 1);
+    document.getElementById('bizpage-keywords').value = list.join(', ');
+  }
+  function renderOfferingsSuggestions() {
+    const category = document.getElementById('bizpage-category').value;
+    const items = CATEGORY_OFFERINGS[category];
+    const field = document.getElementById('bizpage-offerings-field');
+    const row = document.getElementById('bizpage-offerings-chips');
+    if (!items || !items.length) {
+      field.classList.add('hidden');
+      row.innerHTML = '';
+      return;
+    }
+    field.classList.remove('hidden');
+    const current = readOfferingsList().map((s) => s.toLowerCase());
+    row.innerHTML = '';
+    items.forEach((item) => {
+      const label = document.createElement('label');
+      const isChecked = current.includes(item.toLowerCase());
+      label.className = 'checkbox-chip' + (isChecked ? ' checked' : '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = isChecked;
+      cb.onchange = () => {
+        toggleOffering(item, cb.checked);
+        label.classList.toggle('checked', cb.checked);
+      };
+      const span = document.createElement('span');
+      span.textContent = item;
+      label.appendChild(cb);
+      label.appendChild(span);
+      row.appendChild(label);
+    });
+  }
+  // If a business types or deletes something in the field by hand, keep the
+  // chips' checked state honest rather than letting them drift out of sync.
+  document.getElementById('bizpage-keywords').addEventListener('input', renderOfferingsSuggestions);
+
   function applyCategoryExamples() {
     const category = document.getElementById('bizpage-category').value;
     const ex = CATEGORY_EXAMPLES[category] || CATEGORY_EXAMPLES.Other;
@@ -1249,6 +1316,7 @@
       'hidden',
       !DIETARY_RELEVANT_CATEGORIES.includes(category)
     );
+    renderOfferingsSuggestions();
   }
   document.getElementById('bizpage-category').addEventListener('change', applyCategoryExamples);
   applyCategoryExamples();
@@ -2025,6 +2093,9 @@
       row.innerHTML = `
         <div class="product-info">
           <div class="product-name">${o.customerUsername} · GYD ${fmt(o.amount)}</div>
+          ${o.items && o.items.length
+            ? `<div class="product-description">${o.items.map(cartItemLine).join('<br/>')}</div>`
+            : ''}
           <div class="product-description">Code ${o.pickupCode} · expires ${fmtEventDate(o.expiresAt)}</div>
         </div>
       `;
@@ -2156,6 +2227,9 @@
             <span class="pill ${pending ? 'pending' : o.status === 'completed' ? 'completed' : 'declined'}">${statusLabel}</span>
           </div>
           <div class="muted" style="font-size:12px;">GYD ${fmt(o.amount)}</div>
+          ${o.items && o.items.length
+            ? `<div class="muted" style="font-size:12px;">${o.items.map(cartItemLine).join('<br/>')}</div>`
+            : ''}
           <div class="muted" style="font-size:12px;">${pending ? 'Pick up by ' + fmtEventDate(o.expiresAt) : (o.resolvedAt ? fmtEventDate(o.resolvedAt) : '')}</div>
           ${pending && o.lockedByBusiness ? '<div class="muted" style="font-size:12px; margin-top:4px;">🔒 The business has started preparing this — contact them if you need to cancel.</div>' : ''}
         </div>
@@ -2324,12 +2398,67 @@
     }
   }
 
+  // Mirrors the "grid of photos, last one dimmed with a +N count, then a
+  // 'See all photos' button" pattern review sites like Yelp use — rather
+  // than dumping potentially 20 thumbnails on screen at once. Clicking the
+  // +N tile or the button just re-renders with everything shown.
+  const PHOTO_GRID_PREVIEW_CAP = 6;
+  function renderBusinessViewPhotos(photos, showAll) {
+    const photosBox = document.getElementById('bizpage-view-photos');
+    const seeAllBtn = document.getElementById('bizpage-view-photos-seeall');
+    photosBox.innerHTML = '';
+    if (!photos || photos.length === 0) {
+      photosBox.innerHTML = '<p class="muted">No photos yet.</p>';
+      seeAllBtn.classList.add('hidden');
+      return;
+    }
+    const total = photos.length;
+    const visibleCount = showAll ? total : Math.min(PHOTO_GRID_PREVIEW_CAP, total);
+    const remaining = total - visibleCount;
+    photos.slice(0, visibleCount).forEach((p, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'photo-grid-item';
+      cell.innerHTML = `<img src="${p.url}" alt="" />`;
+      const isMoreTile = !showAll && remaining > 0 && i === visibleCount - 1;
+      if (isMoreTile) {
+        const overlay = document.createElement('div');
+        overlay.className = 'photo-grid-more-overlay';
+        overlay.textContent = `+${remaining}`;
+        cell.appendChild(overlay);
+      }
+      // The click handler lives on the whole cell, not just the <img>, so
+      // tapping the +N overlay (which sits on top of the image) works too.
+      cell.onclick = () => {
+        if (isMoreTile) renderBusinessViewPhotos(photos, true);
+        else openPhotoLightbox(p.url);
+      };
+      photosBox.appendChild(cell);
+    });
+    seeAllBtn.classList.toggle('hidden', showAll || remaining <= 0);
+    seeAllBtn.onclick = () => renderBusinessViewPhotos(photos, true);
+  }
+
   async function openBusinessPage(username) {
     switchTab('bizpage');
     document.getElementById('bizpage-checkout-panel').classList.add('hidden');
     try {
       const data = await api(`/api/business/directory/${encodeURIComponent(username)}`);
       const b = data.business;
+      // The business's first-ever uploaded gallery photo doubles as its
+      // page's cover/banner image (same convention the directory listing
+      // already uses coverPhotoUrl for) — shown big at the top, tap to
+      // open it in the same lightbox the gallery photos use below.
+      const coverBox = document.getElementById('bizpage-view-cover');
+      const coverImg = document.getElementById('bizpage-view-cover-img');
+      if (b.coverPhotoUrl) {
+        coverImg.src = b.coverPhotoUrl;
+        coverImg.onclick = () => openPhotoLightbox(b.coverPhotoUrl);
+        coverBox.classList.remove('hidden');
+      } else {
+        coverImg.src = '';
+        coverImg.onclick = null;
+        coverBox.classList.add('hidden');
+      }
       const logoEl = document.getElementById('bizpage-view-logo');
       logoEl.textContent = b.logoEmoji || '🏢';
       logoEl.style.background = hexToRgba(b.themeColor, 0.18);
@@ -2384,39 +2513,8 @@
       websiteBtn.classList.toggle('hidden', !b.website);
       if (b.website) websiteBtn.href = b.website;
 
-      const photosBox = document.getElementById('bizpage-view-photos');
-      photosBox.innerHTML = '';
-      if (!b.photos || b.photos.length === 0) {
-        photosBox.innerHTML = '<p class="muted">No photos yet.</p>';
-      } else {
-        b.photos.forEach((p) => {
-          const cell = document.createElement('div');
-          cell.className = 'photo-grid-item';
-          cell.innerHTML = `<img src="${p.url}" alt="" />`;
-          cell.querySelector('img').onclick = () => openPhotoLightbox(p.url);
-          photosBox.appendChild(cell);
-        });
-      }
-
-      const productsBox = document.getElementById('bizpage-view-products');
-      productsBox.innerHTML = '';
-      if (!b.products || b.products.length === 0) {
-        productsBox.innerHTML = '<p class="muted">No products listed yet.</p>';
-      } else {
-        b.products.forEach((p) => {
-          const row = document.createElement('div');
-          row.className = 'product-row';
-          row.innerHTML = `
-            ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
-            <div class="product-info">
-              <div class="product-name">${p.name}</div>
-              ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
-            </div>
-            <span class="product-price">GYD ${fmt(p.price)}</span>
-          `;
-          productsBox.appendChild(row);
-        });
-      }
+      renderBusinessViewPhotos(b.photos, false);
+      renderBusinessViewProducts(b);
 
       renderBizPageEvents(b, username);
       renderBizPageJobs(b);
@@ -2728,10 +2826,130 @@
     document.getElementById('photo-lightbox-img').src = '';
   };
 
+  // ---------- shopping cart (tap a product, it adds up, then checkout) ----------
+  //
+  // Client-side only, per business, kept in memory for this browsing
+  // session — nothing is saved until "Confirm & pay" actually creates the
+  // order (see the checkout section below, which is what sends this cart's
+  // contents to the server). Keyed by business username so switching to
+  // message the business, or looking at a different one, doesn't wipe out
+  // what was already added when you come back.
+  const carts = {};
+  function getCart(username) {
+    if (!carts[username]) carts[username] = {};
+    return carts[username];
+  }
+  function cartEntries(username) {
+    return Object.values(getCart(username));
+  }
+  function cartItemCount(username) {
+    return cartEntries(username).reduce((sum, e) => sum + e.quantity, 0);
+  }
+  function cartTotal(username) {
+    return cartEntries(username).reduce((sum, e) => sum + e.product.price * e.quantity, 0);
+  }
+  function addToCart(username, product) {
+    const cart = getCart(username);
+    const entry = cart[product.id] || { product, quantity: 0 };
+    entry.quantity += 1;
+    cart[product.id] = entry;
+  }
+  function decrementCartItem(username, productId) {
+    const cart = getCart(username);
+    const entry = cart[productId];
+    if (!entry) return;
+    entry.quantity -= 1;
+    if (entry.quantity <= 0) delete cart[productId];
+  }
+  // Shared with the pending-orders lists below so a business sees exactly
+  // what was ordered the same way everywhere — quantity, the per-item
+  // price it was bought at, and the name, e.g. "4 x GYD 100.00 Cupcakes"
+  // (not just "4x Cupcakes"), so nothing has to be inferred or re-priced.
+  function cartItemLine(item) {
+    return `${item.quantity} x GYD ${fmt(item.price)} ${item.name}`;
+  }
+  function cartItemsTotal(items) {
+    return items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  }
+
+  function renderCartBar(b) {
+    const bar = document.getElementById('bizpage-cart-bar');
+    const count = cartItemCount(b.username);
+    if (count === 0) {
+      bar.classList.add('hidden');
+      return;
+    }
+    bar.classList.remove('hidden');
+    document.getElementById('bizpage-cart-count').textContent = count === 1 ? '1 item' : `${count} items`;
+    document.getElementById('bizpage-cart-total').textContent = `GYD ${fmt(cartTotal(b.username))}`;
+    document.getElementById('bizpage-cart-checkout-btn').onclick = () => {
+      const items = cartEntries(b.username).map((e) => ({
+        productId: e.product.id, name: e.product.name, price: e.product.price, quantity: e.quantity,
+      }));
+      openCheckout(b, items);
+    };
+  }
+
+  function renderBusinessViewProducts(b) {
+    const productsBox = document.getElementById('bizpage-view-products');
+    productsBox.innerHTML = '';
+    if (!b.products || b.products.length === 0) {
+      productsBox.innerHTML = '<p class="muted">No products listed yet.</p>';
+      renderCartBar(b);
+      return;
+    }
+    const cart = getCart(b.username);
+    b.products.forEach((p) => {
+      const qty = cart[p.id] ? cart[p.id].quantity : 0;
+      const row = document.createElement('div');
+      row.className = 'product-row';
+      row.innerHTML = `
+        ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
+        <div class="product-info">
+          <div class="product-name">${p.name}</div>
+          ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
+        </div>
+        <div class="product-cart-col">
+          <span class="product-price">GYD ${fmt(p.price)}</span>
+          ${qty > 0 ? `
+            <div class="product-cart-stepper">
+              <button type="button" class="product-cart-btn" data-action="minus">−</button>
+              <span class="product-cart-qty">${qty}</span>
+              <button type="button" class="product-cart-btn" data-action="plus">+</button>
+            </div>
+          ` : `<button type="button" class="btn secondary small product-cart-add" data-action="plus">+ Add</button>`}
+        </div>
+      `;
+      const plusBtn = row.querySelector('[data-action="plus"]');
+      const minusBtn = row.querySelector('[data-action="minus"]');
+      if (plusBtn) plusBtn.onclick = () => { addToCart(b.username, p); renderBusinessViewProducts(b); };
+      if (minusBtn) minusBtn.onclick = () => { decrementCartItem(b.username, p.id); renderBusinessViewProducts(b); };
+      productsBox.appendChild(row);
+    });
+    renderCartBar(b);
+  }
+
   // ---------- checkout (pickup vs delivery) ----------
 
   let checkoutBusiness = null;
   let checkoutFulfillment = 'pickup';
+  // Set when checkout was opened from the cart (an array of {productId,
+  // name, price, quantity}); null for the plain "type an amount" flow. The
+  // server always re-prices from its own product records when this is
+  // sent, never trusting the amount field even though it's pre-filled from
+  // this same data — see /api/business/checkout on the server.
+  let checkoutItems = null;
+
+  function renderCheckoutCartItems() {
+    const box = document.getElementById('checkout-cart-items');
+    if (!checkoutItems || checkoutItems.length === 0) {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      return;
+    }
+    box.classList.remove('hidden');
+    box.innerHTML = checkoutItems.map((item) => `<div class="checkout-cart-item-row">${cartItemLine(item)}</div>`).join('');
+  }
 
   function updateCheckoutTotalPreview() {
     const amount = Number(document.getElementById('checkout-amount').value);
@@ -2756,18 +2974,31 @@
     };
   });
 
-  function openCheckout(b) {
+  function openCheckout(b, items) {
     checkoutBusiness = b;
     checkoutFulfillment = 'pickup';
-    document.getElementById('checkout-amount').value = '';
+    checkoutItems = items && items.length ? items : null;
+    const amountField = document.getElementById('checkout-amount');
+    if (checkoutItems) {
+      // Coming from the cart — the amount is whatever was just tapped
+      // together, so it's shown but locked rather than editable (editing
+      // it wouldn't do anything anyway; the server re-prices from the
+      // cart's product IDs, not from this field, once items are sent).
+      amountField.value = cartItemsTotal(checkoutItems);
+      amountField.readOnly = true;
+    } else {
+      amountField.value = '';
+      amountField.readOnly = false;
+    }
+    renderCheckoutCartItems();
     document.getElementById('checkout-address').value = '';
     document.getElementById('checkout-error').textContent = '';
     document.getElementById('checkout-success').textContent = '';
-    document.getElementById('checkout-total-preview').textContent = '';
     document.getElementById('checkout-pickup-code-box').classList.add('hidden');
     document.querySelectorAll('.fulfillment-btn').forEach((btn) => btn.classList.toggle('selected', btn.dataset.fulfillment === 'pickup'));
     document.getElementById('checkout-fulfillment-field').classList.toggle('hidden', !b.offersDelivery);
     document.getElementById('checkout-address-field').classList.add('hidden');
+    updateCheckoutTotalPreview();
     const panel = document.getElementById('bizpage-checkout-panel');
     panel.classList.remove('hidden');
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2790,6 +3021,7 @@
         amount,
         fulfillment: wantsDelivery ? 'delivery' : 'pickup',
         deliveryAddress,
+        items: checkoutItems,
       });
       state.user = data.user;
       renderWho();
@@ -2803,8 +3035,18 @@
         document.getElementById('checkout-pickup-code-text').textContent = data.order.pickupCode;
         codeBox.classList.remove('hidden');
       }
+      // The order's placed — empty out the cart that paid for it so the
+      // product list and cart bar go back to zero instead of still
+      // offering to "check out" the same items again.
+      if (checkoutBusiness) {
+        carts[checkoutBusiness.username] = {};
+        renderBusinessViewProducts(checkoutBusiness);
+      }
+      checkoutItems = null;
+      document.getElementById('checkout-amount').readOnly = false;
       document.getElementById('checkout-amount').value = '';
       document.getElementById('checkout-address').value = '';
+      renderCheckoutCartItems();
     } catch (err) {
       errBox.textContent = err.message;
     }
