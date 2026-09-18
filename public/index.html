@@ -161,12 +161,13 @@
       </div>
     </header>
 
-    <!-- Instagram/Google-style "switch account" popover — same login and
-         same underlying data as the Personal/Business switch elsewhere
-         (#account-mode-switch, #wallet-context-switch all share
-         walletContext), just presented as two accounts to tap between
-         instead of a mode toggle, since that's the mental model asked for.
-         A transparent backdrop behind it closes it on an outside tap. -->
+    <!-- Instagram/Google-style "switch account" popover — the ONLY way to
+         switch between Personal and Business (the header pill and the
+         Wallet tab's own toggle were both removed as redundant once this
+         existed). Same login and same underlying data either way (see
+         walletContext in app.js), just presented as two accounts to tap
+         between instead of a mode toggle. A transparent backdrop behind it
+         closes it on an outside tap. -->
     <div class="account-switcher-backdrop hidden" id="account-switcher-backdrop"></div>
     <div class="account-switcher-menu hidden" id="account-switcher-menu">
       <button type="button" class="account-switcher-row" data-mode="personal" id="account-switcher-personal-row">
@@ -188,19 +189,6 @@
     </div>
 
     <main class="app-main">
-      <!-- Only shown to business accounts (see renderWho() in app.js). Unlike
-           #wallet-context-switch below (which only flips the balance shown on
-           the Wallet tab), this one lives above every tab's content and is a
-           full mode switch: choosing "Business" jumps straight to the
-           Business tab (storefront/orders/products) and shows the business
-           balance up top; choosing "Personal" returns to the Wallet tab and
-           the personal balance. Both still stay reachable from the bottom
-           nav either way — this is a shortcut, not a lockout. -->
-      <div class="account-mode-switch hidden" id="account-mode-switch">
-        <button type="button" class="account-mode-btn active" data-mode="personal" data-i18n="t334">Personal</button>
-        <button type="button" class="account-mode-btn" data-mode="business" data-i18n="t335">Business</button>
-      </div>
-
       <div class="banner">
         <span class="banner-icon">ℹ</span>
         <span data-i18n="t276">Phase 1 demo: deposits are simulated (no real payment processor is connected) and cash-out only records a
@@ -231,17 +219,10 @@
 
       <!-- WALLET TAB -->
       <section id="panel-wallet" class="tab-panel">
-        <!-- Only shown to business accounts (see renderWho() in app.js) — lets
-             the same login flip between acting as their personal wallet and
-             their business wallet without leaving this tab. Both balances
-             have always lived on this one account (see business_gyd_balance
-             in supabase/schema.sql); this just surfaces the one that used to
-             require going to the Business tab to see. -->
-        <div class="wallet-context-switch hidden" id="wallet-context-switch">
-          <button type="button" class="wallet-context-btn active" data-context="personal" data-i18n="t334">Personal</button>
-          <button type="button" class="wallet-context-btn" data-context="business" data-i18n="t335">Business</button>
-        </div>
-
+        <!-- Which balance/panel this tab shows (personal vs. business) is
+             controlled entirely by walletContext in app.js — set by tapping
+             the profile header's account switcher (#account-switcher-menu),
+             the only way to switch between them now. -->
         <div id="wallet-personal-view">
         <h2 class="section-title" data-i18n="t1">Your account</h2>
         <div class="account-card">

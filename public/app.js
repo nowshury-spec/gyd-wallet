@@ -375,17 +375,9 @@
     // still null — nothing on screen needs updating yet in that case.
     if (!state.user) return;
     walletContext = ctx === 'business' && state.user.isBusiness ? 'business' : 'personal';
-    document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.context === walletContext);
-    });
-    // The header's global Personal/Business switch (#account-mode-switch)
-    // shares this same underlying state, so any path that changes
-    // walletContext — including the Wallet tab's own toggle below — keeps
-    // that header switch in sync too, instead of the two ever disagreeing.
-    document.querySelectorAll('.account-mode-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.mode === walletContext);
-    });
-    // Same sync for the account-switcher popover's two rows.
+    // The account-switcher popover (#account-switcher-menu, opened by tapping
+    // the profile header) is the only UI that changes this now — keep its two
+    // rows' checkmarks in sync with whichever one is actually active.
     document.querySelectorAll('.account-switcher-row').forEach((row) => {
       row.classList.toggle('active', row.dataset.mode === walletContext);
     });
@@ -413,29 +405,18 @@
       `$${state.user.paytag}` + (state.user.isBusiness && walletContext === 'business' ? ` · Business` : '');
   }
 
-  document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
-    btn.onclick = () => setWalletContext(btn.dataset.context);
-  });
-
   window.addEventListener('gyd-lang-changed', () => setWalletContext(walletContext));
 
-  // The header's global Personal/Business switch (#account-mode-switch).
-  // Unlike the Wallet tab's own toggle above (which only swaps the
-  // balance/panel shown there), this one also jumps the whole screen to the
-  // relevant home tab, so switching to "Business" really does feel like
-  // moving into the business side of the account rather than just peeking
-  // at its balance. It shares walletContext as its state (see the sync in
-  // setWalletContext above) rather than tracking its own, so the two
-  // switches can never disagree.
+  // Switching accounts (via the profile header's #account-switcher-menu, the
+  // only way to do it now) doesn't just swap which balance is on screen — it
+  // also jumps the whole screen to the relevant home tab, so switching to
+  // "Business" really does feel like moving into the business side of the
+  // account rather than just peeking at its balance.
   function setAccountMode(mode) {
     if (!state.user) return;
     setWalletContext(mode);
     switchTab(walletContext === 'business' ? 'business' : 'wallet');
   }
-
-  document.querySelectorAll('.account-mode-btn').forEach((btn) => {
-    btn.onclick = () => setAccountMode(btn.dataset.mode);
-  });
 
   // ---------- account switcher (tap the profile header, Instagram/Google-style) ----------
   // Same switch as setAccountMode above (same login, same underlying data —
@@ -475,8 +456,6 @@
     // who-tag's actual text (including whether it shows "· Business"), and
     // #business-owner-panel's visibility, are set by setWalletContext below,
     // since both depend on which mode is active, not just isBusiness.
-    document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
-    document.getElementById('account-mode-switch').classList.toggle('hidden', !state.user.isBusiness);
     // The tap-to-switch profile header only makes sense with two accounts to
     // pick from — a plain personal account leaves it inert (no caret, no
     // click handler effect) rather than opening an empty/single-row menu.
