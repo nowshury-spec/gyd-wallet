@@ -141,12 +141,18 @@
   <div class="phone-frame">
 
     <header class="app-header">
-      <div class="who">
+      <!-- Tapping this opens #account-switcher-menu below — but only for a
+           business account (see renderWho() in app.js), which is the only
+           case where there's a second identity to switch to. A plain
+           personal account has nothing to switch between, so this stays a
+           plain, non-interactive header for them. -->
+      <div class="who" id="who-switcher-btn">
         <div class="avatar" id="who-avatar">?</div>
         <div>
           <div class="name" id="who-username">—</div>
           <div class="tag" id="who-tag"></div>
         </div>
+        <span class="who-switch-caret hidden" id="who-switch-caret">⌄</span>
       </div>
       <div class="header-actions">
         <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay" data-i18n-title="t317" data-i18n="t160">▦</button>
@@ -154,6 +160,32 @@
         <button class="icon-btn" id="logout-btn" title="Log out" data-i18n-title="t319" data-i18n="t162">⏻</button>
       </div>
     </header>
+
+    <!-- Instagram/Google-style "switch account" popover — same login and
+         same underlying data as the Personal/Business switch elsewhere
+         (#account-mode-switch, #wallet-context-switch all share
+         walletContext), just presented as two accounts to tap between
+         instead of a mode toggle, since that's the mental model asked for.
+         A transparent backdrop behind it closes it on an outside tap. -->
+    <div class="account-switcher-backdrop hidden" id="account-switcher-backdrop"></div>
+    <div class="account-switcher-menu hidden" id="account-switcher-menu">
+      <button type="button" class="account-switcher-row" data-mode="personal" id="account-switcher-personal-row">
+        <span class="account-switcher-avatar" id="switcher-personal-avatar">?</span>
+        <span class="account-switcher-info">
+          <span class="account-switcher-name" id="switcher-personal-name">—</span>
+          <span class="account-switcher-sub" data-i18n="t334">Personal</span>
+        </span>
+        <span class="account-switcher-check" id="switcher-personal-check">✓</span>
+      </button>
+      <button type="button" class="account-switcher-row" data-mode="business" id="account-switcher-business-row">
+        <span class="account-switcher-avatar account-switcher-avatar-business" id="switcher-business-avatar">🏢</span>
+        <span class="account-switcher-info">
+          <span class="account-switcher-name" id="switcher-business-name">—</span>
+          <span class="account-switcher-sub" data-i18n="t335">Business</span>
+        </span>
+        <span class="account-switcher-check" id="switcher-business-check">✓</span>
+      </button>
+    </div>
 
     <main class="app-main">
       <!-- Only shown to business accounts (see renderWho() in app.js). Unlike

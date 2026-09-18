@@ -385,6 +385,10 @@
     document.querySelectorAll('.account-mode-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === walletContext);
     });
+    // Same sync for the account-switcher popover's two rows.
+    document.querySelectorAll('.account-switcher-row').forEach((row) => {
+      row.classList.toggle('active', row.dataset.mode === walletContext);
+    });
     document.getElementById('wallet-personal-view').classList.toggle('hidden', walletContext !== 'personal');
     document.getElementById('wallet-business-view').classList.toggle('hidden', walletContext !== 'business');
     const label = document.getElementById('hero-balance-label');
@@ -433,6 +437,38 @@
     btn.onclick = () => setAccountMode(btn.dataset.mode);
   });
 
+  // ---------- account switcher (tap the profile header, Instagram/Google-style) ----------
+  // Same switch as setAccountMode above (same login, same underlying data —
+  // see the comment on walletContext) just presented as picking between two
+  // named accounts instead of a mode toggle, since that's closer to how
+  // people already think about switching accounts elsewhere.
+
+  function closeAccountSwitcher() {
+    document.getElementById('account-switcher-menu').classList.add('hidden');
+    document.getElementById('account-switcher-backdrop').classList.add('hidden');
+  }
+
+  document.getElementById('who-switcher-btn').onclick = () => {
+    if (!state.user || !state.user.isBusiness) return;
+    const menu = document.getElementById('account-switcher-menu');
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+      closeAccountSwitcher();
+    } else {
+      menu.classList.remove('hidden');
+      document.getElementById('account-switcher-backdrop').classList.remove('hidden');
+    }
+  };
+
+  document.getElementById('account-switcher-backdrop').onclick = closeAccountSwitcher;
+
+  document.querySelectorAll('.account-switcher-row').forEach((row) => {
+    row.onclick = () => {
+      setAccountMode(row.dataset.mode);
+      closeAccountSwitcher();
+    };
+  });
+
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
@@ -441,6 +477,18 @@
     // since both depend on which mode is active, not just isBusiness.
     document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
     document.getElementById('account-mode-switch').classList.toggle('hidden', !state.user.isBusiness);
+    // The tap-to-switch profile header only makes sense with two accounts to
+    // pick from — a plain personal account leaves it inert (no caret, no
+    // click handler effect) rather than opening an empty/single-row menu.
+    document.getElementById('who-switcher-btn').classList.toggle('who-switchable', !!state.user.isBusiness);
+    document.getElementById('who-switch-caret').classList.toggle('hidden', !state.user.isBusiness);
+    if (state.user.isBusiness) {
+      document.getElementById('switcher-personal-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
+      document.getElementById('switcher-personal-name').textContent = state.user.username;
+      document.getElementById('switcher-business-name').textContent = state.user.businessName || 'Business';
+    } else {
+      closeAccountSwitcher();
+    }
     // Offering to add a business account only makes sense for an account
     // that doesn't already have one — once it does, "Your business page"
     // on the Business tab is where it's managed from then on.

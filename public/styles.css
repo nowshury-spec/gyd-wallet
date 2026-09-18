@@ -454,6 +454,87 @@ select:hover { border-color: var(--muted-2); }
 .who .name { font-weight: 800; font-size: 14px; }
 .who .tag { color: var(--accent); font-size: 12px; font-weight: 700; }
 
+/* ---------- account switcher (tap-to-switch, Instagram/Google-style) ---------- */
+
+.who.who-switchable { cursor: pointer; }
+.who-switch-caret {
+  color: var(--muted);
+  font-size: 15px;
+  margin-left: -2px;
+  transform: translateY(1px);
+}
+
+.account-switcher-backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  z-index: 399;
+}
+
+.account-switcher-menu {
+  position: absolute;
+  top: 64px;
+  left: 20px;
+  width: min(280px, calc(100% - 40px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 14px);
+  box-shadow: var(--shadow-sm), 0 12px 28px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 10px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: background 0.15s ease;
+}
+
+.account-switcher-row:hover { background: var(--surface-2); }
+
+.account-switcher-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(160deg, var(--gold), #d99a2b);
+  color: #2a1c00; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px; flex-shrink: 0;
+}
+
+.account-switcher-avatar-business {
+  background: none;
+  background-color: var(--surface-2);
+  font-size: 16px;
+}
+
+.account-switcher-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.account-switcher-name {
+  font-weight: 700; font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.account-switcher-sub { font-size: 11.5px; color: var(--muted); }
+
+.account-switcher-check {
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 14px;
+  visibility: hidden;
+  flex-shrink: 0;
+}
+.account-switcher-row.active .account-switcher-check { visibility: visible; }
+.account-switcher-row.active { background: var(--surface-2); }
+
 .header-actions { display: flex; gap: 8px; }
 
 .icon-btn {
