@@ -495,6 +495,86 @@ ALTER TABLE business_tips ENABLE ROW LEVEL SECURITY;
 -- rather than freeform text.
 ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS dietary_tags TEXT;
 
+-- Optional freeform website URL and hours text for a business's page —
+-- kept as plain strings (no live "open now" computation, which would need
+-- real timezone handling) matching the simple style of the other optional
+-- profile fields like phone/location above.
+ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS website TEXT;
+ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS hours TEXT;
+
+-- A business's photo gallery (see server.js's /api/business/photos and
+-- db.js's storageUpload/storageDelete). Unlike a product photo — a base64
+-- data: URL stored right in business_products.image_data — these go into a
+-- real Supabase Storage bucket, since a business can have up to 20 of
+-- them: storing that many as base64 text would bloat every profile/
+-- directory query that touches this business's row.
+CREATE TABLE IF NOT EXISTS business_photos (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+ALTER TABLE business_photos ENABLE ROW LEVEL SECURITY;
+
+-- The bucket backing business_photos above, made public for reads (so a
+-- photo's URL just works in an <img> tag with no auth), with write access
+-- scoped to it via storage.objects RLS policies. Granted to the anon role
+-- — the same key db.js uses for every query in this app via exec_query —
+-- which is safe for the same reason that's safe there: this key is never
+-- sent to a browser, and every call that reaches these endpoints already
+-- passes through this app's own requireBusiness auth check first.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('business-photos', 'business-photos', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "gyd_wallet_business_photos_read" ON storage.objects;
+CREATE POLICY "gyd_wallet_business_photos_read"
+  ON storage.objects FOR SELECT
+  TO anon
+  USING (bucket_id = 'business-photos');
+
+DROP POLICY IF EXISTS "gyd_wallet_business_photos_write" ON storage.objects;
+CREATE POLICY "gyd_wallet_business_photos_write"
+  ON storage.objects FOR INSERT
+  TO anon
+  WITH CHECK (bucket_id = 'business-photos');
+
+DROP POLICY IF EXISTS "gyd_wallet_business_photos_delete" ON storage.objects;
+CREATE POLICY "gyd_wallet_business_photos_delete"
+  ON storage.objects FOR DELETE
+  TO anon
+  USING (bucket_id = 'business-photos');
+
+-- A pickup order's hold-until-pickup escrow (see server.js's "pickup orders"
+-- section for the full lifecycle: checkout debits the customer and inserts
+-- a 'pending' row here rather than paying the business right away; it's
+-- released to the business — status 'completed' — either by the business
+-- redeeming the customer's pickup_code in person, or automatically once
+-- expires_at passes unredeemed; either side can also cancel a still-pending
+-- order for a full refund — status 'cancelled'). release_reason records
+-- which of those four things actually happened: redeemed, auto_released,
+-- cancelled_by_business, or cancelled_by_customer.
+CREATE TABLE IF NOT EXISTS business_orders (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount DOUBLE PRECISION NOT NULL,
+  pickup_code TEXT UNIQUE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | cancelled
+  release_reason TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  resolved_at TEXT,
+  -- Set once by the business (POST /api/business/orders/:id/lock) when it
+  -- starts fulfilling a still-pending order — closes the gap where a store
+  -- preps an order and the customer cancels for a refund before the pickup
+  -- code is ever redeemed. Once true, only the business can still cancel
+  -- it; the customer's own cancel endpoint refuses. One-way, no unlock.
+  locked_by_business BOOLEAN NOT NULL DEFAULT false
+);
+ALTER TABLE business_orders ENABLE ROW LEVEL SECURITY;
+
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter

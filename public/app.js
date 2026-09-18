@@ -308,6 +308,7 @@
           (tab === 'remit' && b.dataset.tab === 'send') ||
           (tab === 'bizpage' && b.dataset.tab === 'business') ||
           (tab === 'mytickets' && b.dataset.tab === 'business') ||
+          (tab === 'myorders' && b.dataset.tab === 'business') ||
           (tab === 'jobs' && b.dataset.tab === 'business') ||
           (tab === 'ludo' && b.dataset.tab === 'games')
       )
@@ -327,18 +328,22 @@
       loadMyBusinessPage();
       loadMyEvents();
       loadMyJobs();
+      loadMyPendingOrders();
     }
     if (tab === 'messages') loadThreads();
     if (tab === 'wallet') loadTransactions();
     if (tab === 'remit') openRemitLobby();
     if (tab === 'ludo') enterLudoTab();
     if (tab === 'mytickets') loadMyTickets();
+    if (tab === 'myorders') loadMyOrders();
     if (tab === 'jobs') loadJobsBoard();
     if (tab === 'support') loadSupportTickets();
   }
 
   document.getElementById('my-tickets-btn').onclick = () => switchTab('mytickets');
   document.getElementById('mytickets-back-btn').onclick = () => switchTab('business');
+  document.getElementById('my-orders-btn').onclick = () => switchTab('myorders');
+  document.getElementById('myorders-back-btn').onclick = () => switchTab('business');
   document.getElementById('jobs-board-btn').onclick = () => switchTab('jobs');
   document.getElementById('jobs-back-btn').onclick = () => switchTab('business');
 
@@ -1142,17 +1147,69 @@
         document.getElementById('bizpage-logo').value = data.profile.logoEmoji || '';
         document.getElementById('bizpage-phone').value = data.profile.phone || '';
         document.getElementById('bizpage-location').value = data.profile.location || '';
+        document.getElementById('bizpage-website').value = data.profile.website || '';
+        document.getElementById('bizpage-hours').value = data.profile.hours || '';
         document.getElementById('bizpage-theme-color').value = data.profile.themeColor || THEME_SWATCHES[0];
         document.getElementById('bizpage-offers-delivery').checked = !!data.profile.offersDelivery;
         document.getElementById('bizpage-delivery-fee').value = data.profile.deliveryFee || '';
         document.getElementById('bizpage-delivery-fee-field').classList.toggle('hidden', !data.profile.offersDelivery);
         renderSwatches();
       }
+      renderMyBusinessPhotos(data.photos || []);
     } catch {
       // No page set up yet — leave the form at its defaults.
+      renderMyBusinessPhotos([]);
     }
     loadMyProducts();
   }
+
+  // ---------- business photo gallery (owner management) ----------
+
+  function renderMyBusinessPhotos(photos) {
+    const box = document.getElementById('bizpage-photo-list');
+    const countEl = document.getElementById('bizpage-photo-count');
+    countEl.textContent = `${photos.length} / 20 photos`;
+    box.innerHTML = '';
+    photos.forEach((p) => {
+      const cell = document.createElement('div');
+      cell.className = 'photo-grid-item';
+      cell.innerHTML = `<img src="${p.url}" alt="" />`;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'photo-remove-btn';
+      removeBtn.textContent = '✕';
+      removeBtn.title = window.i18n ? window.i18n.t('t191') : 'Remove photo';
+      removeBtn.onclick = async () => {
+        try {
+          const data = await api(`/api/business/photos/${p.id}`, 'DELETE');
+          renderMyBusinessPhotos(data.photos);
+        } catch (err) {
+          document.getElementById('bizpage-photo-error').textContent = err.message;
+        }
+      };
+      cell.appendChild(removeBtn);
+      box.appendChild(cell);
+    });
+  }
+
+  document.getElementById('bizpage-photo-add-btn').onclick = () => {
+    document.getElementById('bizpage-photo-input').click();
+  };
+
+  document.getElementById('bizpage-photo-input').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const errBox = document.getElementById('bizpage-photo-error');
+    errBox.textContent = '';
+    try {
+      const imageData = await resizeImageToDataUrl(file, 1024, 0.8);
+      const data = await api('/api/business/photos', 'POST', { imageData });
+      renderMyBusinessPhotos(data.photos);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
 
   // ---------- business products & prices ----------
 
@@ -1743,6 +1800,117 @@
 
   document.getElementById('checkin-stop-scan-btn').onclick = stopCheckinCamera;
 
+  // ---------- pickup orders (business side: redeem a code, see pending ones) ----------
+
+  function orderStatusPill(o) {
+    if (o.status === 'completed') return `<span class="pill completed">${o.releaseReason === 'redeemed' ? 'picked up' : 'auto-released'}</span>`;
+    if (o.status === 'cancelled') return '<span class="pill declined">cancelled</span>';
+    return '<span class="pill pending">pending</span>';
+  }
+
+  async function runOrderRedeem(rawCode) {
+    const errBox = document.getElementById('order-redeem-error');
+    const resultBox = document.getElementById('order-redeem-result');
+    errBox.textContent = '';
+    resultBox.innerHTML = '';
+    const code = (rawCode || '').trim().toUpperCase();
+    if (!code) {
+      errBox.textContent = 'Enter the pickup code.';
+      return;
+    }
+    try {
+      const data = await api(`/api/business/orders/${encodeURIComponent(code)}/redeem`, 'POST', {});
+      document.getElementById('order-redeem-code').value = '';
+      if (data.ok) {
+        resultBox.innerHTML = data.alreadyExpired
+          ? `<p><span class="pill pending">Already released</span> This order's 24-hour hold had already passed — GYD ${fmt(data.order.amount)} is already in your business wallet.</p>`
+          : `<p><span class="pill completed">Redeemed</span> GYD ${fmt(data.order.amount)} moved to your business wallet.</p>`;
+      } else if (data.reason === 'already_completed') {
+        resultBox.innerHTML = `<p><span class="pill pending">Already redeemed</span> GYD ${fmt(data.order.amount)}${
+          data.order.resolvedAt ? ' — ' + fmtEventDate(data.order.resolvedAt) : ''
+        }</p>`;
+      } else {
+        resultBox.innerHTML = '<p><span class="pill declined">Cancelled</span> This order was cancelled and refunded — nothing to redeem.</p>';
+      }
+      loadMyPendingOrders();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  }
+
+  document.getElementById('order-redeem-btn').onclick = () => runOrderRedeem(document.getElementById('order-redeem-code').value);
+  document.getElementById('order-redeem-code').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runOrderRedeem(document.getElementById('order-redeem-code').value);
+  });
+
+  async function loadMyPendingOrders() {
+    if (!state.user || !state.user.isBusiness) return;
+    const box = document.getElementById('my-pending-orders-list');
+    try {
+      const data = await api('/api/business/orders');
+      renderMyPendingOrders(data.orders);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderMyPendingOrders(orders) {
+    const box = document.getElementById('my-pending-orders-list');
+    box.innerHTML = '';
+    if (orders.length === 0) {
+      box.innerHTML = '<p class="muted">No pending orders yet.</p>';
+      return;
+    }
+    orders.forEach((o) => {
+      const row = document.createElement('div');
+      row.className = 'product-row';
+      row.innerHTML = `
+        <div class="product-info">
+          <div class="product-name">${o.customerUsername} · GYD ${fmt(o.amount)}</div>
+          <div class="product-description">Code ${o.pickupCode} · expires ${fmtEventDate(o.expiresAt)}</div>
+        </div>
+      `;
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex; gap:8px; align-items:center;';
+      if (o.lockedByBusiness) {
+        const badge = document.createElement('span');
+        badge.className = 'muted';
+        badge.style.fontSize = '12px';
+        badge.textContent = '🔒 Being prepared';
+        actions.appendChild(badge);
+      } else {
+        const lockBtn = document.createElement('button');
+        lockBtn.className = 'btn secondary small';
+        lockBtn.textContent = 'Mark as preparing';
+        lockBtn.title = "Stops the customer from cancelling this order once you've started on it.";
+        lockBtn.onclick = async () => {
+          try {
+            await api(`/api/business/orders/${o.id}/lock`, 'POST', {});
+            loadMyPendingOrders();
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        actions.appendChild(lockBtn);
+      }
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn secondary small';
+      cancelBtn.textContent = 'Cancel & refund';
+      cancelBtn.onclick = async () => {
+        if (!confirm(`Cancel this order and refund GYD ${fmt(o.amount)} to ${o.customerUsername}?`)) return;
+        try {
+          await api(`/api/business/orders/${o.id}/cancel`, 'POST', {});
+          loadMyPendingOrders();
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      actions.appendChild(cancelBtn);
+      row.appendChild(actions);
+      box.appendChild(row);
+    });
+  }
+
   // ---------- my tickets ----------
 
   function ticketQrUrl(code) {
@@ -1790,6 +1958,73 @@
           <code>${t.ticketCode}</code>
         </div>
       `;
+      box.appendChild(card);
+    });
+  }
+
+  // ---------- my pickup orders (customer side) ----------
+
+  function pickupCodeQrUrl(code) {
+    return qrImageUrl(`gydpickup:${code}`);
+  }
+
+  async function loadMyOrders() {
+    const box = document.getElementById('my-orders-list');
+    box.innerHTML = '<p class="muted">Loading your orders…</p>';
+    try {
+      const data = await api('/api/orders/mine');
+      renderMyOrders(data.orders);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderMyOrders(orders) {
+    const box = document.getElementById('my-orders-list');
+    box.innerHTML = '';
+    if (orders.length === 0) {
+      box.innerHTML = '<p class="muted">No orders yet — pay for a pickup order from a business page.</p>';
+      return;
+    }
+    orders.forEach((o) => {
+      const pending = o.status === 'pending';
+      const statusLabel = pending ? 'pending' : o.status === 'completed' ? (o.releaseReason === 'redeemed' ? 'picked up' : 'auto-released') : 'cancelled';
+      const card = document.createElement('div');
+      card.className = 'panel ticket-card';
+      card.innerHTML = `
+        <div class="ticket-card-info">
+          <div class="event-title-row">
+            <span class="event-name">${o.businessName || o.businessUsername}</span>
+            <span class="pill ${pending ? 'pending' : o.status === 'completed' ? 'completed' : 'declined'}">${statusLabel}</span>
+          </div>
+          <div class="muted" style="font-size:12px;">GYD ${fmt(o.amount)}</div>
+          <div class="muted" style="font-size:12px;">${pending ? 'Pick up by ' + fmtEventDate(o.expiresAt) : (o.resolvedAt ? fmtEventDate(o.resolvedAt) : '')}</div>
+          ${pending && o.lockedByBusiness ? '<div class="muted" style="font-size:12px; margin-top:4px;">🔒 The business has started preparing this — contact them if you need to cancel.</div>' : ''}
+        </div>
+        ${pending ? `
+          <div class="ticket-card-qr">
+            <img src="${pickupCodeQrUrl(o.pickupCode)}" alt="Pickup code QR" width="140" height="140" />
+            <code>${o.pickupCode}</code>
+          </div>
+        ` : ''}
+      `;
+      if (pending && !o.lockedByBusiness) {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn secondary small';
+        cancelBtn.style.marginTop = '10px';
+        cancelBtn.textContent = 'Cancel & refund';
+        cancelBtn.onclick = async () => {
+          if (!confirm(`Cancel this order and get GYD ${fmt(o.amount)} refunded?`)) return;
+          try {
+            await api(`/api/orders/${o.id}/cancel`, 'POST', {});
+            await refreshMe();
+            loadMyOrders();
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        card.appendChild(cancelBtn);
+      }
       box.appendChild(card);
     });
   }
@@ -1866,6 +2101,8 @@
     const logoEmoji = document.getElementById('bizpage-logo').value.trim();
     const phone = document.getElementById('bizpage-phone').value.trim();
     const location = document.getElementById('bizpage-location').value.trim();
+    const website = document.getElementById('bizpage-website').value.trim();
+    const hours = document.getElementById('bizpage-hours').value.trim();
     const themeColor = document.getElementById('bizpage-theme-color').value;
     const offersDelivery = document.getElementById('bizpage-offers-delivery').checked;
     const deliveryFee = document.getElementById('bizpage-delivery-fee').value;
@@ -1875,7 +2112,7 @@
     successBox.textContent = '';
     try {
       await api('/api/business/profile', 'POST', {
-        category, tagline, description, keywords, dietaryTags, logoEmoji, phone, location, themeColor,
+        category, tagline, description, keywords, dietaryTags, logoEmoji, phone, location, website, hours, themeColor,
         offersDelivery, deliveryFee: offersDelivery ? deliveryFee : 0,
       });
       successBox.textContent = 'Saved — your page is live in the directory.';
@@ -1913,7 +2150,7 @@
         const card = document.createElement('div');
         card.className = 'directory-card';
         card.innerHTML = `
-          <div class="directory-logo" style="background:${hexToRgba(b.themeColor, 0.18)};">${b.logoEmoji || '🏢'}</div>
+          <div class="directory-logo" style="background:${b.coverPhotoUrl ? `url('${b.coverPhotoUrl}') center/cover` : hexToRgba(b.themeColor, 0.18)};">${b.coverPhotoUrl ? '' : (b.logoEmoji || '🏢')}</div>
           <div class="directory-info">
             <div class="biz-name">${b.businessName}</div>
             <div class="biz-tagline">${b.tagline || ''}</div>
@@ -1968,13 +2205,40 @@
       if (b.phone) contactBits.push(`📞 ${b.phone}`);
       if (b.location) contactBits.push(`📍 ${b.location}`);
       document.getElementById('bizpage-view-contact').textContent = contactBits.join('   ·   ');
+      const hoursEl = document.getElementById('bizpage-view-hours');
+      hoursEl.classList.toggle('hidden', !b.hours);
+      hoursEl.textContent = b.hours ? `🕒 ${b.hours}` : '';
+      document.getElementById('bizpage-view-delivery-panel').classList.toggle('hidden', !b.offersDelivery);
       const deliveryNote = document.getElementById('bizpage-view-delivery');
-      deliveryNote.style.display = b.offersDelivery ? '' : 'none';
       deliveryNote.textContent = b.offersDelivery
         ? b.deliveryFee > 0
           ? `🚚 Delivery available — GYD ${fmt(b.deliveryFee)} fee`
           : '🚚 Free delivery available'
         : '';
+
+      const callBtn = document.getElementById('bizpage-action-call');
+      callBtn.classList.toggle('hidden', !b.phone);
+      if (b.phone) callBtn.href = `tel:${b.phone.replace(/[^0-9+]/g, '')}`;
+      const directionsBtn = document.getElementById('bizpage-action-directions');
+      directionsBtn.classList.toggle('hidden', !b.location);
+      if (b.location) directionsBtn.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.location)}`;
+      const websiteBtn = document.getElementById('bizpage-action-website');
+      websiteBtn.classList.toggle('hidden', !b.website);
+      if (b.website) websiteBtn.href = b.website;
+
+      const photosBox = document.getElementById('bizpage-view-photos');
+      photosBox.innerHTML = '';
+      if (!b.photos || b.photos.length === 0) {
+        photosBox.innerHTML = '<p class="muted">No photos yet.</p>';
+      } else {
+        b.photos.forEach((p) => {
+          const cell = document.createElement('div');
+          cell.className = 'photo-grid-item';
+          cell.innerHTML = `<img src="${p.url}" alt="" />`;
+          cell.querySelector('img').onclick = () => openPhotoLightbox(p.url);
+          photosBox.appendChild(cell);
+        });
+      }
 
       const productsBox = document.getElementById('bizpage-view-products');
       productsBox.innerHTML = '';
@@ -2297,6 +2561,15 @@
 
   document.getElementById('bizpage-back-btn').onclick = () => switchTab('business');
 
+  function openPhotoLightbox(url) {
+    document.getElementById('photo-lightbox-img').src = url;
+    document.getElementById('photo-lightbox').classList.remove('hidden');
+  }
+  document.getElementById('photo-lightbox').onclick = () => {
+    document.getElementById('photo-lightbox').classList.add('hidden');
+    document.getElementById('photo-lightbox-img').src = '';
+  };
+
   // ---------- checkout (pickup vs delivery) ----------
 
   let checkoutBusiness = null;
@@ -2333,6 +2606,7 @@
     document.getElementById('checkout-error').textContent = '';
     document.getElementById('checkout-success').textContent = '';
     document.getElementById('checkout-total-preview').textContent = '';
+    document.getElementById('checkout-pickup-code-box').classList.add('hidden');
     document.querySelectorAll('.fulfillment-btn').forEach((btn) => btn.classList.toggle('selected', btn.dataset.fulfillment === 'pickup'));
     document.getElementById('checkout-fulfillment-field').classList.toggle('hidden', !b.offersDelivery);
     document.getElementById('checkout-address-field').classList.add('hidden');
@@ -2361,9 +2635,16 @@
       });
       state.user = data.user;
       renderWho();
-      successBox.textContent = wantsDelivery
-        ? `Paid! Total charged: GYD ${fmt(data.total)} (delivery to ${deliveryAddress})`
-        : `Paid! Total charged: GYD ${fmt(data.total)} (pickup)`;
+      const codeBox = document.getElementById('checkout-pickup-code-box');
+      if (wantsDelivery) {
+        successBox.textContent = `Paid! Total charged: GYD ${fmt(data.total)} (delivery to ${deliveryAddress})`;
+        codeBox.classList.add('hidden');
+      } else {
+        successBox.textContent = `Paid! Total charged: GYD ${fmt(data.total)} — held until you pick it up.`;
+        document.getElementById('checkout-pickup-qr').src = pickupCodeQrUrl(data.order.pickupCode);
+        document.getElementById('checkout-pickup-code-text').textContent = data.order.pickupCode;
+        codeBox.classList.remove('hidden');
+      }
       document.getElementById('checkout-amount').value = '';
       document.getElementById('checkout-address').value = '';
     } catch (err) {

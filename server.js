@@ -1687,8 +1687,14 @@ function businessProfilePublic(row) {
     logoEmoji: row.logo_emoji,
     phone: row.phone,
     location: row.location,
+    website: row.website || null,
+    hours: row.hours || null,
     offersDelivery: !!row.offers_delivery,
     deliveryFee: row.delivery_fee || 0,
+    // The first photo in the gallery (see /api/business/photos below) —
+    // cheap to include everywhere via a correlated subquery so directory
+    // cards get a cover image without a second round trip per business.
+    coverPhotoUrl: row.cover_photo_url || null,
     updatedAt: row.updated_at,
     // Always 'approved' now — the staff review gate this used to reflect
     // was removed, but the field stays for compatibility with anything
@@ -1707,11 +1713,14 @@ on(
       .prepare(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
-           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
+           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(user.id);
-    sendJson(res, 200, { profile: row ? businessProfilePublic(row) : null });
+    if (!row) return sendJson(res, 200, { profile: null, photos: [] });
+    const photos = await db.prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC').all(user.id);
+    sendJson(res, 200, { profile: businessProfilePublic(row), photos: photos.map(businessPhotoPublic) });
   })
 );
 
@@ -1737,6 +1746,9 @@ on(
     const logoEmoji = (body.logoEmoji || '').trim().slice(0, 8);
     const phone = (body.phone || '').trim().slice(0, 40);
     const location = (body.location || '').trim().slice(0, 140);
+    let website = (body.website || '').trim().slice(0, 200);
+    if (website && !/^https?:\/\//i.test(website)) website = `https://${website}`;
+    const hours = (body.hours || '').trim().slice(0, 200);
     const offersDelivery = body.offersDelivery ? 1 : 0;
     const deliveryFeeRaw = Number(body.deliveryFee);
     const deliveryFee = offersDelivery && isFinite(deliveryFeeRaw) && deliveryFeeRaw >= 0 ? deliveryFeeRaw : 0;
@@ -1754,23 +1766,24 @@ on(
       // directory just for touching up their tagline or hours.
       await db.prepare(
         `UPDATE business_profiles
-         SET category = ?, tagline = ?, description = ?, keywords = ?, dietary_tags = ?, theme_color = ?, logo_emoji = ?, phone = ?, location = ?, offers_delivery = ?, delivery_fee = ?, updated_at = ?
+         SET category = ?, tagline = ?, description = ?, keywords = ?, dietary_tags = ?, theme_color = ?, logo_emoji = ?, phone = ?, location = ?, website = ?, hours = ?, offers_delivery = ?, delivery_fee = ?, updated_at = ?
          WHERE user_id = ?`
-      ).run(category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now(), user.id);
+      ).run(category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, website || null, hours || null, offersDelivery, deliveryFee, now(), user.id);
     } else {
       // A brand new business page goes live in the directory immediately —
       // no staff approval step.
       await db.prepare(
-        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, dietary_tags, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(user.id, category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now());
+        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, dietary_tags, theme_color, logo_emoji, phone, location, website, hours, offers_delivery, delivery_fee, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(user.id, category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, website || null, hours || null, offersDelivery, deliveryFee, now());
     }
 
     const row = await db
       .prepare(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
-           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
+           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(user.id);
@@ -1787,7 +1800,8 @@ on(
     const dietary = (query.dietary || '').trim().toLowerCase();
     let sql = `SELECT u.*, bp.*,
       (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
-      (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+      (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
+      (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
       FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.review_status = 'approved'`;
     const args = [];
     if (category) {
@@ -1829,11 +1843,15 @@ on(
       .prepare(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
-           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
+           (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
+           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(bizUser.id);
     if (!row) return sendJson(res, 404, { error: 'This business has not set up their page yet.' });
+    const photos = await db
+      .prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC')
+      .all(bizUser.id);
     const products = await db
       .prepare('SELECT * FROM business_products WHERE business_id = ? ORDER BY created_at ASC')
       .all(bizUser.id);
@@ -1861,6 +1879,7 @@ on(
     sendJson(res, 200, {
       business: {
         ...businessProfilePublic(row),
+        photos: photos.map(businessPhotoPublic),
         products: products.map(businessProductPublic),
         events: eventsPublic,
         jobs: jobs.map((j) => jobPostingPublic(j)),
@@ -1871,6 +1890,86 @@ on(
         isOwnBusiness: bizUser.id === user.id,
       },
     });
+  })
+);
+
+// ---------- business photo gallery ----------
+//
+// Unlike a product photo (a base64 data: URL stored right in the row — see
+// business_products above), gallery photos go into a real Supabase Storage
+// bucket (see db.js's storageUpload/storageDelete) since a business can
+// have up to MAX_BUSINESS_PHOTOS of these: storing them as data: URLs would
+// make every profile/directory query drag that much base64 text along.
+
+const MAX_BUSINESS_PHOTOS = 20;
+
+function businessPhotoPublic(row) {
+  return { id: row.id, url: row.url, createdAt: row.created_at };
+}
+
+// Same idea as validateProductImage above, just with a bigger size cap
+// since this is the main photo gallery rather than a small product thumb —
+// still well under readJsonBody's 3MB body cap once base64-encoded.
+function validateBusinessPhoto(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith('data:image/')) {
+    return { ok: false, error: 'Choose a photo to upload.' };
+  }
+  if (raw.length > 2_200_000) {
+    return { ok: false, error: 'That photo is too large — try a smaller one.' };
+  }
+  const match = /^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+/=]+)$/.exec(raw);
+  if (!match) {
+    return { ok: false, error: 'Business photo must be a JPEG, PNG, or WEBP image.' };
+  }
+  return { ok: true, mime: `image/${match[1]}`, ext: match[1] === 'jpeg' ? 'jpg' : match[1], base64: match[2] };
+}
+
+on(
+  'GET',
+  '/api/business/photos',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const rows = await db.prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC').all(user.id);
+    sendJson(res, 200, { photos: rows.map(businessPhotoPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/business/photos',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const validated = validateBusinessPhoto(body.imageData);
+    if (!validated.ok) return badRequest(res, validated.error);
+    const countRow = await db.prepare('SELECT COUNT(*) as n FROM business_photos WHERE business_id = ?').get(user.id);
+    if (Number(countRow.n) >= MAX_BUSINESS_PHOTOS) {
+      return badRequest(res, `You've reached the ${MAX_BUSINESS_PHOTOS}-photo limit — remove one to add another.`);
+    }
+    const id = crypto.randomUUID();
+    const storagePath = `${user.id}/${id}.${validated.ext}`;
+    let url;
+    try {
+      url = await db.storageUpload('business-photos', storagePath, Buffer.from(validated.base64, 'base64'), validated.mime);
+    } catch (err) {
+      return sendJson(res, 502, { error: `Could not upload that photo: ${err.message}` });
+    }
+    await db.prepare(
+      'INSERT INTO business_photos (id, business_id, url, storage_path, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, user.id, url, storagePath, now());
+    const rows = await db.prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC').all(user.id);
+    sendJson(res, 201, { photos: rows.map(businessPhotoPublic) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/business/photos/:id',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const row = await db.prepare('SELECT * FROM business_photos WHERE id = ?').get(params.id);
+    if (!row) return sendJson(res, 404, { error: 'Photo not found.' });
+    if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This photo is not yours to remove.' });
+    await db.storageDelete('business-photos', row.storage_path);
+    await db.prepare('DELETE FROM business_photos WHERE id = ?').run(params.id);
+    const rows = await db.prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC').all(user.id);
+    sendJson(res, 200, { photos: rows.map(businessPhotoPublic) });
   })
 );
 
@@ -2654,6 +2753,11 @@ on(
 // business (they're the one arranging the delivery), not the platform —
 // unlike GYD Direct's fee, which the platform keeps. Pickup never needs an
 // address; delivery always does.
+//
+// Delivery still pays the business instantly (nothing to redeem in person).
+// Pickup instead HOLDS the money — see the business_orders section right
+// below — since a delivery has no "come show your code" moment but a
+// pickup does.
 
 on(
   'POST',
@@ -2678,21 +2782,313 @@ on(
     const total = Math.round((amount + deliveryFee) * 100) / 100;
     if (user.gyd_balance < total) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
 
-    const newBalance = await db.atomicTransfer(user.id, total, bizUser.id, true);
-    if (newBalance === null) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
+    if (wantsDelivery) {
+      const newBalance = await db.atomicTransfer(user.id, total, bizUser.id, true);
+      if (newBalance === null) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
+      await logTx({
+        type: 'business_payment', fromUser: user.id, toUser: bizUser.id, amount: total, currency: 'GYD',
+        note: `Delivery to ${deliveryAddress} (delivery fee GYD ${fmtNum(deliveryFee)})`,
+      });
+      const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      return sendJson(res, 200, { user: publicUser(updated), total, fulfillment: 'delivery', deliveryFee });
+    }
 
-    const note = wantsDelivery
-      ? `Delivery to ${deliveryAddress} (delivery fee GYD ${fmtNum(deliveryFee)})`
-      : 'Pickup';
-    await logTx({ type: 'business_payment', fromUser: user.id, toUser: bizUser.id, amount: total, currency: 'GYD', note });
+    // Pickup: debit the customer now (same as a real charge) but hold the
+    // money in a pending business_orders row rather than crediting the
+    // business — see releasePendingOrder/refundPendingOrder below for what
+    // moves it from there. One atomic statement so the debit and the order
+    // row are created together or not at all, same "debit + conditional
+    // insert" idiom as generateReferenceCode's caller (/api/remit) above.
+    const orderId = crypto.randomUUID();
+    const pickupCode = await generatePickupCode();
+    const createdAt = now();
+    const expiresAt = new Date(Date.now() + PICKUP_HOLD_HOURS * 3600 * 1000).toISOString();
+    const rows = await db.raw(
+      `WITH debit AS (
+         UPDATE users SET gyd_balance = gyd_balance - $1 WHERE id = $2 AND gyd_balance >= $1 RETURNING gyd_balance
+       ), ins AS (
+         INSERT INTO business_orders (id, business_id, customer_id, amount, pickup_code, status, created_at, expires_at)
+         SELECT $3, $4, $2, $1, $5, 'pending', $6, $7 WHERE EXISTS (SELECT 1 FROM debit)
+       )
+       SELECT gyd_balance FROM debit`,
+      [total, user.id, orderId, bizUser.id, pickupCode, createdAt, expiresAt]
+    );
+    if (rows.length === 0) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(total)}.`);
+
+    await logTx({
+      type: 'business_order_hold', fromUser: user.id, toUser: null, amount: total, currency: 'GYD', status: 'pending',
+      note: `Pickup order ${pickupCode} — held until pickup or ${PICKUP_HOLD_HOURS}h`,
+    });
 
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     sendJson(res, 200, {
       user: publicUser(updated),
       total,
-      fulfillment: wantsDelivery ? 'delivery' : 'pickup',
-      deliveryFee,
+      fulfillment: 'pickup',
+      deliveryFee: 0,
+      order: {
+        id: orderId, pickupCode, amount: total, status: 'pending', releaseReason: null,
+        createdAt, expiresAt, resolvedAt: null,
+        businessUsername: bizUser.username, businessName: bizUser.business_name,
+      },
     });
+  })
+);
+
+// ---------- pickup orders (hold-until-pickup escrow) ----------
+//
+// A pickup order's money is debited from the customer at checkout (above)
+// but held rather than paid to the business right away. It's released one
+// of three ways: the business redeems the customer's pickup code in person
+// (releasePendingOrder, reason 'redeemed'); nobody redeems it and the
+// PICKUP_HOLD_HOURS window passes, so it releases automatically the next
+// time anyone looks at it (autoReleaseExpiredFor* below, reason
+// 'auto_released' — there's no background worker in this app, so "the next
+// time anyone looks at it" is how the 24-hour deadline actually gets
+// enforced, same zero-infrastructure approach as everything else here); or
+// either side cancels it first for a full refund (refundPendingOrder).
+
+const PICKUP_HOLD_HOURS = 24;
+
+function businessOrderPublic(row) {
+  return {
+    id: row.id,
+    pickupCode: row.pickup_code,
+    amount: row.amount,
+    status: row.status,
+    releaseReason: row.release_reason || null,
+    lockedByBusiness: !!row.locked_by_business,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    resolvedAt: row.resolved_at || null,
+    businessUsername: row.business_username || undefined,
+    businessName: row.business_display_name || undefined,
+    customerUsername: row.customer_username || undefined,
+  };
+}
+
+// Same idea as generateTicketCode/generateReferenceCode above — a short,
+// unique, human-typeable code. Hex like a ticket code (rather than numeric
+// like a GYD Direct reference code) since this one's read off a customer's
+// screen at a counter rather than read aloud over the phone.
+async function generatePickupCode() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const existing = await db.prepare('SELECT id FROM business_orders WHERE pickup_code = ?').get(code);
+    if (!existing) return code;
+  }
+  throw new Error('Could not generate a unique pickup code');
+}
+
+// Credits the business's wallet with the held amount and marks the order
+// completed. The `claim` UPDATE's own WHERE (id = ? AND status = 'pending')
+// is the atomic guard — same idiom as atomicTransfer's `WHERE gyd_balance >=
+// ?` — so if two release attempts land at once (a cashier redeeming the
+// instant the 24-hour hold expires) only one can ever flip status and thus
+// only one credits the business. Returns false if the order wasn't pending.
+async function releasePendingOrder(orderId, reason) {
+  const rows = await db.raw(
+    `WITH claim AS (
+       UPDATE business_orders SET status = 'completed', release_reason = $2, resolved_at = $3
+       WHERE id = $1 AND status = 'pending'
+       RETURNING business_id, customer_id, amount, pickup_code
+     ), credit AS (
+       UPDATE users SET business_gyd_balance = business_gyd_balance + (SELECT amount FROM claim)
+       WHERE id = (SELECT business_id FROM claim) AND EXISTS (SELECT 1 FROM claim)
+       RETURNING id
+     )
+     SELECT business_id, customer_id, amount, pickup_code FROM claim`,
+    [orderId, reason, now()]
+  );
+  if (rows.length === 0) return false;
+  const { business_id, customer_id, amount, pickup_code } = rows[0];
+  await logTx({
+    type: 'business_payment', fromUser: customer_id, toUser: business_id, amount, currency: 'GYD',
+    note: reason === 'redeemed'
+      ? `Pickup order ${pickup_code} redeemed at the store`
+      : `Pickup order ${pickup_code} auto-released after ${PICKUP_HOLD_HOURS}h — never redeemed`,
+  });
+  return true;
+}
+
+// The escape hatch for either side: refunds the customer in full and marks
+// the order cancelled. Same atomic-claim guard as releasePendingOrder.
+async function refundPendingOrder(orderId, reason) {
+  const rows = await db.raw(
+    `WITH claim AS (
+       UPDATE business_orders SET status = 'cancelled', release_reason = $2, resolved_at = $3
+       WHERE id = $1 AND status = 'pending'
+       RETURNING customer_id, amount, pickup_code
+     ), refund AS (
+       UPDATE users SET gyd_balance = gyd_balance + (SELECT amount FROM claim)
+       WHERE id = (SELECT customer_id FROM claim) AND EXISTS (SELECT 1 FROM claim)
+       RETURNING id
+     )
+     SELECT customer_id, amount, pickup_code FROM claim`,
+    [orderId, reason, now()]
+  );
+  if (rows.length === 0) return false;
+  const { customer_id, amount, pickup_code } = rows[0];
+  await logTx({
+    type: 'business_order_refund', fromUser: null, toUser: customer_id, amount, currency: 'GYD',
+    note: reason === 'cancelled_by_business'
+      ? `Pickup order ${pickup_code} cancelled by the business — refunded`
+      : `Pickup order ${pickup_code} cancelled — refunded`,
+  });
+  return true;
+}
+
+// Called at the top of the two "list my orders" endpoints below so the
+// 24-hour deadline gets enforced lazily, the moment either side next looks
+// — see the section comment above for why there's no scheduled job doing
+// this instead.
+async function autoReleaseExpiredForBusiness(businessId) {
+  const rows = await db.prepare(
+    "SELECT id FROM business_orders WHERE business_id = ? AND status = 'pending' AND expires_at <= ?"
+  ).all(businessId, now());
+  for (const row of rows) await releasePendingOrder(row.id, 'auto_released');
+}
+
+async function autoReleaseExpiredForCustomer(customerId) {
+  const rows = await db.prepare(
+    "SELECT id FROM business_orders WHERE customer_id = ? AND status = 'pending' AND expires_at <= ?"
+  ).all(customerId, now());
+  for (const row of rows) await releasePendingOrder(row.id, 'auto_released');
+}
+
+on(
+  'GET',
+  '/api/orders/mine',
+  requireAuth(async (req, res, params, query, body, user) => {
+    await autoReleaseExpiredForCustomer(user.id);
+    const rows = await db
+      .prepare(
+        `SELECT bo.*, u.username AS business_username, u.business_name AS business_display_name
+         FROM business_orders bo JOIN users u ON u.id = bo.business_id
+         WHERE bo.customer_id = ? ORDER BY bo.created_at DESC LIMIT 50`
+      )
+      .all(user.id);
+    sendJson(res, 200, { orders: rows.map(businessOrderPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/orders/:id/cancel',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const order = await db.prepare('SELECT * FROM business_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Order not found.' });
+    if (order.customer_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours to cancel." });
+    if (order.status !== 'pending') return badRequest(res, 'This order is no longer pending.');
+    if (order.locked_by_business) {
+      return badRequest(res, 'The business has already started preparing this order — contact them directly if you need to cancel.');
+    }
+    const refunded = await refundPendingOrder(order.id, 'cancelled_by_customer');
+    if (!refunded) return badRequest(res, 'This order was already resolved — try refreshing.');
+    const updated = await db
+      .prepare(
+        `SELECT bo.*, u.username AS business_username, u.business_name AS business_display_name
+         FROM business_orders bo JOIN users u ON u.id = bo.business_id WHERE bo.id = ?`
+      )
+      .get(order.id);
+    sendJson(res, 200, { order: businessOrderPublic(updated) });
+  })
+);
+
+on(
+  'GET',
+  '/api/business/orders',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    await autoReleaseExpiredForBusiness(user.id);
+    const rows = await db
+      .prepare(
+        `SELECT bo.*, u.username AS customer_username
+         FROM business_orders bo JOIN users u ON u.id = bo.customer_id
+         WHERE bo.business_id = ? AND bo.status = 'pending' ORDER BY bo.created_at ASC LIMIT 100`
+      )
+      .all(user.id);
+    sendJson(res, 200, { orders: rows.map(businessOrderPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/business/orders/:code/redeem',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const code = (params.code || '').trim().toUpperCase();
+    const order = await db.prepare('SELECT * FROM business_orders WHERE pickup_code = ?').get(code);
+    if (!order) return badRequest(res, 'No pending order with that code.');
+    if (order.business_id !== user.id) return sendJson(res, 403, { error: "This order isn't for your business." });
+
+    if (order.status !== 'pending') {
+      return sendJson(res, 200, {
+        ok: false,
+        reason: order.status === 'completed' ? 'already_completed' : 'cancelled',
+        order: businessOrderPublic(order),
+      });
+    }
+
+    const alreadyExpired = new Date(order.expires_at).getTime() <= Date.now();
+    const released = await releasePendingOrder(order.id, alreadyExpired ? 'auto_released' : 'redeemed');
+    const fresh = await db.prepare('SELECT * FROM business_orders WHERE id = ?').get(order.id);
+    if (!released) {
+      // Someone else (another tab, or the lazy auto-release check) resolved
+      // it a moment ago — report the real current state rather than erroring.
+      return sendJson(res, 200, {
+        ok: false,
+        reason: fresh.status === 'completed' ? 'already_completed' : 'cancelled',
+        order: businessOrderPublic(fresh),
+      });
+    }
+    sendJson(res, 200, { ok: true, alreadyExpired, order: businessOrderPublic(fresh) });
+  })
+);
+
+on(
+  'POST',
+  '/api/business/orders/:id/cancel',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const order = await db.prepare('SELECT * FROM business_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Order not found.' });
+    if (order.business_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours to cancel." });
+    if (order.status !== 'pending') return badRequest(res, 'This order is no longer pending.');
+    const refunded = await refundPendingOrder(order.id, 'cancelled_by_business');
+    if (!refunded) return badRequest(res, 'This order was already resolved — try refreshing.');
+    const updated = await db
+      .prepare(
+        `SELECT bo.*, u.username AS customer_username
+         FROM business_orders bo JOIN users u ON u.id = bo.customer_id WHERE bo.id = ?`
+      )
+      .get(order.id);
+    sendJson(res, 200, { order: businessOrderPublic(updated) });
+  })
+);
+
+// A business marks a pending order "being prepared" once they start on it —
+// closes the gap where a store bakes/bags an order in advance of pickup,
+// the customer cancels for a full refund before the code is ever redeemed,
+// and the store is out whatever it already put into fulfilling it. Once
+// locked, only the business can still cancel/refund it (see the lock check
+// added to the customer's own cancel endpoint above); the business's own
+// cancel endpoint above is intentionally unaffected by this lock. One-way —
+// there's no unlock — since the point is "the store already committed to
+// this," not a toggle.
+on(
+  'POST',
+  '/api/business/orders/:id/lock',
+  requireBusiness(async (req, res, params, query, body, user) => {
+    const order = await db.prepare('SELECT * FROM business_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Order not found.' });
+    if (order.business_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours." });
+    if (order.status !== 'pending') return badRequest(res, 'This order is no longer pending.');
+    await db.prepare('UPDATE business_orders SET locked_by_business = TRUE WHERE id = ?').run(order.id);
+    const updated = await db
+      .prepare(
+        `SELECT bo.*, u.username AS customer_username
+         FROM business_orders bo JOIN users u ON u.id = bo.customer_id WHERE bo.id = ?`
+      )
+      .get(order.id);
+    sendJson(res, 200, { order: businessOrderPublic(updated) });
   })
 );
 
