@@ -1176,6 +1176,90 @@
     });
   });
 
+  // Example text for the business-page and product fields, keyed by
+  // category — so a retail shop or an auto shop doesn't see cake/bakery
+  // examples in every placeholder no matter what they picked. These are
+  // ONLY placeholders (shown while a field is empty, exactly like the
+  // static bakery examples they replace) — never written into the field,
+  // so switching categories while editing never touches anything already
+  // typed. Falls back to the generic 'Other' entry for a category not
+  // listed here (there shouldn't be one, since BUSINESS_CATEGORIES and this
+  // map are meant to stay in sync) or before any category is chosen yet.
+  const CATEGORY_EXAMPLES = {
+    'Bakery & Desserts': {
+      logo: '🍰', tagline: 'Fresh cakes baked daily in Georgetown', keywords: 'wedding cakes, cupcakes, birthday cakes',
+      productName: 'Chocolate cake (8-inch)', productDescription: 'Rich chocolate sponge with ganache',
+    },
+    'Restaurant & Food': {
+      logo: '🍛', tagline: 'Home-style Guyanese food, made fresh daily', keywords: 'curry chicken, roti, pepperpot',
+      productName: 'Curry chicken & roti', productDescription: 'Served with rice and a side salad',
+    },
+    'Groceries & Markets': {
+      logo: '🛒', tagline: 'Fresh produce and pantry staples, every day', keywords: 'rice, cooking oil, fresh vegetables',
+      productName: '5kg bag of rice', productDescription: 'Locally sourced, restocked weekly',
+    },
+    'Retail & Shopping': {
+      logo: '🛍️', tagline: 'Quality clothing and accessories for the whole family', keywords: 'dresses, sneakers, handbags',
+      productName: "Men's polo shirt (size L)", productDescription: '100% cotton, machine washable',
+    },
+    'Beauty & Wellness': {
+      logo: '💇', tagline: 'Look and feel your best — appointments open daily', keywords: 'haircuts, manicures, facials',
+      productName: 'Full set acrylic nails', productDescription: 'Includes shape, color, and top coat',
+    },
+    'Automotive': {
+      logo: '🔧', tagline: 'Reliable auto repair and servicing you can trust', keywords: 'oil change, brake repair, tire rotation',
+      productName: 'Standard oil change', productDescription: 'Includes filter and up to 5 quarts of oil',
+    },
+    'Home & Repair Services': {
+      logo: '🛠️', tagline: 'Fast, reliable home repairs done right', keywords: 'plumbing, electrical, AC repair',
+      productName: 'AC unit servicing', productDescription: 'Includes cleaning and gas top-up check',
+    },
+    'Professional Services': {
+      logo: '💼', tagline: 'Trusted professional services for your business', keywords: 'bookkeeping, tax filing, notary',
+      productName: 'Tax filing (individual)', productDescription: 'Includes review and e-filing',
+    },
+    'Health & Fitness': {
+      logo: '🏋️', tagline: 'Helping you reach your health and fitness goals', keywords: 'personal training, yoga classes, meal plans',
+      productName: '1-on-1 training session (1 hour)', productDescription: 'Includes a personalized workout plan',
+    },
+    'Events & Entertainment': {
+      logo: '🎉', tagline: 'Making your event one to remember', keywords: 'DJ services, event decor, photography',
+      productName: 'DJ package (4 hours)', productDescription: 'Includes sound system and lighting',
+    },
+    Other: {
+      logo: '🏪', tagline: "Tell customers what makes your business special", keywords: 'your product or service, another one, a third',
+      productName: 'Your product or service', productDescription: "A short description of what's included",
+    },
+  };
+
+  // Categories whose businesses would actually use "Dietary options" — kept
+  // hidden for everyone else (a mechanic or a clothing shop has no use for
+  // vegan/halal/gluten-free tags cluttering their page editor).
+  const DIETARY_RELEVANT_CATEGORIES = ['Bakery & Desserts', 'Restaurant & Food', 'Groceries & Markets'];
+
+  function applyCategoryExamples() {
+    const category = document.getElementById('bizpage-category').value;
+    const ex = CATEGORY_EXAMPLES[category] || CATEGORY_EXAMPLES.Other;
+    document.getElementById('bizpage-logo').placeholder = ex.logo;
+    document.getElementById('bizpage-tagline').placeholder = ex.tagline;
+    document.getElementById('bizpage-keywords').placeholder = ex.keywords;
+    document.getElementById('product-name').placeholder = ex.productName;
+    document.getElementById('product-description').placeholder = ex.productDescription;
+    document.getElementById('bizpage-dietary-field').classList.toggle(
+      'hidden',
+      !DIETARY_RELEVANT_CATEGORIES.includes(category)
+    );
+  }
+  document.getElementById('bizpage-category').addEventListener('change', applyCategoryExamples);
+  applyCategoryExamples();
+  // i18n.js applies its own (static, bakery-flavored) translated placeholder
+  // text to every [data-i18n-ph] element on 'gyd-lang-changed' — which fires
+  // once on initial load and again on every language switch — and that runs
+  // AFTER this file's initial applyCategoryExamples() call above, silently
+  // overwriting the category-specific placeholders we just set. Re-apply
+  // ours afterward so the category-aware text always wins.
+  window.addEventListener('gyd-lang-changed', applyCategoryExamples);
+
   function renderSwatches() {
     const row = document.getElementById('bizpage-swatches');
     const hiddenInput = document.getElementById('bizpage-theme-color');
@@ -1224,6 +1308,10 @@
         document.getElementById('bizpage-delivery-fee').value = data.profile.deliveryFee || '';
         document.getElementById('bizpage-delivery-fee-field').classList.toggle('hidden', !data.profile.offersDelivery);
         renderSwatches();
+        // Setting .value on the category <select> above doesn't fire its own
+        // 'change' event, so the category-aware placeholders/dietary-field
+        // visibility need an explicit refresh here for a saved page.
+        applyCategoryExamples();
       }
       renderMyBusinessPhotos(data.photos || []);
     } catch {
