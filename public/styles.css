@@ -68,6 +68,29 @@ body {
 
 button { font-family: inherit; cursor: pointer; }
 input, button, select { font-size: 14px; font-family: inherit; }
+
+/* Plain <select> elements had zero custom styling and fell back to the
+   browser's native control (thin border, system font, no color) — this
+   made any panel with a dropdown (like "Find a business" > Category)
+   look flat next to the styled text inputs around it. Bring it in line. */
+select {
+  display: block;
+  width: 100%;
+  padding: 11px 34px 11px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background-color: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235c6b60' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+select:hover { border-color: var(--muted-2); }
 .hidden { display: none !important; }
 ::selection { background: var(--accent-glow); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -124,6 +147,39 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .lang-btn.active {
   background: var(--accent);
   color: #ffffff;
+}
+
+/* ---------- wallet personal/business context switch ---------- */
+
+.wallet-context-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  margin-bottom: 18px;
+}
+
+.wallet-context-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.wallet-context-btn:hover { color: var(--text); }
+
+.wallet-context-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
 }
 
 .auth-wrapper {
@@ -268,6 +324,40 @@ input, button, select { font-size: 14px; font-family: inherit; }
 .link-btn:hover { text-decoration: underline; }
 
 .forgot-intro { font-size: 13px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+
+/* ---------- social sign-in (Google / Facebook) ---------- */
+
+.social-auth { margin-bottom: 18px; }
+
+.social-btn {
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 10px;
+}
+.social-btn:hover { background: var(--surface-2); filter: none; border-color: var(--muted-2); }
+
+.social-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex-shrink: 0;
+}
+.social-icon-fb {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #1877f2; color: #fff; font-weight: 800; font-size: 12px;
+  font-family: Georgia, serif; font-style: italic;
+}
+
+.social-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 16px 0; color: var(--muted-2); font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.social-divider::before, .social-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
 
 .reset-code-display {
   background: var(--surface-2);
@@ -444,7 +534,10 @@ input, button, select { font-size: 14px; font-family: inherit; }
 
 .account-card-mark { font-family: "Space Grotesk", sans-serif; font-size: 15px; font-weight: 700; }
 
-h2.section-title { font-size: 14.5px; font-weight: 800; margin: 0 0 14px; color: var(--text); letter-spacing: -0.005em; }
+h2.section-title {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 16px; font-weight: 700; margin: 0 0 14px; color: var(--text); letter-spacing: -0.005em;
+}
 
 .panel {
   background: var(--surface);
@@ -853,12 +946,14 @@ label.btn { display: inline-flex; }
 /* ---------- business directory (find a business, business pages) ---------- */
 
 .directory-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 0; border-bottom: 1px solid var(--border-soft);
-  cursor: pointer; transition: background 0.12s ease;
+  display: flex; align-items: center; gap: 13px;
+  padding: 13px 14px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+  cursor: pointer; transition: background 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease;
 }
-.directory-card:last-child { border-bottom: none; }
-.directory-card:hover { background: var(--surface-2); }
+.directory-card:last-child { margin-bottom: 0; }
+.directory-card:hover { background: var(--surface-2); box-shadow: var(--shadow-md); transform: translateY(-1px); }
 
 .directory-logo {
   width: 44px; height: 44px; border-radius: 14px; flex-shrink: 0;
@@ -866,12 +961,21 @@ label.btn { display: inline-flex; }
 }
 
 .directory-info { min-width: 0; flex: 1; }
-.directory-info .biz-name { font-weight: 800; font-size: 13.5px; }
+.directory-info .biz-name {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700; font-size: 15px; color: var(--text); letter-spacing: -0.005em;
+}
 .directory-info .biz-tagline {
-  font-size: 11.5px; color: var(--muted);
+  font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.directory-card .pill { flex-shrink: 0; }
+.directory-card .pill { flex-shrink: 0; font-size: 11px; }
+
+#directory-results > p.muted {
+  padding: 18px 14px; text-align: center; font-weight: 500;
+  background: var(--surface-2); border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
 
 .swatch-row { display: flex; gap: 10px; margin-top: 8px; }
 .swatch {
@@ -886,6 +990,16 @@ label.btn { display: inline-flex; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
   padding: 4px 11px; font-size: 11px; color: var(--muted);
 }
+.chip.chip-dietary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+.checkbox-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.checkbox-chip {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 12px; cursor: pointer; user-select: none; transition: all 0.12s ease;
+}
+.checkbox-chip input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+.checkbox-chip.checked { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); font-weight: 600; }
 
 .bizpage-banner { text-align: center; padding: 28px 20px 22px; }
 .bizpage-logo {

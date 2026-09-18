@@ -17,10 +17,18 @@ const crypto = require('crypto');
 const url = require('url');
 
 const db = require('./db');
-const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify } = require('./auth');
+const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, sign, verify } = require('./auth');
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
 const { emailEnabled, sendEmail, codeEmailHtml } = require('./email');
 const { smsEnabled, sendSms } = require('./sms');
+const {
+  googleEnabled,
+  facebookEnabled,
+  googleAuthUrl,
+  facebookAuthUrl,
+  googleProfileFromCode,
+  facebookProfileFromCode,
+} = require('./oauth');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -34,6 +42,11 @@ function sendJson(res, status, body) {
     'Content-Length': Buffer.byteLength(data),
   });
   res.end(data);
+}
+
+function redirect(res, location) {
+  res.writeHead(302, { Location: location });
+  res.end();
 }
 
 function readJsonBody(req) {
@@ -216,6 +229,71 @@ async function generateUniquePaytag(base) {
   return candidate;
 }
 
+// Only used for accounts created via "Continue with Google/Facebook" —
+// a password signup always has the person type their own username. Reuses
+// the same slugify-then-de-dupe shape as generateUniquePaytag above, just
+// against the username column instead.
+async function generateUniqueUsername(base) {
+  let slug = (base || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if (slug.length < 3) slug = 'user' + crypto.randomInt(1000000);
+  slug = slug.slice(0, 16);
+  let candidate = slug;
+  let n = 0;
+  while (await db.prepare('SELECT id FROM users WHERE username = ?').get(candidate)) {
+    n += 1;
+    candidate = `${slug}${n}`;
+  }
+  return candidate;
+}
+
+// Turns a Google/Facebook profile into a GYD Wallet user, in three
+// possible ways:
+//   1. This exact provider account has signed in before -> that user.
+//   2. First time from this provider, but its (verified) email matches an
+//      existing password account -> link the two, so someone doesn't end
+//      up with two separate wallets just because they used "Continue with
+//      Google" once instead of typing the password they already have.
+//   3. Neither -> a brand-new account, with no usable password (a random
+//      one is generated and never shared) until/unless they set one later
+//      via the existing "Forgot your password?" flow, which only needs a
+//      verified email on file.
+async function findOrCreateOAuthUser(provider, profile) {
+  const identity = await db
+    .prepare('SELECT user_id FROM oauth_identities WHERE provider = ? AND provider_user_id = ?')
+    .get(provider, profile.providerUserId);
+  if (identity) {
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id);
+  }
+
+  let user = null;
+  if (profile.email) {
+    user = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(profile.email);
+  }
+
+  if (!user) {
+    const usernameBase = profile.name || (profile.email ? profile.email.split('@')[0] : provider);
+    const username = await generateUniqueUsername(usernameBase);
+    const paytag = await generateUniquePaytag(username);
+    const { salt, hash } = hashPassword(crypto.randomBytes(32).toString('hex'));
+    const id = crypto.randomUUID();
+    await db
+      .prepare(
+        `INSERT INTO users (id, username, paytag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)`
+      )
+      .run(id, username, paytag, profile.email || null, hash, salt, now());
+    user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO oauth_identities (id, user_id, provider, provider_user_id, email, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(crypto.randomUUID(), user.id, provider, profile.providerUserId, profile.email || null, now());
+
+  return user;
+}
+
 async function findUserByHandle(raw) {
   const handle = (raw || '').trim().replace(/^\$/, '');
   if (!handle) return null;
@@ -388,6 +466,70 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
   rateLimitReset(perAccountKey);
   const token = makeSessionToken(user.id);
   sendJson(res, 200, { token, user: publicUser(user) });
+});
+
+// ---------- social sign-in (Google / Facebook) ----------
+//
+// A full-page redirect flow, not fetch/AJAX — that's simply how every
+// OAuth provider's consent screen works: the browser navigates away to
+// Google or Facebook, then back to our own /api/auth/<provider>/callback.
+// That callback has no in-page JS running mid-navigation to hand the SPA
+// its new session token as a JSON response, so it redirects one more time
+// to the app's own root with the token in the query string; app.js's
+// boot() picks it up from there exactly like a password login would, then
+// strips it from the address bar. See oauth.js for the provider-specific
+// pieces, and README's "Setting up social sign-in" for the env vars this
+// is gated behind (both providers off is a normal, fully working state —
+// the buttons just don't show).
+function oauthState(provider) {
+  return sign({ purpose: 'oauth_state', provider, nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + 10 * 60 * 1000 });
+}
+
+function validOauthState(token, provider) {
+  const data = verify(token);
+  return !!(data && data.purpose === 'oauth_state' && data.provider === provider);
+}
+
+on('GET', '/api/auth/social-providers', async (req, res) => {
+  sendJson(res, 200, { google: googleEnabled(), facebook: facebookEnabled() });
+});
+
+on('GET', '/api/auth/google/start', async (req, res) => {
+  if (!googleEnabled()) return sendJson(res, 503, { error: 'Google sign-in is not set up yet.' });
+  redirect(res, googleAuthUrl(oauthState('google')));
+});
+
+on('GET', '/api/auth/google/callback', async (req, res, params, query) => {
+  if (!googleEnabled()) return redirect(res, '/?oauth_error=' + encodeURIComponent('Google sign-in is not set up yet.'));
+  try {
+    if (query.error) throw new Error('Google sign-in was cancelled.');
+    if (!validOauthState(query.state, 'google')) throw new Error('That sign-in link expired — please try again.');
+    const profile = await googleProfileFromCode(query.code);
+    const user = await findOrCreateOAuthUser('google', profile);
+    const token = makeSessionToken(user.id);
+    redirect(res, '/?oauth_token=' + encodeURIComponent(token));
+  } catch (err) {
+    redirect(res, '/?oauth_error=' + encodeURIComponent(err.message));
+  }
+});
+
+on('GET', '/api/auth/facebook/start', async (req, res) => {
+  if (!facebookEnabled()) return sendJson(res, 503, { error: 'Facebook sign-in is not set up yet.' });
+  redirect(res, facebookAuthUrl(oauthState('facebook')));
+});
+
+on('GET', '/api/auth/facebook/callback', async (req, res, params, query) => {
+  if (!facebookEnabled()) return redirect(res, '/?oauth_error=' + encodeURIComponent('Facebook sign-in is not set up yet.'));
+  try {
+    if (query.error) throw new Error('Facebook sign-in was cancelled.');
+    if (!validOauthState(query.state, 'facebook')) throw new Error('That sign-in link expired — please try again.');
+    const profile = await facebookProfileFromCode(query.code);
+    const user = await findOrCreateOAuthUser('facebook', profile);
+    const token = makeSessionToken(user.id);
+    redirect(res, '/?oauth_token=' + encodeURIComponent(token));
+  } catch (err) {
+    redirect(res, '/?oauth_error=' + encodeURIComponent(err.message));
+  }
 });
 
 const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -1498,6 +1640,12 @@ on('POST', '/api/business/charge-requests/:id/decline', resolveChargeRequest('de
 // doesn't mention cake at all — the point is matching what they sell, not
 // just how they're filed.
 
+// Fixed set a business page's dietary_tags column is restricted to — kept
+// short and Guyana-relevant (halal in particular) so it stays a meaningful
+// filter facet in the directory rather than freeform text search would
+// already cover via keywords.
+const ALLOWED_DIETARY_TAGS = ['vegan', 'vegetarian', 'gluten-free', 'halal', 'kosher', 'dairy-free', 'nut-free'];
+
 function businessProfilePublic(row) {
   return {
     // business_profiles.user_id (its primary key, always present since
@@ -1510,6 +1658,10 @@ function businessProfilePublic(row) {
     tagline: row.tagline,
     description: row.description,
     keywords: (row.keywords || '')
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean),
+    dietaryTags: (row.dietary_tags || '')
       .split(',')
       .map((k) => k.trim())
       .filter(Boolean),
@@ -1553,6 +1705,16 @@ on(
     const tagline = (body.tagline || '').trim().slice(0, 140);
     const description = (body.description || '').trim().slice(0, 1000);
     const keywords = (body.keywords || '').trim().slice(0, 300);
+    // Accepts either an array (checkboxes on the frontend) or a
+    // comma-separated string, and silently drops anything not on the
+    // allow-list rather than rejecting the save over it.
+    const dietaryTagsInput = Array.isArray(body.dietaryTags)
+      ? body.dietaryTags
+      : (body.dietaryTags || '').split(',');
+    const dietaryTags = dietaryTagsInput
+      .map((t) => String(t).trim().toLowerCase())
+      .filter((t) => ALLOWED_DIETARY_TAGS.includes(t))
+      .join(',');
     const themeColor = /^#[0-9a-fA-F]{6}$/.test(body.themeColor || '') ? body.themeColor : '#4954e6';
     const logoEmoji = (body.logoEmoji || '').trim().slice(0, 8);
     const phone = (body.phone || '').trim().slice(0, 40);
@@ -1574,16 +1736,16 @@ on(
       // directory just for touching up their tagline or hours.
       await db.prepare(
         `UPDATE business_profiles
-         SET category = ?, tagline = ?, description = ?, keywords = ?, theme_color = ?, logo_emoji = ?, phone = ?, location = ?, offers_delivery = ?, delivery_fee = ?, updated_at = ?
+         SET category = ?, tagline = ?, description = ?, keywords = ?, dietary_tags = ?, theme_color = ?, logo_emoji = ?, phone = ?, location = ?, offers_delivery = ?, delivery_fee = ?, updated_at = ?
          WHERE user_id = ?`
-      ).run(category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now(), user.id);
+      ).run(category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now(), user.id);
     } else {
       // A brand new business page goes live in the directory immediately —
       // no staff approval step.
       await db.prepare(
-        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(user.id, category, tagline, description, keywords, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now());
+        `INSERT INTO business_profiles (user_id, category, tagline, description, keywords, dietary_tags, theme_color, logo_emoji, phone, location, offers_delivery, delivery_fee, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(user.id, category, tagline, description, keywords, dietaryTags, themeColor, logoEmoji, phone, location, offersDelivery, deliveryFee, now());
     }
 
     const row = await db
@@ -1604,6 +1766,7 @@ on(
   requireAuth(async (req, res, params, query) => {
     const q = (query.q || '').trim();
     const category = (query.category || '').trim();
+    const dietary = (query.dietary || '').trim().toLowerCase();
     let sql = `SELECT u.*, bp.*,
       (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
       (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count
@@ -1612,6 +1775,13 @@ on(
     if (category) {
       sql += ' AND bp.category = ?';
       args.push(category);
+    }
+    if (dietary && ALLOWED_DIETARY_TAGS.includes(dietary)) {
+      // Wrapped in commas so "vegan" doesn't match as a substring of some
+      // other tag — with today's allow-list that can't happen, but it keeps
+      // this correct if a future tag name overlaps with another.
+      sql += " AND (',' || bp.dietary_tags || ',') LIKE ?";
+      args.push(`%,${dietary},%`);
     }
     if (q) {
       // Matches the business name/tagline/description/category/keywords, AND
@@ -1663,6 +1833,13 @@ on(
       )
       .all(bizUser.id);
     const myReviewRow = reviews.find((r) => r.reviewer_id === user.id);
+    const tips = await db
+      .prepare(
+        `SELECT t.*, u.username FROM business_tips t JOIN users u ON u.id = t.user_id
+         WHERE t.business_id = ? ORDER BY t.created_at DESC LIMIT 200`
+      )
+      .all(bizUser.id);
+    const myTipRow = tips.find((t) => t.user_id === user.id);
     sendJson(res, 200, {
       business: {
         ...businessProfilePublic(row),
@@ -1671,6 +1848,8 @@ on(
         jobs: jobs.map((j) => jobPostingPublic(j)),
         reviews: reviews.map(businessReviewPublic),
         myReview: myReviewRow ? businessReviewPublic(myReviewRow) : null,
+        tips: tips.map(businessTipPublic),
+        myTip: myTipRow ? businessTipPublic(myTipRow) : null,
         isOwnBusiness: bizUser.id === user.id,
       },
     });
@@ -1740,6 +1919,24 @@ on(
   })
 );
 
+// A business removing a specific review from its own page — distinct from
+// the route above, which is a customer removing their own. No staff ticket
+// involved (unlike reportReview below): the business owner can take this
+// down immediately, at the cost of a customer's honest bad review being
+// just as easy to erase as spam. That trade-off was a deliberate choice,
+// not an oversight — see the conversation that added this route.
+on(
+  'DELETE',
+  '/api/business/directory/:handle/reviews/:reviewId',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
+    if (bizUser.id !== user.id) return sendJson(res, 403, { error: 'Only this business can remove a review from its own page.' });
+    await db.prepare('DELETE FROM business_reviews WHERE id = ? AND business_id = ?').run(params.reviewId, bizUser.id);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
 // Reporting a review someone thinks is spam, abusive, or fake. This
 // doesn't hide or delete anything by itself — it just opens a normal
 // support ticket (same queue and UI staff already use for everything
@@ -1781,6 +1978,77 @@ on(
        VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`
     ).run(crypto.randomUUID(), user.id, user.username, user.email || null, `Reported review on ${bizUser.username}`, message, now());
 
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+// A short, Foursquare-style tip ("ask for the corner table", "cash only")
+// — see business_tips in schema.sql. One tip per (business, customer) pair,
+// same upsert-on-resubmit pattern as business_reviews above, so it stays a
+// single running note rather than a feed a person can flood.
+function businessTipPublic(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    text: row.text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+on(
+  'POST',
+  '/api/business/directory/:handle/tips',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
+    if (bizUser.id === user.id) return badRequest(res, "You can't leave a tip on your own business.");
+    const text = (body.text || '').trim().slice(0, 300);
+    if (!text) return badRequest(res, 'Write a tip before saving.');
+    const profile = await db.prepare('SELECT user_id FROM business_profiles WHERE user_id = ?').get(bizUser.id);
+    if (!profile) return badRequest(res, "This business hasn't set up their page yet.");
+
+    const existing = await db
+      .prepare('SELECT id FROM business_tips WHERE business_id = ? AND user_id = ?')
+      .get(bizUser.id, user.id);
+    if (existing) {
+      await db.prepare(`UPDATE business_tips SET text = ?, updated_at = ? WHERE id = ?`).run(text, now(), existing.id);
+    } else {
+      await db.prepare(
+        `INSERT INTO business_tips (id, business_id, user_id, text, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(crypto.randomUUID(), bizUser.id, user.id, text, now(), now());
+    }
+
+    const row = await db
+      .prepare('SELECT t.*, u.username FROM business_tips t JOIN users u ON u.id = t.user_id WHERE t.business_id = ? AND t.user_id = ?')
+      .get(bizUser.id, user.id);
+    sendJson(res, 200, { tip: businessTipPublic(row) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/business/directory/:handle/tips',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
+    await db.prepare('DELETE FROM business_tips WHERE business_id = ? AND user_id = ?').run(bizUser.id, user.id);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+// A business removing a specific tip from its own page — same instant,
+// no-staff-ticket removal as the review route above, and the same
+// trade-off: quick to clear spam, just as quick to erase a fair complaint.
+on(
+  'DELETE',
+  '/api/business/directory/:handle/tips/:tipId',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const bizUser = await findUserByHandle(params.handle);
+    if (!bizUser || !bizUser.is_business) return sendJson(res, 404, { error: 'No business with that username or $paytag.' });
+    if (bizUser.id !== user.id) return sendJson(res, 403, { error: 'Only this business can remove a tip from its own page.' });
+    await db.prepare('DELETE FROM business_tips WHERE id = ? AND business_id = ?').run(params.tipId, bizUser.id);
     sendJson(res, 200, { ok: true });
   })
 );

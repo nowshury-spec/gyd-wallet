@@ -49,8 +49,22 @@
   document.getElementById('tab-login').onclick = () => switchAuthTab('login');
   document.getElementById('tab-register').onclick = () => switchAuthTab('register');
 
+  // Whether to show the "Continue with Google/Facebook" block at all
+  // depends on two independent things: is this an auth-tab view (not
+  // forgot-password/reset/etc, where social sign-in wouldn't make sense),
+  // and is at least one provider actually configured server-side. Tracked
+  // separately so either one changing (switching tabs, or the
+  // social-providers check resolving after the page already rendered)
+  // re-evaluates the same combined visibility.
+  let isAuthTabView = true;
+  let socialProvidersAvailable = false;
+  function updateSocialAuthVisibility() {
+    document.getElementById('social-auth').classList.toggle('hidden', !(isAuthTabView && socialProvidersAvailable));
+  }
+
   function switchAuthTab(which) {
     const isAuthTab = which === 'login' || which === 'register';
+    isAuthTabView = isAuthTab;
     document.querySelector('.auth-tabs').classList.toggle('hidden', !isAuthTab);
     document.getElementById('tab-login').classList.toggle('active', which === 'login');
     document.getElementById('tab-register').classList.toggle('active', which === 'register');
@@ -60,6 +74,7 @@
     document.getElementById('reset-form').classList.toggle('hidden', which !== 'reset');
     document.getElementById('forgot-username-form').classList.toggle('hidden', which !== 'forgot-username');
     document.getElementById('username-result-panel').classList.toggle('hidden', which !== 'username-result');
+    updateSocialAuthVisibility();
   }
 
   document.getElementById('register-is-business').onchange = (e) => {
@@ -100,6 +115,32 @@
       errBox.textContent = err.message;
     }
   };
+
+  // ---------- social sign-in (Google / Facebook) ----------
+  // Both are full-page redirects (see server.js's /api/auth/*/start
+  // comment for why) — clicking either just navigates away; there's
+  // nothing to await here. The buttons themselves start hidden and only
+  // appear once we've confirmed the corresponding provider is actually
+  // configured, so a not-yet-set-up provider never shows a dead button.
+  document.getElementById('google-signin-btn').onclick = () => {
+    window.location.href = '/api/auth/google/start';
+  };
+  document.getElementById('facebook-signin-btn').onclick = () => {
+    window.location.href = '/api/auth/facebook/start';
+  };
+
+  (async function loadSocialProviders() {
+    try {
+      const data = await api('/api/auth/social-providers');
+      document.getElementById('google-signin-btn').classList.toggle('hidden', !data.google);
+      document.getElementById('facebook-signin-btn').classList.toggle('hidden', !data.facebook);
+      socialProvidersAvailable = !!(data.google || data.facebook);
+      updateSocialAuthVisibility();
+    } catch {
+      // If this fails for any reason, leave the social buttons hidden —
+      // password login/signup keeps working either way.
+    }
+  })();
 
   document.getElementById('forgot-password-link').onclick = () => {
     document.getElementById('login-error').textContent = '';
@@ -225,6 +266,10 @@
         return;
       }
       switchTab('wallet');
+      // Add/Cash Out only ever act on the personal balance (see
+      // setWalletContext's comment) — jump back there first so the field
+      // being focused is actually visible, in case Business view was open.
+      setWalletContext('personal');
       const focusId = btn.dataset.focus;
       requestAnimationFrame(() => {
         const el = document.getElementById(focusId);
@@ -284,15 +329,61 @@
   // from it) is untouched.
   let balanceHidden = false;
 
+  // Which wallet the Wallet tab (and the hero balance at the top of every
+  // screen) is currently showing — 'personal' or 'business'. Only
+  // meaningful for a business account: both balances have always lived on
+  // the one account (see business_gyd_balance in supabase/schema.sql), this
+  // just controls which one is currently the "active" one on screen. Reset
+  // to 'personal' on every fresh login/reload rather than persisted, so a
+  // shared or public device never reopens the app already showing someone's
+  // business balance.
+  let walletContext = 'personal';
+
+  function currentBalance() {
+    if (!state.user) return 0;
+    return walletContext === 'business' ? state.user.businessGydBalance || 0 : state.user.gydBalance;
+  }
+
+  function setWalletContext(ctx) {
+    // Guards against the auth screen's own language picker: i18n.js fires
+    // gyd-lang-changed as soon as the page loads (to apply the saved
+    // language), which is before anyone has logged in and state.user is
+    // still null — nothing on screen needs updating yet in that case.
+    if (!state.user) return;
+    walletContext = ctx === 'business' && state.user.isBusiness ? 'business' : 'personal';
+    document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.context === walletContext);
+    });
+    document.getElementById('wallet-personal-view').classList.toggle('hidden', walletContext !== 'personal');
+    document.getElementById('wallet-business-view').classList.toggle('hidden', walletContext !== 'business');
+    const label = document.getElementById('hero-balance-label');
+    const fallback = walletContext === 'business' ? 'Business balance' : 'Available balance';
+    label.textContent = window.i18n ? window.i18n.t(walletContext === 'business' ? 't283' : 't281') : fallback;
+    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
+  }
+
+  document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
+    btn.onclick = () => setWalletContext(btn.dataset.context);
+  });
+
+  window.addEventListener('gyd-lang-changed', () => setWalletContext(walletContext));
+
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
     document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
-    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(state.user.gydBalance);
     document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
+    document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
     if (state.user.isBusiness) {
       document.getElementById('biz-wallet-balance').textContent = fmt(state.user.businessGydBalance);
+      document.getElementById('wallet-view-biz-balance').textContent = fmt(state.user.businessGydBalance);
+    } else if (walletContext === 'business') {
+      // Shouldn't normally happen (a business account can't un-become one
+      // from the UI), but if it ever did, don't strand the view on a
+      // business panel that's no longer reachable.
+      walletContext = 'personal';
     }
+    setWalletContext(walletContext);
     const paytagInput = document.getElementById('paytag-input');
     if (document.activeElement !== paytagInput) paytagInput.value = state.user.paytag || '';
     document.getElementById('account-card-paytag').textContent = `$${state.user.paytag || ''}`;
@@ -316,7 +407,7 @@
     balanceHidden = !balanceHidden;
     document.getElementById('balance-visibility-btn').textContent = balanceHidden ? '🙈' : '👁';
     updateBalanceVisibilityLabel();
-    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(state.user.gydBalance);
+    document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
   };
 
   window.addEventListener('gyd-lang-changed', updateBalanceVisibilityLabel);
@@ -336,11 +427,17 @@
   };
 
   // ---------- business wallet (separate balance for business accounts) ----------
-
-  document.getElementById('biz-wallet-move-btn').onclick = async () => {
-    const amount = Number(document.getElementById('biz-wallet-move-amount').value);
-    const errBox = document.getElementById('biz-wallet-move-error');
-    const successBox = document.getElementById('biz-wallet-move-success');
+  //
+  // Wired up twice with the same underlying logic — once for the original
+  // panel on the Business tab (#business-owner-panel), once for its mirror
+  // on the Wallet tab's Business view (#wallet-business-view) — since both
+  // show/move the same business_gyd_balance and should never drift out of
+  // sync with each other.
+  async function moveBusinessToPersonal(amountInputId, errId, successId) {
+    const amountInput = document.getElementById(amountInputId);
+    const errBox = document.getElementById(errId);
+    const successBox = document.getElementById(successId);
+    const amount = Number(amountInput.value);
     errBox.textContent = '';
     successBox.textContent = '';
     if (!positiveWager(amount)) return (errBox.textContent = 'Enter a positive amount.');
@@ -348,13 +445,21 @@
       const data = await api('/api/business/wallet/move-to-personal', 'POST', { amount });
       state.user = data.user;
       renderWho();
-      document.getElementById('biz-wallet-move-amount').value = '';
+      amountInput.value = '';
       successBox.textContent = `Moved GYD ${fmt(amount)} to your personal wallet.`;
       loadTransactions();
     } catch (err) {
       errBox.textContent = err.message;
     }
-  };
+  }
+
+  document.getElementById('biz-wallet-move-btn').onclick = () =>
+    moveBusinessToPersonal('biz-wallet-move-amount', 'biz-wallet-move-error', 'biz-wallet-move-success');
+
+  document.getElementById('wallet-view-biz-move-btn').onclick = () =>
+    moveBusinessToPersonal('wallet-view-biz-move-amount', 'wallet-view-biz-move-error', 'wallet-view-biz-move-success');
+
+  document.getElementById('wallet-view-manage-business-btn').onclick = () => switchTab('business');
 
   async function refreshMe() {
     const data = await api('/api/me');
@@ -991,6 +1096,12 @@
   }
   renderSwatches();
 
+  // Keeps each dietary checkbox's pill styling in sync with its checked
+  // state — same "active" toggle pattern as .swatch.selected above.
+  document.querySelectorAll('#bizpage-dietary-tags .checkbox-chip input').forEach((cb) => {
+    cb.onchange = () => cb.closest('.checkbox-chip').classList.toggle('checked', cb.checked);
+  });
+
   async function loadMyBusinessPage() {
     if (!state.user.isBusiness) return;
     try {
@@ -1000,6 +1111,11 @@
         document.getElementById('bizpage-tagline').value = data.profile.tagline || '';
         document.getElementById('bizpage-description').value = data.profile.description || '';
         document.getElementById('bizpage-keywords').value = data.profile.keywords.join(', ');
+        document.querySelectorAll('#bizpage-dietary-tags .checkbox-chip').forEach((chip) => {
+          const cb = chip.querySelector('input');
+          cb.checked = (data.profile.dietaryTags || []).includes(cb.value);
+          chip.classList.toggle('checked', cb.checked);
+        });
         document.getElementById('bizpage-logo').value = data.profile.logoEmoji || '';
         document.getElementById('bizpage-phone').value = data.profile.phone || '';
         document.getElementById('bizpage-location').value = data.profile.location || '';
@@ -1697,6 +1813,7 @@
     const tagline = document.getElementById('bizpage-tagline').value.trim();
     const description = document.getElementById('bizpage-description').value.trim();
     const keywords = document.getElementById('bizpage-keywords').value.trim();
+    const dietaryTags = Array.from(document.querySelectorAll('#bizpage-dietary-tags .checkbox-chip input:checked')).map((cb) => cb.value);
     const logoEmoji = document.getElementById('bizpage-logo').value.trim();
     const phone = document.getElementById('bizpage-phone').value.trim();
     const location = document.getElementById('bizpage-location').value.trim();
@@ -1709,7 +1826,7 @@
     successBox.textContent = '';
     try {
       await api('/api/business/profile', 'POST', {
-        category, tagline, description, keywords, logoEmoji, phone, location, themeColor,
+        category, tagline, description, keywords, dietaryTags, logoEmoji, phone, location, themeColor,
         offersDelivery, deliveryFee: offersDelivery ? deliveryFee : 0,
       });
       successBox.textContent = 'Saved — your page is live in the directory.';
@@ -1725,15 +1842,18 @@
     directorySearchTimer = setTimeout(loadDirectory, 250);
   };
   document.getElementById('directory-category').onchange = loadDirectory;
+  document.getElementById('directory-dietary').onchange = loadDirectory;
 
   async function loadDirectory() {
     const q = document.getElementById('directory-search').value.trim();
     const category = document.getElementById('directory-category').value;
+    const dietary = document.getElementById('directory-dietary').value;
     const box = document.getElementById('directory-results');
     try {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (category) params.set('category', category);
+      if (dietary) params.set('dietary', dietary);
       const data = await api(`/api/business/directory?${params.toString()}`);
       box.innerHTML = '';
       if (data.businesses.length === 0) {
@@ -1787,6 +1907,14 @@
         chip.textContent = k;
         keywordsBox.appendChild(chip);
       });
+      const dietaryBox = document.getElementById('bizpage-view-dietary');
+      dietaryBox.innerHTML = '';
+      (b.dietaryTags || []).forEach((tag) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip chip-dietary';
+        chip.textContent = tag.replace(/-/g, ' ');
+        dietaryBox.appendChild(chip);
+      });
       const contactBits = [];
       if (b.phone) contactBits.push(`📞 ${b.phone}`);
       if (b.location) contactBits.push(`📍 ${b.location}`);
@@ -1822,6 +1950,7 @@
       renderBizPageEvents(b, username);
       renderBizPageJobs(b);
       renderBizPageReviews(b, username);
+      renderBizPageTips(b, username);
 
       document.getElementById('bizpage-view-message-btn').onclick = () => {
         switchTab('messages');
@@ -1880,11 +2009,19 @@
         <div class="review-row-top">
           <span class="star-glyphs">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
           <strong>@${r.reviewerUsername}</strong>
-          <button type="button" class="link-btn report-review-btn" style="margin-left:auto; font-size:11px;">Report</button>
+          ${
+            b.isOwnBusiness
+              ? `<button type="button" class="link-btn remove-review-btn" style="margin-left:auto; font-size:11px;">Remove</button>`
+              : `<button type="button" class="link-btn report-review-btn" style="margin-left:auto; font-size:11px;">Report</button>`
+          }
         </div>
         ${r.comment ? `<div class="product-description" style="margin-top:4px;">${r.comment}</div>` : ''}
       `;
-      row.querySelector('.report-review-btn').onclick = () => reportReview(username, r.id);
+      if (b.isOwnBusiness) {
+        row.querySelector('.remove-review-btn').onclick = () => removeReviewAsBusiness(username, r.id);
+      } else {
+        row.querySelector('.report-review-btn').onclick = () => reportReview(username, r.id);
+      }
       box.appendChild(row);
     });
   }
@@ -1898,6 +2035,19 @@
     try {
       await api(`/api/business/directory/${encodeURIComponent(username)}/reviews/${reviewId}/report`, 'POST', { reason });
       alert("Thanks — we've sent this to our support team to look at.");
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // A business removing a review straight from its own page — no staff
+  // ticket, gone immediately. Only shown to the business itself (see
+  // b.isOwnBusiness above).
+  async function removeReviewAsBusiness(username, reviewId) {
+    if (!confirm("Remove this review from your page? This can't be undone.")) return;
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(username)}/reviews/${reviewId}`, 'DELETE');
+      openBusinessPage(username);
     } catch (err) {
       alert(err.message);
     }
@@ -1930,6 +2080,91 @@
       setReviewStars(0);
       document.getElementById('bizpage-review-comment').value = '';
       openBusinessPage(reviewBusinessUsername);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  // ---------- tips (short, Foursquare-style notes) ----------
+
+  let tipBusinessUsername = null;
+
+  function renderBizPageTips(b, username) {
+    tipBusinessUsername = username;
+    const formWrap = document.getElementById('bizpage-tip-form-wrap');
+    const errBox = document.getElementById('bizpage-tip-error');
+    const successBox = document.getElementById('bizpage-tip-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+
+    // A business can't leave a tip on its own page — same rule as reviews.
+    formWrap.classList.toggle('hidden', !!b.isOwnBusiness);
+    if (!b.isOwnBusiness) {
+      document.getElementById('bizpage-tip-text').value = b.myTip ? b.myTip.text : '';
+      document.getElementById('bizpage-tip-remove-btn').classList.toggle('hidden', !b.myTip);
+    }
+
+    const box = document.getElementById('bizpage-view-tips');
+    box.innerHTML = '';
+    if (!b.tips || b.tips.length === 0) {
+      box.innerHTML = '<p class="muted">No tips yet — be the first to leave one.</p>';
+      return;
+    }
+    b.tips.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'review-row';
+      row.innerHTML = `
+        <div class="review-row-top">
+          <strong>@${t.username}</strong>
+          ${
+            b.isOwnBusiness
+              ? `<button type="button" class="link-btn remove-tip-btn" style="margin-left:auto; font-size:11px;">Remove</button>`
+              : ''
+          }
+        </div>
+        <div class="product-description" style="margin-top:4px;">${t.text}</div>
+      `;
+      if (b.isOwnBusiness) {
+        row.querySelector('.remove-tip-btn').onclick = () => removeTipAsBusiness(username, t.id);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  // Same instant, no-staff-ticket removal as removeReviewAsBusiness above.
+  async function removeTipAsBusiness(username, tipId) {
+    if (!confirm("Remove this tip from your page? This can't be undone.")) return;
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(username)}/tips/${tipId}`, 'DELETE');
+      openBusinessPage(username);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  document.getElementById('bizpage-tip-submit-btn').onclick = async () => {
+    const errBox = document.getElementById('bizpage-tip-error');
+    const successBox = document.getElementById('bizpage-tip-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    const text = document.getElementById('bizpage-tip-text').value.trim();
+    if (!text) return (errBox.textContent = 'Write a tip before saving.');
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(tipBusinessUsername)}/tips`, 'POST', { text });
+      successBox.textContent = 'Thanks — your tip was saved.';
+      openBusinessPage(tipBusinessUsername);
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('bizpage-tip-remove-btn').onclick = async () => {
+    const errBox = document.getElementById('bizpage-tip-error');
+    errBox.textContent = '';
+    try {
+      await api(`/api/business/directory/${encodeURIComponent(tipBusinessUsername)}/tips`, 'DELETE');
+      document.getElementById('bizpage-tip-text').value = '';
+      openBusinessPage(tipBusinessUsername);
     } catch (err) {
       errBox.textContent = err.message;
     }
@@ -2858,6 +3093,23 @@
   // ---------- boot ----------
 
   (async function boot() {
+    // A "Continue with Google/Facebook" sign-in lands back here as a full
+    // page redirect (see server.js's /api/auth/*/callback routes) with the
+    // result in the URL, since there's no in-page JS running mid-navigation
+    // to hand it a JSON response the normal way. Pick it up once, then
+    // scrub the URL so refreshing the page doesn't try to reuse it.
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthToken = urlParams.get('oauth_token');
+    const oauthError = urlParams.get('oauth_error');
+    if (oauthToken || oauthError) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (oauthToken) {
+      setToken(oauthToken);
+    } else if (oauthError) {
+      document.getElementById('login-error').textContent = oauthError;
+    }
+
     if (!state.token) return;
     try {
       await refreshMe();

@@ -60,6 +60,24 @@ CREATE TABLE IF NOT EXISTS users (
   sessions_invalidated_at TEXT
 );
 
+-- Links a users row to a "Continue with Google/Facebook" identity — see
+-- oauth.js and the /api/auth/google/* + /api/auth/facebook/* routes in
+-- server.js. Kept as its own table (rather than google_id/facebook_id
+-- columns on users) so an account can have one, both, or neither, and so
+-- adding a third provider later is another row shape, not another column.
+-- provider_user_id is that provider's own permanent account id (Google's
+-- `sub`, Facebook's `id`) — never the email, since a person can change
+-- their email with the provider but that id never changes.
+CREATE TABLE IF NOT EXISTS oauth_identities (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL, -- 'google' | 'facebook'
+  provider_user_id TEXT NOT NULL,
+  email TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (provider, provider_user_id)
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
@@ -432,6 +450,33 @@ CREATE TABLE IF NOT EXISTS business_reviews (
   updated_at TEXT NOT NULL,
   UNIQUE (business_id, reviewer_id)
 );
+
+-- A short, quick, Foursquare-style tip a customer leaves on a business's
+-- page ("ask for the corner table", "cash only") — separate from a star
+-- review, and deliberately kept to one per (business, customer) pair
+-- (submitting again edits the existing tip, same upsert pattern as
+-- business_reviews above) so it stays a single running note rather than a
+-- feed. FKs (unlike business_reviews.business_id/reviewer_id, which predate
+-- this convention) so a deleted business or user doesn't leave orphaned
+-- tips behind. Public on the business's page — no staff moderation queue
+-- for these yet, same as business_reviews.
+CREATE TABLE IF NOT EXISTS business_tips (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL CHECK (length(trim(text)) > 0 AND length(text) <= 300),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (business_id, user_id)
+);
+ALTER TABLE business_tips ENABLE ROW LEVEL SECURITY;
+
+-- Comma-separated dietary options a business selects for their page (e.g.
+-- "vegan,halal,gluten-free"), matching the existing free-text `keywords`
+-- column's storage style. Values are restricted to a fixed allow-list in
+-- server.js (ALLOWED_DIETARY_TAGS) so it stays a meaningful filter facet
+-- rather than freeform text.
+ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS dietary_tags TEXT;
 
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app

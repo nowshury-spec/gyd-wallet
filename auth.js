@@ -76,4 +76,4 @@ function makeStaffSessionToken(staffId) {
   return sign({ sid: staffId, role: 'staff', iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS });
 }
 
-module.exports = { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, verify };
+module.exports = { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, sign, verify };

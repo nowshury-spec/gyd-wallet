@@ -348,6 +348,40 @@ That's the whole setup — nothing in the code needs to change. A Twilio trial a
 
 **Why you have to do this part yourself:** same reason as the Resend API key above — these are credentials, and they go into Render's environment variables through Render's own dashboard, by you.
 
+## Setting up social sign-in (Google / Facebook)
+
+The auth screen can show "Continue with Google" and "Continue with Facebook" buttons alongside the regular username/password login and signup forms. `oauth.js` adds this using each provider's own OAuth 2.0 HTTP endpoints, reached with Node's built-in `fetch()` — same zero-npm-dependency approach as `email.js` and `sms.js` — and, like those, each provider only turns on once it's configured. Both are optional and independent of each other: with neither set up, the auth screen just shows the password form the way it always has; with one set up but not the other, only that one button appears.
+
+Signing in with either provider either logs into an existing account (if that Google/Facebook account has signed in before, or its verified email matches an existing password account) or creates a brand-new one automatically — no password is set on a new account created this way, though its owner can still add one later through the normal "Forgot your password?" flow once they've added an email.
+
+**Setting up Google (free):**
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a project (or use an existing one) — no cost, no credit card required for this.
+2. Go to **APIs & Services → OAuth consent screen**, choose **External**, and fill in the minimal required fields (app name, your email). You can leave it in "Testing" mode while trying this out, or publish it once you're ready for anyone to use it.
+3. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**, choose **Web application**.
+4. Under **Authorized redirect URIs**, add exactly: `https://gyd-wallet.onrender.com/api/auth/google/callback`
+5. Click Create — Google shows you a **Client ID** and **Client secret**.
+6. In **Render's dashboard** → your service → **Environment**, add:
+   - `GOOGLE_CLIENT_ID`
+   - `GOOGLE_CLIENT_SECRET`
+
+**Setting up Facebook (free):**
+
+1. Go to [Meta for Developers](https://developers.facebook.com/) and create an app (choose "Consumer" or "Other" as the type) — also free, no payment info needed.
+2. Add the **Facebook Login** product to the app.
+3. Under Facebook Login's **Settings**, add exactly this to **Valid OAuth Redirect URIs**: `https://gyd-wallet.onrender.com/api/auth/facebook/callback`
+4. Under the app's **Settings → Basic**, copy the **App ID** and **App Secret**.
+5. While the app is in "Development" mode, only people you've added as testers/developers on the Facebook app itself can sign in with it — switch the app to "Live" (Meta may ask for a privacy policy URL and basic app review first) once you want it open to anyone.
+6. In **Render's dashboard** → your service → **Environment**, add:
+   - `FACEBOOK_APP_ID`
+   - `FACEBOOK_APP_SECRET`
+
+Either way, redeploy after saving (Render does this automatically after an environment variable change), then refresh the auth screen — the corresponding button appears once its two env vars are set.
+
+If this app is ever deployed somewhere other than `gyd-wallet.onrender.com` (a custom domain, a staging copy), also set `APP_BASE_URL` to that URL and update both providers' redirect URI settings to match — the redirect URI sent to Google/Facebook has to exactly match what's registered in their console, or sign-in fails.
+
+**Why you have to do this part yourself:** same reason as the Resend and Twilio credentials above — a client ID and secret are credentials, and they go into Render's environment variables through Render's own dashboard, by you. Claude also can't click through Google's or Facebook's own developer console on your behalf to create the OAuth app itself, since that means signing into your Google/Facebook account.
+
 ## How product photos are stored
 
 There's no file-upload endpoint or file storage in this zero-dependency prototype, so a product photo never becomes a file on the server at all. Instead, the browser reads the chosen photo, draws it onto an off-screen canvas resized to a maximum of 500px on its longest side, re-encodes that as a compressed JPEG, and sends the whole thing as a `data:image/...;base64,...` string in the same JSON request that creates the product — the server just validates it looks like an image and isn't unreasonably large (capped at roughly 1.5MB of raw image data), then stores that string as a normal text column. That keeps the feature genuinely working without adding an image-processing library or a place to store uploaded files, at the cost of every photo living inline in the SQLite database rather than as a separate optimized asset — fine for a demo, not how you'd want to do it at real scale (a real build would upload to object storage and store a URL instead).

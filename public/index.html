@@ -38,6 +38,20 @@
       <button id="tab-register" data-i18n="t148">Sign up</button>
     </div>
 
+    <div id="social-auth" class="social-auth hidden">
+      <button type="button" class="btn social-btn" id="google-signin-btn">
+        <span class="social-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.88 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.95v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.66 9c0-.59.1-1.17.29-1.7V4.97H.95A9 9 0 0 0 0 9c0 1.45.35 2.83.95 4.03l3-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .95 4.97l3 2.33C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
+        </span>
+        <span data-i18n="t331">Continue with Google</span>
+      </button>
+      <button type="button" class="btn social-btn" id="facebook-signin-btn">
+        <span class="social-icon social-icon-fb" aria-hidden="true">f</span>
+        <span data-i18n="t332">Continue with Facebook</span>
+      </button>
+      <div class="social-divider"><span data-i18n="t333">or</span></div>
+    </div>
+
     <form id="login-form">
       <div class="field">
         <label data-i18n="t51">Username</label>
@@ -150,7 +164,7 @@
 
       <div class="hero-balance">
         <div class="hero-balance-top">
-          <span class="hero-balance-label" data-i18n="t281">Available balance</span>
+          <span class="hero-balance-label" id="hero-balance-label" data-i18n="t281">Available balance</span>
           <button type="button" class="balance-visibility-btn" id="balance-visibility-btn" aria-label="Hide balance" title="Hide balance">👁</button>
         </div>
         <div class="hero-balance-value"><span id="balance-gyd">0.00</span><span class="hero-balance-unit">GYD</span></div>
@@ -172,6 +186,18 @@
 
       <!-- WALLET TAB -->
       <section id="panel-wallet" class="tab-panel">
+        <!-- Only shown to business accounts (see renderWho() in app.js) — lets
+             the same login flip between acting as their personal wallet and
+             their business wallet without leaving this tab. Both balances
+             have always lived on this one account (see business_gyd_balance
+             in supabase/schema.sql); this just surfaces the one that used to
+             require going to the Business tab to see. -->
+        <div class="wallet-context-switch hidden" id="wallet-context-switch">
+          <button type="button" class="wallet-context-btn active" data-context="personal" data-i18n="t334">Personal</button>
+          <button type="button" class="wallet-context-btn" data-context="business" data-i18n="t335">Business</button>
+        </div>
+
+        <div id="wallet-personal-view">
         <h2 class="section-title" data-i18n="t1">Your account</h2>
         <div class="account-card">
           <div class="account-card-top">
@@ -225,6 +251,34 @@
             This deducts the GYD and files a pending request — it does not send real money in this prototype.
           </p>
           <div class="error-msg" id="cashout-error"></div>
+        </div>
+        </div>
+
+        <!-- Mirrors the "Your business wallet" panel that still also lives on
+             the Business tab (see #business-owner-panel in index.html) — same
+             balance, same move-to-personal endpoint, just reachable from here
+             too so switching to "Business" above shows something immediately
+             instead of an empty tab. Managing the actual storefront (page,
+             products, jobs) stays on the Business tab, linked below. -->
+        <div id="wallet-business-view" class="hidden">
+          <h2 class="section-title" data-i18n="t29">Your business wallet</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t255">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
+            <div class="biz-wallet-balance">
+              <span class="biz-wallet-label" data-i18n="t283">Business balance</span>
+              <span class="biz-wallet-value">GYD <span id="wallet-view-biz-balance">0.00</span></span>
+            </div>
+            <div class="panel-row" style="margin-top:16px;">
+              <div class="field">
+                <label data-i18n="t81">Move to personal wallet</label>
+                <input type="number" id="wallet-view-biz-move-amount" min="0.01" step="0.01" placeholder="1000" />
+              </div>
+              <button class="btn secondary" id="wallet-view-biz-move-btn" data-i18n="t189">Move</button>
+            </div>
+            <div class="error-msg" id="wallet-view-biz-move-error"></div>
+            <p class="muted" id="wallet-view-biz-move-success" style="font-size:12.5px; margin-top:2px;"></p>
+          </div>
+          <button type="button" class="btn secondary full" id="wallet-view-manage-business-btn" data-i18n="t336">Manage your business page →</button>
         </div>
 
         <h2 class="section-title" data-i18n="t5">Recent activity</h2>
@@ -577,6 +631,19 @@
                 <option value="" data-i18n="t135">All categories</option>
               </select>
             </div>
+            <div class="field">
+              <label data-i18n="t337">Dietary</label>
+              <select id="directory-dietary">
+                <option value="" data-i18n="t338">Any diet</option>
+                <option value="vegan" data-i18n="t339">Vegan</option>
+                <option value="vegetarian" data-i18n="t340">Vegetarian</option>
+                <option value="gluten-free" data-i18n="t341">Gluten-free</option>
+                <option value="halal" data-i18n="t342">Halal</option>
+                <option value="kosher" data-i18n="t343">Kosher</option>
+                <option value="dairy-free" data-i18n="t344">Dairy-free</option>
+                <option value="nut-free" data-i18n="t345">Nut-free</option>
+              </select>
+            </div>
           </div>
           <div id="directory-results"><p class="muted" data-i18n="t254">Loading businesses…</p></div>
         </div>
@@ -626,6 +693,18 @@
             <div class="field">
               <label data-i18n="t86">What you offer (comma-separated — this is what search matches)</label>
               <input type="text" id="bizpage-keywords" maxlength="300" placeholder="wedding cakes, cupcakes, birthday cakes" data-i18n-ph="t297" />
+            </div>
+            <div class="field">
+              <label data-i18n="t346">Dietary options (optional — shown on your page and filterable in search)</label>
+              <div class="checkbox-chip-row" id="bizpage-dietary-tags">
+                <label class="checkbox-chip"><input type="checkbox" value="vegan" /><span data-i18n="t339">Vegan</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="vegetarian" /><span data-i18n="t340">Vegetarian</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="gluten-free" /><span data-i18n="t341">Gluten-free</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="halal" /><span data-i18n="t342">Halal</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="kosher" /><span data-i18n="t343">Kosher</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="dairy-free" /><span data-i18n="t344">Dairy-free</span></label>
+                <label class="checkbox-chip"><input type="checkbox" value="nut-free" /><span data-i18n="t345">Nut-free</span></label>
+              </div>
             </div>
             <div class="panel-row">
               <div class="field">
@@ -834,8 +913,26 @@
         <div class="panel">
           <p class="muted" id="bizpage-view-description"></p>
           <div class="chip-row" id="bizpage-view-keywords"></div>
+          <div class="chip-row" id="bizpage-view-dietary"></div>
           <p class="muted" id="bizpage-view-contact" style="margin-top:12px;"></p>
           <p class="muted" id="bizpage-view-delivery" style="margin-top:8px; display:none;" data-i18n="t264">🚚 Delivery available</p>
+        </div>
+
+        <h2 class="section-title" data-i18n="t347">Tips</h2>
+        <div class="panel">
+          <div id="bizpage-view-tips"><p class="muted" data-i18n="t348">No tips yet — be the first to leave one.</p></div>
+          <div id="bizpage-tip-form-wrap">
+            <div class="field" style="margin-top:12px;">
+              <label data-i18n="t349">Leave a tip for other customers (optional)</label>
+              <textarea id="bizpage-tip-text" rows="2" maxlength="300" placeholder="Ask for the corner table, arrive before 6pm…" data-i18n-ph="t350"></textarea>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <button class="btn secondary" id="bizpage-tip-submit-btn" data-i18n="t351">Save my tip</button>
+              <button class="btn secondary hidden" id="bizpage-tip-remove-btn" data-i18n="t352">Remove my tip</button>
+            </div>
+            <div class="error-msg" id="bizpage-tip-error"></div>
+            <p class="muted" id="bizpage-tip-success" style="font-size:12.5px; margin-top:6px;"></p>
+          </div>
         </div>
 
         <h2 class="section-title" data-i18n="t39">Products &amp; prices</h2>
