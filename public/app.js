@@ -391,6 +391,22 @@
     const fallback = walletContext === 'business' ? 'Business balance' : 'Available balance';
     label.textContent = window.i18n ? window.i18n.t(walletContext === 'business' ? 't283' : 't281') : fallback;
     document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
+
+    // The Business tab itself (search/browse other businesses, browse jobs,
+    // "My tickets"/"My orders" as a customer) stays reachable no matter which
+    // mode you're in or whether you even have a business — that's browsing,
+    // open to everyone. What's mode-gated is the "manage your own business"
+    // section below it (#business-owner-panel: your page editor, photos,
+    // products, employees, redeeming/pending pickup orders, posting jobs) —
+    // that only shows while a business account is actually in Business mode,
+    // so switching to Personal really does mean you can look but not touch,
+    // instead of just switching which balance is on screen.
+    document.getElementById('business-owner-panel').classList.toggle(
+      'hidden',
+      !(state.user.isBusiness && walletContext === 'business')
+    );
+    document.getElementById('who-tag').textContent =
+      `$${state.user.paytag}` + (state.user.isBusiness && walletContext === 'business' ? ` · Business` : '');
   }
 
   document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
@@ -420,8 +436,9 @@
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
-    document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
-    document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
+    // who-tag's actual text (including whether it shows "· Business"), and
+    // #business-owner-panel's visibility, are set by setWalletContext below,
+    // since both depend on which mode is active, not just isBusiness.
     document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
     document.getElementById('account-mode-switch').classList.toggle('hidden', !state.user.isBusiness);
     // Offering to add a business account only makes sense for an account
