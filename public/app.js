@@ -378,6 +378,13 @@
     document.querySelectorAll('.wallet-context-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.context === walletContext);
     });
+    // The header's global Personal/Business switch (#account-mode-switch)
+    // shares this same underlying state, so any path that changes
+    // walletContext — including the Wallet tab's own toggle below — keeps
+    // that header switch in sync too, instead of the two ever disagreeing.
+    document.querySelectorAll('.account-mode-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.mode === walletContext);
+    });
     document.getElementById('wallet-personal-view').classList.toggle('hidden', walletContext !== 'personal');
     document.getElementById('wallet-business-view').classList.toggle('hidden', walletContext !== 'business');
     const label = document.getElementById('hero-balance-label');
@@ -392,12 +399,31 @@
 
   window.addEventListener('gyd-lang-changed', () => setWalletContext(walletContext));
 
+  // The header's global Personal/Business switch (#account-mode-switch).
+  // Unlike the Wallet tab's own toggle above (which only swaps the
+  // balance/panel shown there), this one also jumps the whole screen to the
+  // relevant home tab, so switching to "Business" really does feel like
+  // moving into the business side of the account rather than just peeking
+  // at its balance. It shares walletContext as its state (see the sync in
+  // setWalletContext above) rather than tracking its own, so the two
+  // switches can never disagree.
+  function setAccountMode(mode) {
+    if (!state.user) return;
+    setWalletContext(mode);
+    switchTab(walletContext === 'business' ? 'business' : 'wallet');
+  }
+
+  document.querySelectorAll('.account-mode-btn').forEach((btn) => {
+    btn.onclick = () => setAccountMode(btn.dataset.mode);
+  });
+
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
     document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
     document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
     document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
     document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
+    document.getElementById('account-mode-switch').classList.toggle('hidden', !state.user.isBusiness);
     // Offering to add a business account only makes sense for an account
     // that doesn't already have one — once it does, "Your business page"
     // on the Business tab is where it's managed from then on.

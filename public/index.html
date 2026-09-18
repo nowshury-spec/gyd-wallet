@@ -156,6 +156,19 @@
     </header>
 
     <main class="app-main">
+      <!-- Only shown to business accounts (see renderWho() in app.js). Unlike
+           #wallet-context-switch below (which only flips the balance shown on
+           the Wallet tab), this one lives above every tab's content and is a
+           full mode switch: choosing "Business" jumps straight to the
+           Business tab (storefront/orders/products) and shows the business
+           balance up top; choosing "Personal" returns to the Wallet tab and
+           the personal balance. Both still stay reachable from the bottom
+           nav either way — this is a shortcut, not a lockout. -->
+      <div class="account-mode-switch hidden" id="account-mode-switch">
+        <button type="button" class="account-mode-btn active" data-mode="personal" data-i18n="t334">Personal</button>
+        <button type="button" class="account-mode-btn" data-mode="business" data-i18n="t335">Business</button>
+      </div>
+
       <div class="banner">
         <span class="banner-icon">ℹ</span>
         <span data-i18n="t276">Phase 1 demo: deposits are simulated (no real payment processor is connected) and cash-out only records a
@@ -617,6 +630,7 @@
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:-4px;">
           <button class="btn secondary small" id="jobs-board-btn" data-i18n="t187">💼 Jobs</button>
           <button class="btn secondary small" id="my-tickets-btn" data-i18n="t188">🎟️ My tickets</button>
+          <button class="btn secondary small" id="my-orders-btn" data-i18n="t373">📦 My orders</button>
         </div>
         <h2 class="section-title" data-i18n="t28">Find a business</h2>
         <div class="panel">
@@ -716,6 +730,16 @@
                 <input type="text" id="bizpage-location" placeholder="Georgetown, Guyana" data-i18n-ph="t298" />
               </div>
             </div>
+            <div class="panel-row">
+              <div class="field">
+                <label data-i18n="t360">Website (optional)</label>
+                <input type="text" id="bizpage-website" placeholder="https://yourbusiness.com" data-i18n-ph="t371" />
+              </div>
+              <div class="field">
+                <label data-i18n="t361">Hours (optional)</label>
+                <input type="text" id="bizpage-hours" placeholder="Mon–Sat 8am–6pm" data-i18n-ph="t372" />
+              </div>
+            </div>
             <div class="field">
               <label data-i18n="t89">Page color</label>
               <div class="swatch-row" id="bizpage-swatches"></div>
@@ -732,6 +756,18 @@
             <button class="btn" id="bizpage-save-btn" data-i18n="t190">Save my page</button>
             <div class="error-msg" id="bizpage-save-error"></div>
             <p class="muted" id="bizpage-save-success" style="font-size:12.5px; margin-top:8px;"></p>
+          </div>
+
+          <h2 class="section-title" data-i18n="t362">Photos</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t363">Show off your business — customers can browse these on your page. Up to 20 photos.</p>
+            <input type="file" id="bizpage-photo-input" accept="image/*" class="hidden" />
+            <div style="display:flex; align-items:center; gap:10px;">
+              <button class="btn secondary small" id="bizpage-photo-add-btn" data-i18n="t364">+ Add photo</button>
+              <span class="muted" id="bizpage-photo-count" style="font-size:12px;"></span>
+            </div>
+            <div class="error-msg" id="bizpage-photo-error" style="margin-top:8px;"></div>
+            <div class="photo-grid" id="bizpage-photo-list" style="margin-top:12px;"></div>
           </div>
 
           <h2 class="section-title" data-i18n="t31">Products &amp; prices</h2>
@@ -874,6 +910,23 @@
             <div id="checkin-result" style="margin-top:10px;"></div>
           </div>
 
+          <h2 class="section-title" data-i18n="t377">Redeem a pickup order</h2>
+          <div class="panel">
+            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t378">Enter the code a customer shows you at pickup to release their payment to your business wallet.</p>
+            <div class="panel-row">
+              <div class="field">
+                <label data-i18n="t379">Pickup code</label>
+                <input type="text" id="order-redeem-code" placeholder="A1B2C3D4E5" data-i18n-ph="t309" style="text-transform:uppercase;" />
+              </div>
+              <button class="btn" id="order-redeem-btn" data-i18n="t380">Redeem</button>
+            </div>
+            <div class="error-msg" id="order-redeem-error"></div>
+            <div id="order-redeem-result" style="margin-top:10px;"></div>
+          </div>
+
+          <h2 class="section-title" data-i18n="t381">Pending pickup orders</h2>
+          <div class="panel" id="my-pending-orders-list"><p class="muted" data-i18n="t382">No pending orders yet.</p></div>
+
           <h2 class="section-title" data-i18n="t35">Request a payment from a customer</h2>
           <div class="panel">
             <div class="panel-row">
@@ -922,16 +975,47 @@
           <div class="bizpage-logo" id="bizpage-view-logo">🏢</div>
           <div class="bizpage-name" id="bizpage-view-name">—</div>
           <div class="bizpage-paytag" id="bizpage-view-paytag"></div>
-          <span class="pill" id="bizpage-view-category"></span>
+          <div class="chip-row" style="justify-content:center;">
+            <span class="pill" id="bizpage-view-category"></span>
+            <div class="chip-row" id="bizpage-view-keywords" style="display:inline-flex;"></div>
+          </div>
           <p class="bizpage-tagline" id="bizpage-view-tagline"></p>
           <div class="star-summary" id="bizpage-view-rating-summary" style="margin-top:10px;"></div>
         </div>
+
+        <div class="bizpage-action-row">
+          <button type="button" class="bizpage-action-btn" id="bizpage-view-message-btn">
+            <span class="bizpage-action-icon">💬</span><span data-i18n="t205">Message</span>
+          </button>
+          <a class="bizpage-action-btn hidden" id="bizpage-action-call" href="#">
+            <span class="bizpage-action-icon">📞</span><span data-i18n="t366">Call</span>
+          </a>
+          <a class="bizpage-action-btn hidden" id="bizpage-action-directions" href="#" target="_blank" rel="noopener">
+            <span class="bizpage-action-icon">📍</span><span data-i18n="t367">Directions</span>
+          </a>
+          <a class="bizpage-action-btn hidden" id="bizpage-action-website" href="#" target="_blank" rel="noopener">
+            <span class="bizpage-action-icon">🌐</span><span data-i18n="t368">Website</span>
+          </a>
+        </div>
+
+        <div class="panel hidden" id="bizpage-view-delivery-panel">
+          <p class="muted" id="bizpage-view-delivery" style="margin:0;" data-i18n="t264">🚚 Delivery available</p>
+        </div>
+
+        <h2 class="section-title" data-i18n="t362">Photos</h2>
+        <div class="panel">
+          <div class="photo-grid" id="bizpage-view-photos"><p class="muted" data-i18n="t365">No photos yet.</p></div>
+        </div>
+
         <div class="panel">
           <p class="muted" id="bizpage-view-description"></p>
-          <div class="chip-row" id="bizpage-view-keywords"></div>
           <div class="chip-row" id="bizpage-view-dietary"></div>
           <p class="muted" id="bizpage-view-contact" style="margin-top:12px;"></p>
-          <p class="muted" id="bizpage-view-delivery" style="margin-top:8px; display:none;" data-i18n="t264">🚚 Delivery available</p>
+          <p class="muted hidden" id="bizpage-view-hours" style="margin-top:6px;"></p>
+        </div>
+
+        <div class="photo-lightbox hidden" id="photo-lightbox">
+          <img id="photo-lightbox-img" src="" alt="" />
         </div>
 
         <h2 class="section-title" data-i18n="t347">Tips</h2>
@@ -1009,11 +1093,15 @@
           <button class="btn full" id="checkout-pay-btn" data-i18n="t204">Confirm &amp; pay</button>
           <div class="error-msg" id="checkout-error"></div>
           <p class="muted" id="checkout-success" style="font-size:12.5px; margin-top:6px;"></p>
+          <div class="panel hidden" id="checkout-pickup-code-box" style="margin-top:10px; text-align:center;">
+            <p class="muted" style="font-size:12px; margin:0 0 8px;">Show this code at the store to pick up your order — it's automatically released to the business after 24 hours either way.</p>
+            <img id="checkout-pickup-qr" src="" alt="Pickup code QR" width="140" height="140" style="border-radius:var(--radius-sm); background:#fff; padding:6px;" />
+            <div style="font-weight:800; font-size:18px; letter-spacing:0.06em; margin-top:8px;" id="checkout-pickup-code-text"></div>
+          </div>
         </div>
 
         <div style="display:flex; gap:10px;">
-          <button class="btn full" id="bizpage-view-message-btn" data-i18n="t205">Message</button>
-          <button class="btn secondary full" id="bizpage-view-pay-btn" data-i18n="t206">Pay</button>
+          <button class="btn full" id="bizpage-view-pay-btn" data-i18n="t206">Pay</button>
         </div>
       </section>
 
@@ -1024,6 +1112,15 @@
           <h2 class="section-title" style="margin:0;" data-i18n="t45">My tickets</h2>
         </div>
         <div id="my-tickets-list"><p class="muted" data-i18n="t267">Loading your tickets…</p></div>
+      </section>
+
+      <!-- MY PICKUP ORDERS (reached from the "📦 My orders" button on the Business tab) -->
+      <section id="panel-myorders" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="myorders-back-btn" data-i18n="t376">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t374">My pickup orders</h2>
+        </div>
+        <div id="my-orders-list"><p class="muted" data-i18n="t375">Loading your orders…</p></div>
       </section>
 
       <!-- JOBS BOARD (reached from the "💼 Jobs" button on the Business tab) -->
