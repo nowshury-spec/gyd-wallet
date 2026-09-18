@@ -309,6 +309,23 @@ CREATE TABLE IF NOT EXISTS job_postings (
   review_status TEXT NOT NULL DEFAULT 'approved'
 );
 
+-- Which of Guyana's 10 administrative regions a job is in, for filtering on
+-- the jobs board — restricted to a fixed allow-list in server.js
+-- (GUYANA_REGIONS), same pattern as business_profiles.dietary_tags.
+ALTER TABLE job_postings ADD COLUMN IF NOT EXISTS region TEXT;
+
+-- A user bookmarking a job posting on the jobs board — the "☆ save" button.
+-- Purely a personal list; doesn't notify the business or affect the
+-- posting itself.
+CREATE TABLE IF NOT EXISTS saved_jobs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, job_id)
+);
+ALTER TABLE saved_jobs ENABLE ROW LEVEL SECURITY;
+
 -- A "forgot password" reset code. Since this Phase 1 prototype has no real
 -- email sending set up (see "Why no npm packages" in README.md), the code
 -- generated here is handed straight back to the browser and shown on

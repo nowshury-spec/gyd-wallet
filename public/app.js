@@ -249,6 +249,25 @@
     authScreen.classList.remove('hidden');
   };
 
+  // Adding a business account on top of an existing personal one — same
+  // login, same personal balance untouched, just flips isBusiness on and
+  // gives the account a second (business) balance and page to manage from
+  // the Business tab from now on.
+  document.getElementById('upgrade-business-btn').onclick = async () => {
+    const errBox = document.getElementById('upgrade-business-error');
+    const successBox = document.getElementById('upgrade-business-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    const businessName = document.getElementById('upgrade-business-name').value.trim();
+    try {
+      await api('/api/account/upgrade-to-business', 'POST', { businessName });
+      await refreshMe();
+      successBox.textContent = "You've got a business account now — set up your page from the Business tab.";
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
   // ---------- app shell / nav ----------
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
@@ -374,6 +393,10 @@
     document.getElementById('who-tag').textContent = `$${state.user.paytag}` + (state.user.isBusiness ? ` · Business` : '');
     document.getElementById('business-owner-panel').classList.toggle('hidden', !state.user.isBusiness);
     document.getElementById('wallet-context-switch').classList.toggle('hidden', !state.user.isBusiness);
+    // Offering to add a business account only makes sense for an account
+    // that doesn't already have one — once it does, "Your business page"
+    // on the Business tab is where it's managed from then on.
+    document.getElementById('upgrade-business-section').classList.toggle('hidden', !!state.user.isBusiness);
     if (state.user.isBusiness) {
       document.getElementById('biz-wallet-balance').textContent = fmt(state.user.businessGydBalance);
       document.getElementById('wallet-view-biz-balance').textContent = fmt(state.user.businessGydBalance);
@@ -1501,17 +1524,19 @@
     const location = document.getElementById('job-location').value.trim();
     const payInfo = document.getElementById('job-pay').value.trim();
     const jobType = document.getElementById('job-type').value;
+    const region = document.getElementById('job-region').value;
     const errBox = document.getElementById('job-error');
     errBox.textContent = '';
     if (!title) return (errBox.textContent = 'Give the job a title.');
     if (!description) return (errBox.textContent = 'Add a short description of the job.');
     try {
-      const data = await api('/api/business/jobs', 'POST', { title, description, location, payInfo, jobType });
+      const data = await api('/api/business/jobs', 'POST', { title, description, location, payInfo, jobType, region });
       document.getElementById('job-title').value = '';
       document.getElementById('job-description').value = '';
       document.getElementById('job-location').value = '';
       document.getElementById('job-pay').value = '';
       document.getElementById('job-type').value = '';
+      document.getElementById('job-region').value = '';
       renderMyJobs(data.jobs);
     } catch (err) {
       errBox.textContent = err.message;
@@ -1527,11 +1552,13 @@
     const box = document.getElementById('jobs-board-list');
     const q = document.getElementById('jobs-search').value.trim();
     const jobType = document.getElementById('jobs-type-filter').value;
+    const region = document.getElementById('jobs-region-filter').value;
     box.innerHTML = '<p class="muted">Loading jobs…</p>';
     try {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (jobType) params.set('jobType', jobType);
+      if (region) params.set('region', region);
       const data = await api(`/api/jobs?${params.toString()}`);
       renderJobsBoard(data.jobs);
     } catch (err) {
@@ -1541,33 +1568,54 @@
 
   function renderJobsBoard(jobs) {
     const box = document.getElementById('jobs-board-list');
+    const countEl = document.getElementById('jobs-results-count');
     box.innerHTML = '';
+    countEl.textContent = jobs.length === 0 ? '' : `${jobs.length} job${jobs.length === 1 ? '' : 's'} found`;
     if (jobs.length === 0) {
-      box.innerHTML = '<p class="muted">No jobs found.</p>';
+      box.innerHTML = '<p class="muted">No jobs found. Try a different search or filter.</p>';
       return;
     }
     jobs.forEach((j) => {
-      const row = document.createElement('div');
-      row.className = 'panel event-row';
-      const details = [j.jobType, j.location, j.payInfo].filter(Boolean).join(' · ');
-      row.innerHTML = `
-        <div class="event-info">
-          <div class="event-title-row">
-            <span class="event-name">${j.title}</span>
+      const card = document.createElement('div');
+      card.className = 'job-card';
+      const themeColor = (j.business && j.business.themeColor) || '#4954e6';
+      const logoEmoji = (j.business && j.business.logoEmoji) || '💼';
+      card.innerHTML = `
+        <button type="button" class="job-save-btn ${j.isSaved ? 'saved' : ''}" title="${j.isSaved ? 'Remove from saved jobs' : 'Save this job'}">${j.isSaved ? '★' : '☆'}</button>
+        <div class="job-card-top">
+          <div class="job-logo" style="background:${hexToRgba(themeColor, 0.18)};">${logoEmoji}</div>
+          <div class="job-main">
+            <div class="job-title">${j.title}</div>
+            <div class="job-company">${j.business.name}</div>
+            ${j.location ? `<div class="job-location">${j.location}</div>` : ''}
           </div>
-          <div class="muted" style="font-size:12px;">${j.business.name}${details ? ' · ' + details : ''}</div>
-          <div class="product-description" style="margin-top:4px;">${j.description}</div>
         </div>
-        <div class="event-actions"></div>
+        <div class="job-tag-row">
+          ${j.jobType ? `<span class="job-tag tag-type">${j.jobType}</span>` : ''}
+          ${j.payInfo ? `<span class="job-tag tag-pay">${j.payInfo}</span>` : ''}
+        </div>
+        <div class="job-snippet">${j.description}</div>
+        <div class="job-card-footer">
+          <span class="job-posted-ago">Posted ${timeAgo(j.createdAt)}</span>
+          <button type="button" class="job-apply-btn">Apply</button>
+        </div>
       `;
-      const actions = row.querySelector('.event-actions');
-      const applyBtn = document.createElement('button');
-      applyBtn.className = 'btn small';
-      applyBtn.textContent = 'Apply';
-      applyBtn.onclick = () => applyToJob(j);
-      actions.appendChild(applyBtn);
-      box.appendChild(row);
+      card.querySelector('.job-save-btn').onclick = () => toggleSaveJob(j, card.querySelector('.job-save-btn'));
+      card.querySelector('.job-apply-btn').onclick = () => applyToJob(j);
+      box.appendChild(card);
     });
+  }
+
+  async function toggleSaveJob(j, btn) {
+    const wasSaved = btn.classList.contains('saved');
+    try {
+      await api(`/api/jobs/${j.id}/save`, wasSaved ? 'DELETE' : 'POST');
+      btn.classList.toggle('saved', !wasSaved);
+      btn.textContent = wasSaved ? '☆' : '★';
+      btn.title = wasSaved ? 'Save this job' : 'Remove from saved jobs';
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   function applyToJob(j) {
@@ -1580,6 +1628,7 @@
     jobsSearchDebounce = setTimeout(loadJobsBoard, 300);
   });
   document.getElementById('jobs-type-filter').addEventListener('change', loadJobsBoard);
+  document.getElementById('jobs-region-filter').addEventListener('change', loadJobsBoard);
 
   function renderBizPageJobs(b) {
     const panel = document.getElementById('bizpage-view-jobs-panel');

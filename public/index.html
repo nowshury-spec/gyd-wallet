@@ -831,6 +831,22 @@
               </div>
             </div>
             <div class="field">
+              <label data-i18n="t354">Region (optional — lets people filter for it on the jobs board)</label>
+              <select id="job-region">
+                <option value="" data-i18n="t137">Not specified</option>
+                <option value="barima-waini">Region 1 — Barima-Waini</option>
+                <option value="pomeroon-supenaam">Region 2 — Pomeroon-Supenaam</option>
+                <option value="essequibo-islands-wd">Region 3 — Essequibo Islands-West Demerara</option>
+                <option value="demerara-mahaica">Region 4 — Demerara-Mahaica</option>
+                <option value="mahaica-berbice">Region 5 — Mahaica-Berbice</option>
+                <option value="east-berbice-corentyne">Region 6 — East Berbice-Corentyne</option>
+                <option value="cuyuni-mazaruni">Region 7 — Cuyuni-Mazaruni</option>
+                <option value="potaro-siparuni">Region 8 — Potaro-Siparuni</option>
+                <option value="upper-takutu-upper-essequibo">Region 9 — Upper Takutu-Upper Essequibo</option>
+                <option value="upper-demerara-berbice">Region 10 — Upper Demerara-Berbice</option>
+              </select>
+            </div>
+            <div class="field">
               <label data-i18n="t107">Description</label>
               <input type="text" id="job-description" placeholder="What's the job, and what are you looking for?" data-i18n-ph="t308" />
             </div>
@@ -1032,7 +1048,24 @@
                 <option value="Temporary" data-i18n="t146">Temporary</option>
               </select>
             </div>
+            <div class="field">
+              <label data-i18n="t337">Region</label>
+              <select id="jobs-region-filter">
+                <option value="" data-i18n="t353">Any region</option>
+                <option value="barima-waini">Region 1 — Barima-Waini</option>
+                <option value="pomeroon-supenaam">Region 2 — Pomeroon-Supenaam</option>
+                <option value="essequibo-islands-wd">Region 3 — Essequibo Islands-West Demerara</option>
+                <option value="demerara-mahaica">Region 4 — Demerara-Mahaica</option>
+                <option value="mahaica-berbice">Region 5 — Mahaica-Berbice</option>
+                <option value="east-berbice-corentyne">Region 6 — East Berbice-Corentyne</option>
+                <option value="cuyuni-mazaruni">Region 7 — Cuyuni-Mazaruni</option>
+                <option value="potaro-siparuni">Region 8 — Potaro-Siparuni</option>
+                <option value="upper-takutu-upper-essequibo">Region 9 — Upper Takutu-Upper Essequibo</option>
+                <option value="upper-demerara-berbice">Region 10 — Upper Demerara-Berbice</option>
+              </select>
+            </div>
           </div>
+          <p class="muted" id="jobs-results-count" style="font-size:12px; margin:12px 2px 0;"></p>
         </div>
         <div id="jobs-board-list"><p class="muted" data-i18n="t268">Loading jobs…</p></div>
       </section>
@@ -1100,6 +1133,21 @@
           <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t271">If you think someone else might have gotten into your
           account — a lost phone, a shared device — sign out everywhere at once.</p>
           <button class="btn secondary full" id="logout-all-btn" data-i18n="t212">Log out of all devices</button>
+        </div>
+
+        <div id="upgrade-business-section" class="hidden">
+          <h3 class="section-title" style="margin-top:22px;" data-i18n="t355">Business account</h3>
+          <div class="panel">
+            <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t356">Add a business account on top of this one — same login, same
+            personal balance, plus a separate business balance and page you can switch to any time.</p>
+            <div class="field">
+              <label data-i18n="t357">Business name</label>
+              <input type="text" id="upgrade-business-name" maxlength="80" placeholder="Your business name" data-i18n-ph="t358" />
+            </div>
+            <button class="btn secondary full" id="upgrade-business-btn" data-i18n="t359">Add a business account</button>
+            <div class="error-msg" id="upgrade-business-error"></div>
+            <p class="muted" id="upgrade-business-success" style="font-size:12.5px; margin-top:8px;"></p>
+          </div>
         </div>
       </section>
     </main>

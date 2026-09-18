@@ -731,6 +731,24 @@ on(
   })
 );
 
+// Turning an existing personal account into a business account, in place
+// — same account, same login, same personal GYD balance untouched. Until
+// now this flag was only ever set once at signup (see isBusiness in
+// /api/register above); this is the first way to flip it afterward.
+// business_gyd_balance already defaults to 0 for every account (see
+// schema.sql), so there's nothing to initialize beyond the flag and name.
+on(
+  'POST',
+  '/api/account/upgrade-to-business',
+  requireAuth(async (req, res, params, query, body, user) => {
+    if (user.is_business) return badRequest(res, 'This account is already a business account.');
+    const businessName = (body.businessName || '').trim().slice(0, 80) || user.username;
+    await db.prepare('UPDATE users SET is_business = 1, business_name = ? WHERE id = ?').run(businessName, user.id);
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    sendJson(res, 200, { user: publicUser(updated) });
+  })
+);
+
 on(
   'GET',
   '/api/me',
@@ -2442,7 +2460,23 @@ on(
 
 const JOB_TYPES = ['Full-time', 'Part-time', 'Contract', 'Temporary'];
 
-function jobPostingPublic(row, business) {
+// Guyana's 10 administrative regions, for filtering the jobs board — same
+// fixed allow-list pattern as ALLOWED_DIETARY_TAGS above.
+const GUYANA_REGIONS = [
+  { value: 'barima-waini', label: 'Region 1 — Barima-Waini' },
+  { value: 'pomeroon-supenaam', label: 'Region 2 — Pomeroon-Supenaam' },
+  { value: 'essequibo-islands-wd', label: 'Region 3 — Essequibo Islands-West Demerara' },
+  { value: 'demerara-mahaica', label: 'Region 4 — Demerara-Mahaica' },
+  { value: 'mahaica-berbice', label: 'Region 5 — Mahaica-Berbice' },
+  { value: 'east-berbice-corentyne', label: 'Region 6 — East Berbice-Corentyne' },
+  { value: 'cuyuni-mazaruni', label: 'Region 7 — Cuyuni-Mazaruni' },
+  { value: 'potaro-siparuni', label: 'Region 8 — Potaro-Siparuni' },
+  { value: 'upper-takutu-upper-essequibo', label: 'Region 9 — Upper Takutu-Upper Essequibo' },
+  { value: 'upper-demerara-berbice', label: 'Region 10 — Upper Demerara-Berbice' },
+];
+const GUYANA_REGION_VALUES = GUYANA_REGIONS.map((r) => r.value);
+
+function jobPostingPublic(row, extra) {
   return {
     id: row.id,
     title: row.title,
@@ -2450,14 +2484,21 @@ function jobPostingPublic(row, business) {
     location: row.location,
     payInfo: row.pay_info,
     jobType: row.job_type,
+    region: row.region || null,
     status: row.status,
     createdAt: row.created_at,
     // Always 'approved' now — see the same field on businessProfilePublic
     // above for why it's still here.
     reviewStatus: row.review_status || 'approved',
-    business: business
-      ? { username: business.username, name: business.business_name || business.username }
+    business: extra && extra.username
+      ? {
+          username: extra.username,
+          name: extra.business_name || extra.username,
+          logoEmoji: extra.logo_emoji || null,
+          themeColor: extra.theme_color || null,
+        }
       : undefined,
+    isSaved: extra ? !!extra.is_saved : false,
   };
 }
 
@@ -2479,6 +2520,7 @@ on(
     const location = (body.location || '').trim().slice(0, 140);
     const payInfo = (body.payInfo || '').trim().slice(0, 100);
     const jobType = JOB_TYPES.includes(body.jobType) ? body.jobType : null;
+    const region = GUYANA_REGION_VALUES.includes(body.region) ? body.region : null;
 
     if (!title) return badRequest(res, 'Give the job a title.');
     if (!description) return badRequest(res, 'Add a short description of the job.');
@@ -2487,9 +2529,9 @@ on(
     // approval step.
     const id = crypto.randomUUID();
     await db.prepare(
-      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
-    ).run(id, user.id, title, description, location || null, payInfo || null, jobType, now());
+      `INSERT INTO job_postings (id, business_id, title, description, location, pay_info, job_type, region, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+    ).run(id, user.id, title, description, location || null, payInfo || null, jobType, region, now());
 
     const rows = await db.prepare('SELECT * FROM job_postings WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
     sendJson(res, 201, { jobs: rows.map((r) => jobPostingPublic(r)) });
@@ -2530,14 +2572,24 @@ on(
 on(
   'GET',
   '/api/jobs',
-  requireAuth(async (req, res, params, query) => {
+  requireAuth(async (req, res, params, query, body, user) => {
     const q = (query.q || '').trim();
     const jobType = (query.jobType || '').trim();
-    let sql = `SELECT j.*, u.username, u.business_name FROM job_postings j JOIN users u ON u.id = j.business_id WHERE j.status = 'active' AND j.review_status = 'approved'`;
-    const args = [];
+    const region = (query.region || '').trim();
+    let sql = `SELECT j.*, u.username, u.business_name, bp.logo_emoji, bp.theme_color,
+      (SELECT 1 FROM saved_jobs sj WHERE sj.job_id = j.id AND sj.user_id = ?) AS is_saved
+      FROM job_postings j
+      JOIN users u ON u.id = j.business_id
+      LEFT JOIN business_profiles bp ON bp.user_id = j.business_id
+      WHERE j.status = 'active' AND j.review_status = 'approved'`;
+    const args = [user.id];
     if (jobType) {
       sql += ' AND j.job_type = ?';
       args.push(jobType);
+    }
+    if (region && GUYANA_REGION_VALUES.includes(region)) {
+      sql += ' AND j.region = ?';
+      args.push(region);
     }
     if (q) {
       sql += ' AND (j.title LIKE ? OR j.description LIKE ? OR j.location LIKE ?)';
@@ -2547,9 +2599,49 @@ on(
     sql += ' ORDER BY j.created_at DESC LIMIT 100';
     const rows = await db.prepare(sql).all(...args);
     sendJson(res, 200, {
-      jobs: rows.map((r) => jobPostingPublic(r, { username: r.username, business_name: r.business_name })),
+      jobs: rows.map((r) =>
+        jobPostingPublic(r, {
+          username: r.username,
+          business_name: r.business_name,
+          logo_emoji: r.logo_emoji,
+          theme_color: r.theme_color,
+          is_saved: r.is_saved,
+        })
+      ),
       jobTypes: JOB_TYPES,
+      regions: GUYANA_REGIONS,
     });
+  })
+);
+
+// Bookmarking a job on the jobs board — see saved_jobs in schema.sql.
+// Toggled from the ☆ button on each job card; purely personal, doesn't
+// notify the business.
+on(
+  'POST',
+  '/api/jobs/:id/save',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const job = await db.prepare('SELECT id FROM job_postings WHERE id = ?').get(params.id);
+    if (!job) return sendJson(res, 404, { error: 'This job posting no longer exists.' });
+    const existing = await db.prepare('SELECT id FROM saved_jobs WHERE user_id = ? AND job_id = ?').get(user.id, params.id);
+    if (!existing) {
+      await db.prepare('INSERT INTO saved_jobs (id, user_id, job_id, created_at) VALUES (?, ?, ?, ?)').run(
+        crypto.randomUUID(),
+        user.id,
+        params.id,
+        now()
+      );
+    }
+    sendJson(res, 200, { ok: true, saved: true });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/jobs/:id/save',
+  requireAuth(async (req, res, params, query, body, user) => {
+    await db.prepare('DELETE FROM saved_jobs WHERE user_id = ? AND job_id = ?').run(user.id, params.id);
+    sendJson(res, 200, { ok: true, saved: false });
   })
 );
 
