@@ -21,6 +21,7 @@ const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, s
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
 const { emailEnabled, sendEmail, codeEmailHtml } = require('./email');
 const { smsEnabled, sendSms } = require('./sms');
+const { dropshippingEnabled, fetchProductsFromCJ, placeOrderWithCJ } = require('./dropshipping');
 const {
   googleEnabled,
   facebookEnabled,
@@ -193,6 +194,8 @@ function publicUser(u) {
     email: u.email || null,
     isBusiness: !!u.is_business,
     businessName: u.business_name || null,
+    isCourier: !!u.is_courier,
+    courierGydBalance: u.courier_gyd_balance || 0,
     gydBalance: u.gyd_balance,
     businessGydBalance: u.business_gyd_balance || 0,
     createdAt: u.created_at,
@@ -365,6 +368,13 @@ function requireAuth(handler) {
 function requireBusiness(handler) {
   return requireAuth(async (req, res, params, query, body, user) => {
     if (!user.is_business) return sendJson(res, 403, { error: 'This action requires a business account.' });
+    return handler(req, res, params, query, body, user);
+  });
+}
+
+function requireCourier(handler) {
+  return requireAuth(async (req, res, params, query, body, user) => {
+    if (!user.is_courier) return sendJson(res, 403, { error: 'This action requires a courier account.' });
     return handler(req, res, params, query, body, user);
   });
 }
@@ -744,6 +754,22 @@ on(
     if (user.is_business) return badRequest(res, 'This account is already a business account.');
     const businessName = (body.businessName || '').trim().slice(0, 80) || user.username;
     await db.prepare('UPDATE users SET is_business = 1, business_name = ? WHERE id = ?').run(businessName, user.id);
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    sendJson(res, 200, { user: publicUser(updated) });
+  })
+);
+
+// Same idea as upgrading to a business account right above, but for
+// delivering dropshipping orders instead of running a storefront — see the
+// "dropshipping" and "courier" sections further down. Nothing to name or
+// configure: courier_gyd_balance already defaults to 0, so there's just
+// the one flag to flip.
+on(
+  'POST',
+  '/api/account/upgrade-to-courier',
+  requireAuth(async (req, res, params, query, body, user) => {
+    if (user.is_courier) return badRequest(res, 'This account is already a courier account.');
+    await db.prepare('UPDATE users SET is_courier = true WHERE id = ?').run(user.id);
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     sendJson(res, 200, { user: publicUser(updated) });
   })
@@ -3132,6 +3158,442 @@ on(
   })
 );
 
+// ---------- dropshipping (CJdropshipping-sourced products) ----------
+//
+// A second, separate shop alongside the local business directory above:
+// products sourced from CJdropshipping rather than a Guyanese business, so
+// there's no local business_products row or business wallet to credit —
+// the whole GYD amount the buyer pays just leaves the platform (covering
+// what CJ is owed plus the platform's own cut), the same way a personal
+// GYD Direct transfer's fee isn't credited to anyone's wallet either. See
+// dropshipping.js for the actual CJ API calls and why they're unverified.
+//
+// The cart itself is client-side only — see app.js's `carts` object, reused
+// here under its own key — exactly like the local-business product cart;
+// a database row only gets created once someone actually pays (see
+// dropshipping_orders in supabase/schema.sql).
+//
+// This whole feature is OFF by default: with no CJ_API_KEY/CJ_ACCOUNT_ID
+// configured, the product list is simply always empty (nothing to sync)
+// and checkout refuses outright, rather than taking someone's GYD for an
+// order that could never actually be placed with CJ.
+
+// No real exchange-rate API wired up yet — override with USD_TO_GYD_RATE
+// if this needs to track the real rate more closely in the meantime; see
+// README's "Setting up CJdropshipping" section. Only used at SYNC time now
+// (see the sync endpoint below) — every price a customer actually sees or
+// pays comes straight from the pinned dropshipping_products.price_gyd
+// column, never recomputed from this rate on the fly, so browsing and
+// checkout can never disagree on a price.
+const USD_TO_GYD_RATE = Number(process.env.USD_TO_GYD_RATE) || 210;
+// The platform's cut on a dropshipped order, added on top of cost (unlike
+// EVENT_TICKET_FEE_RATE above, there's no local business to net it out of
+// here) — shown to the buyer as a separate line at checkout, never hidden
+// in the item price.
+const DROPSHIP_FEE_RATE = 0.03;
+// Flat local-delivery pricing — getting the order from the Guyana
+// warehouse to the customer's door once it's landed, separate from CJ's
+// own international shipping. Applies regardless of order size (one
+// shipment, one delivery run) EXCEPT once the cart's total weight crosses
+// the oversized-cargo threshold, which charges more since one bulky item
+// costs more to actually deliver than a normal parcel would.
+const DROPSHIP_STANDARD_DELIVERY_GYD = 500;
+const DROPSHIP_OVERSIZE_DELIVERY_GYD = 1500;
+const DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG = 5;
+
+function dropshippingProductPublic(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    priceUsd: row.price_usd,
+    priceGyd: row.price_gyd,
+    weightKg: row.weight_kg,
+    imageUrl: row.image_url || null,
+    category: row.category || null,
+    inStock: !!row.in_stock,
+  };
+}
+
+function dropshippingOrderPublic(row) {
+  let items = [];
+  try {
+    items = JSON.parse(row.items) || [];
+  } catch (e) {
+    items = [];
+  }
+  let shippingAddress = null;
+  try {
+    shippingAddress = JSON.parse(row.shipping_address);
+  } catch (e) {
+    shippingAddress = null;
+  }
+  return {
+    id: row.id,
+    status: row.status,
+    items,
+    totalUsd: row.total_usd,
+    totalGyd: row.total_gyd,
+    platformFeeGyd: row.platform_fee_gyd,
+    deliveryFeeGyd: row.delivery_fee_gyd,
+    totalWeightKg: row.total_weight_kg,
+    amountChargedGyd: row.amount_charged_gyd,
+    usdToGydRate: row.usd_to_gyd_rate,
+    shippingAddress,
+    fulfillment: row.fulfillment || null,
+    // Only ever returned to endpoints scoped to this order's own customer
+    // (dropshippingOrderPublic is never used for the courier's open-board
+    // view — see dropshippingDeliveryPublic below, which deliberately
+    // leaves deliveryCode out) — this is the code the customer reads out
+    // to whichever courier shows up, or shows at the warehouse counter.
+    warehousePickupCode: row.warehouse_pickup_code || null,
+    deliveryCode: row.delivery_code || null,
+    trackingNumber: row.tracking_number || null,
+    createdAt: row.created_at,
+    placedAt: row.placed_at || null,
+    arrivedAt: row.arrived_at || null,
+    claimedAt: row.claimed_at || null,
+    resolvedAt: row.resolved_at || null,
+  };
+}
+
+// The courier-facing view of a delivery — same underlying row as
+// dropshippingOrderPublic above, but deliberately WITHOUT deliveryCode:
+// couriers only ever get to enter that code (blind, told to them by the
+// customer in person), never read it from the API, or "confirming" a
+// delivery would mean nothing. Includes the shipping address, which
+// dropshippingOrderPublic's own callers don't need but a courier obviously
+// does.
+function dropshippingDeliveryPublic(row) {
+  let items = [];
+  try {
+    items = JSON.parse(row.items) || [];
+  } catch (e) {
+    items = [];
+  }
+  let shippingAddress = null;
+  try {
+    shippingAddress = JSON.parse(row.shipping_address);
+  } catch (e) {
+    shippingAddress = null;
+  }
+  return {
+    id: row.id,
+    status: row.status,
+    items,
+    shippingAddress,
+    deliveryFeeGyd: row.delivery_fee_gyd,
+    totalWeightKg: row.total_weight_kg,
+    isOversizeCargo: row.total_weight_kg > DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG,
+    createdAt: row.created_at,
+    claimedAt: row.claimed_at || null,
+    resolvedAt: row.resolved_at || null,
+  };
+}
+
+// Same idea as generatePickupCode above, applied to the two new codes this
+// section needs — a short, unique, human-typeable/readable-aloud code.
+async function generateWarehousePickupCode() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const existing = await db.prepare('SELECT id FROM dropshipping_orders WHERE warehouse_pickup_code = ?').get(code);
+    if (!existing) return code;
+  }
+  throw new Error('Could not generate a unique warehouse pickup code');
+}
+async function generateDeliveryCode() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const existing = await db.prepare('SELECT id FROM dropshipping_orders WHERE delivery_code = ?').get(code);
+    if (!existing) return code;
+  }
+  throw new Error('Could not generate a unique delivery code');
+}
+
+// Shop screen: browse whatever's currently synced from CJ. Always
+// available to any logged-in user (browsing doesn't need CJ credentials —
+// only checkout does), optionally filtered by category. `enabled` in the
+// response tells the client whether checkout will actually work, so it can
+// show "coming soon" messaging instead of a dead Checkout button when this
+// hasn't been configured yet.
+on(
+  'GET',
+  '/api/shop/dropshipping-products',
+  requireAuth(async (req, res, params, query) => {
+    const rows = query.category
+      ? await db.prepare('SELECT * FROM dropshipping_products WHERE in_stock = TRUE AND category = ? ORDER BY created_at DESC').all(query.category)
+      : await db.prepare('SELECT * FROM dropshipping_products WHERE in_stock = TRUE ORDER BY created_at DESC').all();
+    sendJson(res, 200, {
+      products: rows.map(dropshippingProductPublic),
+      enabled: dropshippingEnabled(),
+      feeRate: DROPSHIP_FEE_RATE,
+      delivery: {
+        standardGyd: DROPSHIP_STANDARD_DELIVERY_GYD,
+        oversizeGyd: DROPSHIP_OVERSIZE_DELIVERY_GYD,
+        oversizeThresholdKg: DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG,
+      },
+    });
+  })
+);
+
+// Refreshes the local product cache from CJ's catalog. Owner-level staff
+// only (same requireStaffOwner gate as the other account-wide admin
+// actions in the staff portal below) — this hits an external API and
+// rewrites a shared table, not something any one business or customer
+// should be able to trigger. Refuses cleanly if CJ isn't configured yet.
+on(
+  'POST',
+  '/api/admin/dropshipping/sync-products',
+  requireStaffOwner(async (req, res) => {
+    if (!dropshippingEnabled()) {
+      return badRequest(res, 'CJdropshipping is not configured — set CJ_API_KEY and CJ_ACCOUNT_ID first.');
+    }
+    const result = await fetchProductsFromCJ({ limit: 100, offset: 0 });
+    if (!result.ok) return badRequest(res, `Could not reach CJdropshipping (${result.reason}).`);
+    const syncedAt = now();
+    for (const p of result.products) {
+      // Pinned once here, at sync time — see the USD_TO_GYD_RATE comment
+      // above for why this never gets recomputed at browse/checkout time.
+      const priceGyd = Math.round(p.priceUsd * USD_TO_GYD_RATE * 100) / 100;
+      const weightKg = Number(p.weightKg) || 0;
+      const existing = await db.prepare('SELECT id FROM dropshipping_products WHERE cj_product_id = ?').get(p.cjProductId);
+      if (existing) {
+        await db.prepare(
+          `UPDATE dropshipping_products
+           SET name = ?, description = ?, price_usd = ?, price_gyd = ?, weight_kg = ?, image_url = ?, category = ?, in_stock = ?, last_synced_at = ?
+           WHERE cj_product_id = ?`
+        ).run(p.name, p.description, p.priceUsd, priceGyd, weightKg, p.imageUrl, p.category, p.inStock, syncedAt, p.cjProductId);
+      } else {
+        await db.prepare(
+          `INSERT INTO dropshipping_products
+           (id, cj_product_id, name, description, price_usd, price_gyd, weight_kg, image_url, category, in_stock, last_synced_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(crypto.randomUUID(), p.cjProductId, p.name, p.description, p.priceUsd, priceGyd, weightKg, p.imageUrl, p.category, p.inStock, syncedAt, syncedAt);
+      }
+    }
+    sendJson(res, 200, { success: true, productsCount: result.products.length, syncedAt });
+  })
+);
+
+// Checkout — the one real money-moving endpoint in this section. Prices are
+// always recomputed here from this server's own dropshipping_products
+// table (never trusted from the client), same "server is the price
+// authority" rule as /api/business/checkout above.
+on(
+  'POST',
+  '/api/dropshipping/checkout',
+  requireAuth(async (req, res, params, query, body, user) => {
+    if (!dropshippingEnabled()) {
+      return badRequest(res, "Dropshipping checkout isn't available yet — this needs a CJdropshipping API key configured on the server before real orders can be placed.");
+    }
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return badRequest(res, 'Your cart is empty.');
+    }
+    const productRows = await db.prepare('SELECT * FROM dropshipping_products WHERE in_stock = TRUE').all();
+    const productsById = new Map(productRows.map((p) => [p.id, p]));
+    const resolvedItems = [];
+    let totalWeightKg = 0;
+    for (const entry of body.items) {
+      const product = productsById.get(entry.productId);
+      if (!product) return badRequest(res, 'One of the items in your cart is no longer available — please review your order.');
+      const quantity = Math.floor(Number(entry.quantity));
+      if (!Number.isFinite(quantity) || quantity < 1) return badRequest(res, 'Invalid quantity in your cart.');
+      // priceGyd is the same pinned number this product was shown at while
+      // browsing (see dropshippingProductPublic) — never a fresh
+      // USD-to-GYD conversion done here, so this total can never come out
+      // different from what the cart displayed.
+      resolvedItems.push({ cjProductId: product.cj_product_id, name: product.name, priceUsd: product.price_usd, priceGyd: product.price_gyd, quantity });
+      totalWeightKg += (product.weight_kg || 0) * quantity;
+    }
+
+    const shipping = body.shippingAddress || {};
+    const name = (shipping.name || '').trim().slice(0, 100);
+    const phone = (shipping.phone || '').trim().slice(0, 40);
+    const address = (shipping.address || '').trim().slice(0, 200);
+    const city = (shipping.city || '').trim().slice(0, 100);
+    const country = (shipping.country || 'GY').trim().slice(0, 60);
+    if (!name || !phone || !address || !city) {
+      return badRequest(res, 'Enter a full shipping name, phone, address, and city.');
+    }
+    const shippingAddress = { name, phone, address, city, country };
+
+    // Kept for the record and for placing the order with CJ (which deals
+    // in USD) — no longer part of the GYD math below.
+    const totalUsd = Math.round(resolvedItems.reduce((sum, i) => sum + i.priceUsd * i.quantity, 0) * 100) / 100;
+    const totalGyd = Math.round(resolvedItems.reduce((sum, i) => sum + i.priceGyd * i.quantity, 0) * 100) / 100;
+    const platformFeeGyd = Math.round(totalGyd * DROPSHIP_FEE_RATE * 100) / 100;
+    // No delivery fee charged here — nobody knows yet whether this order
+    // will end up picked up in person or delivered, since that choice only
+    // happens once it's actually landed at the warehouse (see
+    // POST /api/dropshipping/orders/:id/choose-fulfillment below, which is
+    // where delivery_fee_gyd actually gets charged, using this same frozen
+    // total_weight_kg to pick the tier).
+    const amountChargedGyd = Math.round((totalGyd + platformFeeGyd) * 100) / 100;
+    if (!positiveAmount(amountChargedGyd)) return badRequest(res, 'Enter a positive amount.');
+    if (user.gyd_balance < amountChargedGyd) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(amountChargedGyd)}.`);
+
+    // Debit-only atomic guard (no credit side — see the section note above
+    // for why), same "debit CTE + conditional insert" idiom as the pickup
+    // order checkout above.
+    const orderId = crypto.randomUUID();
+    const createdAt = now();
+    const itemsJson = JSON.stringify(resolvedItems);
+    const shippingJson = JSON.stringify(shippingAddress);
+    const rows = await db.raw(
+      `WITH debit AS (
+         UPDATE users SET gyd_balance = gyd_balance - $1 WHERE id = $2 AND gyd_balance >= $1 RETURNING gyd_balance
+       ), ins AS (
+         INSERT INTO dropshipping_orders
+           (id, user_id, status, items, total_usd, total_gyd, platform_fee_gyd, total_weight_kg, usd_to_gyd_rate, amount_charged_gyd, shipping_address, created_at)
+         SELECT $3, $2, 'pending', $4, $5, $6, $7, $8, $9, $1, $10, $11 WHERE EXISTS (SELECT 1 FROM debit)
+       )
+       SELECT gyd_balance FROM debit`,
+      [amountChargedGyd, user.id, orderId, itemsJson, totalUsd, totalGyd, platformFeeGyd, totalWeightKg, USD_TO_GYD_RATE, shippingJson, createdAt]
+    );
+    if (rows.length === 0) return badRequest(res, `Not enough GYD — this checkout needs ${fmtNum(amountChargedGyd)}.`);
+
+    await logTx({
+      type: 'dropshipping_order', fromUser: user.id, toUser: null, amount: amountChargedGyd, currency: 'GYD',
+      note: `Dropshipping order — ${resolvedItems.map((i) => `${i.quantity}x ${i.name}`).join(', ')} `
+        + `(platform fee GYD ${fmtNum(platformFeeGyd)}; delivery fee decided once it arrives)`,
+    });
+
+    // Actually place it with CJ. If that fails, refund in full — the buyer
+    // shouldn't stay charged for an order that never went anywhere.
+    const placeResult = await placeOrderWithCJ({ items: resolvedItems, shipping: shippingAddress });
+    let finalStatus = 'pending';
+    let finalUser = user;
+    if (placeResult.ok) {
+      const placedAt = now();
+      await db.prepare(
+        `UPDATE dropshipping_orders SET status = 'placed_with_cj', cj_order_id = ?, tracking_number = ?, placed_at = ? WHERE id = ?`
+      ).run(placeResult.cjOrderId, placeResult.tracking || null, placedAt, orderId);
+      finalStatus = 'placed_with_cj';
+      finalUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    } else {
+      await db.raw(
+        `WITH credit AS (
+           UPDATE users SET gyd_balance = gyd_balance + $1 WHERE id = $2 RETURNING gyd_balance
+         ), upd AS (
+           UPDATE dropshipping_orders SET status = 'cancelled', resolved_at = $3 WHERE id = $4 RETURNING 1
+         )
+         SELECT gyd_balance FROM credit`,
+        [amountChargedGyd, user.id, now(), orderId]
+      );
+      await logTx({
+        type: 'dropshipping_refund', fromUser: null, toUser: user.id, amount: amountChargedGyd, currency: 'GYD',
+        note: `Refund — CJdropshipping order could not be placed (${placeResult.reason})`,
+      });
+      finalUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      return badRequest(res, `This order could not be placed with CJdropshipping (${placeResult.reason}) — you have been refunded GYD ${fmtNum(amountChargedGyd)}.`);
+    }
+
+    const orderRow = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(orderId);
+    sendJson(res, 200, { user: publicUser(finalUser), order: dropshippingOrderPublic(orderRow), status: finalStatus });
+  })
+);
+
+on(
+  'GET',
+  '/api/dropshipping/orders/mine',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const rows = await db.prepare('SELECT * FROM dropshipping_orders WHERE user_id = ? ORDER BY created_at DESC').all(user.id);
+    sendJson(res, 200, { orders: rows.map(dropshippingOrderPublic) });
+  })
+);
+
+// The moment the pickup-vs-delivery split actually happens. Only reachable
+// once staff has marked the order 'arrived_at_warehouse' (see
+// POST /api/staff/dropshipping-orders/:id/mark-arrived below) — nobody,
+// including the customer, knows which path an order will take before
+// then, which is exactly why no delivery fee was charged back at checkout.
+on(
+  'POST',
+  '/api/dropshipping/orders/:id/choose-fulfillment',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const order = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Order not found.' });
+    if (order.user_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours." });
+    if (order.status !== 'arrived_at_warehouse') {
+      return badRequest(res, 'This order is not ready for pickup or delivery yet.');
+    }
+    const fulfillment = body.fulfillment === 'delivery' ? 'delivery' : body.fulfillment === 'pickup' ? 'pickup' : null;
+    if (!fulfillment) return badRequest(res, 'Choose either pickup or delivery.');
+
+    if (fulfillment === 'pickup') {
+      // Free — nothing changes hands for a pickup, so there's nothing to
+      // guard atomically beyond the status check itself.
+      const code = await generateWarehousePickupCode();
+      const rows = await db.raw(
+        `UPDATE dropshipping_orders SET status = 'awaiting_pickup', fulfillment = 'pickup', warehouse_pickup_code = $1
+         WHERE id = $2 AND status = 'arrived_at_warehouse' RETURNING id`,
+        [code, order.id]
+      );
+      if (rows.length === 0) return badRequest(res, 'This order is not ready for pickup or delivery yet.');
+      const updated = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
+      return sendJson(res, 200, { order: dropshippingOrderPublic(updated) });
+    }
+
+    // Delivery — this is the moment the delivery fee (see
+    // DROPSHIP_STANDARD_DELIVERY_GYD / DROPSHIP_OVERSIZE_DELIVERY_GYD above)
+    // actually gets charged, using the weight frozen on this order back at
+    // checkout to pick the tier. Friendly pre-check first, same pattern as
+    // every other charge in this file — the atomic statement below is the
+    // real guard.
+    const deliveryFeeGyd = order.total_weight_kg > DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG
+      ? DROPSHIP_OVERSIZE_DELIVERY_GYD
+      : DROPSHIP_STANDARD_DELIVERY_GYD;
+    if (user.gyd_balance < deliveryFeeGyd) {
+      return badRequest(res, `Not enough GYD for delivery — this needs ${fmtNum(deliveryFeeGyd)}. You can still choose pickup instead.`);
+    }
+    const deliveryCode = await generateDeliveryCode();
+
+    // Three-part atomic statement: "gate" flips the order and is what
+    // serializes two concurrent choose-fulfillment calls on the same order
+    // (the second one's WHERE status = 'arrived_at_warehouse' simply won't
+    // match once the first has run); "debit" only fires if the gate passed
+    // AND the balance is actually there; "revert" undoes the gate if the
+    // debit didn't happen — so an order can never end up sitting in
+    // 'awaiting_courier' without the fee actually paid, and can never be
+    // double-charged.
+    const rows = await db.raw(
+      `WITH gate AS (
+         UPDATE dropshipping_orders
+         SET status = 'awaiting_courier', fulfillment = 'delivery', delivery_fee_gyd = $1, delivery_code = $2
+         WHERE id = $3 AND status = 'arrived_at_warehouse'
+         RETURNING id
+       ), debit AS (
+         UPDATE users SET gyd_balance = gyd_balance - $1
+         WHERE id = $4 AND gyd_balance >= $1 AND EXISTS (SELECT 1 FROM gate)
+         RETURNING gyd_balance
+       ), revert AS (
+         UPDATE dropshipping_orders
+         SET status = 'arrived_at_warehouse', fulfillment = NULL, delivery_fee_gyd = NULL, delivery_code = NULL
+         WHERE id = $3 AND EXISTS (SELECT 1 FROM gate) AND NOT EXISTS (SELECT 1 FROM debit)
+         RETURNING 1
+       )
+       SELECT gyd_balance FROM debit`,
+      [deliveryFeeGyd, deliveryCode, order.id, user.id]
+    );
+    if (rows.length === 0) {
+      const freshOrder = await db.prepare('SELECT status FROM dropshipping_orders WHERE id = ?').get(order.id);
+      if (freshOrder && freshOrder.status !== 'arrived_at_warehouse') {
+        return badRequest(res, 'This order is no longer ready for pickup or delivery — try refreshing.');
+      }
+      return badRequest(res, `Not enough GYD for delivery — this needs ${fmtNum(deliveryFeeGyd)}. You can still choose pickup instead.`);
+    }
+
+    await logTx({
+      type: 'dropshipping_delivery_fee', fromUser: user.id, toUser: null, amount: deliveryFeeGyd, currency: 'GYD',
+      note: `Delivery fee for dropshipping order ${order.id}${order.total_weight_kg > DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG ? ' (oversize cargo)' : ''}`,
+    });
+
+    const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const updatedOrder = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
+    sendJson(res, 200, { user: publicUser(updatedUser), order: dropshippingOrderPublic(updatedOrder) });
+  })
+);
+
 // ---------- business wallet (separate balance for business accounts) ----------
 //
 // A business account has two GYD balances (see db.js and db.atomicTransfer
@@ -3162,6 +3624,123 @@ on(
     if (rows.length === 0) return badRequest(res, 'Not enough in your business wallet.');
 
     await logTx({ type: 'business_wallet_transfer', toUser: user.id, amount, currency: 'GYD', note: 'Moved from business wallet to personal wallet' });
+
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    sendJson(res, 200, { user: publicUser(updated) });
+  })
+);
+
+// ---------- courier (dropshipping delivery) ----------
+//
+// The third account role alongside personal and business (see is_courier /
+// courier_gyd_balance in supabase/schema.sql) — anyone can opt in, same as
+// upgrading to a business account (see POST /api/account/upgrade-to-courier
+// above). A courier claims a delivery once its customer has chosen
+// delivery (status 'awaiting_courier' — see
+// POST /api/dropshipping/orders/:id/choose-fulfillment above), and gets
+// paid the delivery fee only once they've actually entered the delivery
+// code the customer reads out to them at handoff — see the comment on
+// dropshippingDeliveryPublic above for why that code is never exposed to
+// the courier through any of these endpoints.
+
+on(
+  'GET',
+  '/api/courier/available-deliveries',
+  requireCourier(async (req, res, params, query, body, user) => {
+    const rows = await db
+      .prepare(`SELECT * FROM dropshipping_orders WHERE status = 'awaiting_courier' AND courier_id IS NULL ORDER BY created_at ASC LIMIT 200`)
+      .all();
+    sendJson(res, 200, { deliveries: rows.map(dropshippingDeliveryPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/courier/deliveries/:id/claim',
+  requireCourier(async (req, res, params, query, body, user) => {
+    // Atomic claim — the WHERE clause is the whole guard: only the first of
+    // two couriers tapping "claim" on the same delivery at once actually
+    // gets it.
+    const rows = await db.raw(
+      `UPDATE dropshipping_orders SET courier_id = $1, status = 'out_for_delivery', claimed_at = $2
+       WHERE id = $3 AND status = 'awaiting_courier' AND courier_id IS NULL RETURNING id`,
+      [user.id, now(), params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This delivery was already claimed.');
+    const updated = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(params.id);
+    sendJson(res, 200, { delivery: dropshippingDeliveryPublic(updated) });
+  })
+);
+
+on(
+  'GET',
+  '/api/courier/deliveries/mine',
+  requireCourier(async (req, res, params, query, body, user) => {
+    const rows = await db.prepare(`SELECT * FROM dropshipping_orders WHERE courier_id = ? ORDER BY claimed_at DESC`).all(user.id);
+    sendJson(res, 200, { deliveries: rows.map(dropshippingDeliveryPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/courier/deliveries/:id/confirm',
+  requireCourier(async (req, res, params, query, body, user) => {
+    const order = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Delivery not found.' });
+    if (order.courier_id !== user.id) return sendJson(res, 403, { error: "This delivery isn't yours." });
+    if (order.status !== 'out_for_delivery') return badRequest(res, 'This delivery is not out for confirmation.');
+    const enteredCode = (body.code || '').trim().toUpperCase();
+    if (!enteredCode) return badRequest(res, 'Enter the code the customer gives you.');
+    if (enteredCode !== (order.delivery_code || '').toUpperCase()) {
+      return badRequest(res, "That code doesn't match — ask the customer to read it out again.");
+    }
+
+    // Atomic: only pays out once, and only for the delivery this courier
+    // actually holds — same "credit only fires off a successful gate"
+    // idiom as everywhere else money moves in this file.
+    const rows = await db.raw(
+      `WITH gate AS (
+         UPDATE dropshipping_orders SET status = 'delivered', resolved_at = $1
+         WHERE id = $2 AND status = 'out_for_delivery' AND courier_id = $3
+         RETURNING delivery_fee_gyd
+       ), credit AS (
+         UPDATE users SET courier_gyd_balance = courier_gyd_balance + (SELECT delivery_fee_gyd FROM gate)
+         WHERE id = $3 AND EXISTS (SELECT 1 FROM gate)
+         RETURNING courier_gyd_balance
+       )
+       SELECT courier_gyd_balance FROM credit`,
+      [now(), order.id, user.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This delivery is not out for confirmation.');
+
+    await logTx({
+      type: 'dropshipping_delivery_payout', fromUser: null, toUser: user.id, amount: order.delivery_fee_gyd, currency: 'GYD',
+      note: `Delivery payout for dropshipping order ${order.id}`,
+    });
+
+    const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const updatedOrder = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
+    sendJson(res, 200, { user: publicUser(updatedUser), order: dropshippingDeliveryPublic(updatedOrder) });
+  })
+);
+
+on(
+  'POST',
+  '/api/courier/wallet/move-to-personal',
+  requireCourier(async (req, res, params, query, body, user) => {
+    const amount = Number(body.amount);
+    if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount.');
+    if (user.courier_gyd_balance < amount) return badRequest(res, 'Not enough in your courier wallet.');
+
+    const rows = await db.raw(
+      `UPDATE users SET courier_gyd_balance = courier_gyd_balance - $1, gyd_balance = gyd_balance + $1
+       WHERE id = $2 AND courier_gyd_balance >= $1
+       RETURNING gyd_balance, courier_gyd_balance`,
+      [amount, user.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'Not enough in your courier wallet.');
+
+    await logTx({ type: 'courier_wallet_transfer', toUser: user.id, amount, currency: 'GYD', note: 'Moved from courier wallet to personal wallet' });
 
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     sendJson(res, 200, { user: publicUser(updated) });
@@ -3875,6 +4454,99 @@ on(
     });
     await logStaffAction(staff, 'cashout_rejected', params.id, `Rejected & refunded GYD ${amount_gyd} for user ${user_id}`);
     sendJson(res, 200, { ok: true });
+  })
+);
+
+// ---- staff: dropshipping (warehouse arrivals & pickups) ----
+//
+// The one manual step standing in for a real CJdropshipping tracking
+// webhook (see the file-level comment in dropshipping.js) — until CJ
+// actually pushes "landed in Guyana" events at us, a staff member has to
+// eyeball incoming shipments and mark them here. This is also where a
+// staff member redeems a customer's warehouse pickup code in person,
+// mirroring how a business redeems a local pickup order's code above (see
+// POST /api/business/orders/:code/redeem).
+
+on(
+  'GET',
+  '/api/staff/dropshipping-orders',
+  requireStaffAuth(async (req, res, params, query) => {
+    const rows = await db
+      .prepare(
+        `SELECT o.*, u.username AS customer_username
+         FROM dropshipping_orders o JOIN users u ON u.id = o.user_id
+         WHERE o.status IN ('placed_with_cj', 'arrived_at_warehouse', 'awaiting_pickup', 'awaiting_courier', 'out_for_delivery')
+         ORDER BY o.created_at ASC LIMIT 200`
+      )
+      .all();
+    sendJson(res, 200, {
+      orders: rows.map((r) => ({ ...dropshippingOrderPublic(r), customerUsername: r.customer_username })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/dropshipping-orders/:id/mark-arrived',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const order = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(params.id);
+    if (!order) return sendJson(res, 404, { error: 'Order not found.' });
+    if (order.status !== 'placed_with_cj') return badRequest(res, 'This order is not awaiting arrival.');
+
+    const arrivedAt = now();
+    const rows = await db.raw(
+      `UPDATE dropshipping_orders SET status = 'arrived_at_warehouse', arrived_at = $1
+       WHERE id = $2 AND status = 'placed_with_cj' RETURNING id`,
+      [arrivedAt, order.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This order is not awaiting arrival.');
+
+    // Best-effort customer notification — see the notification caveat in
+    // README.md: this app can only ever email the customer (no phone
+    // number is collected at signup, and there's no calling integration
+    // anywhere in this codebase), and even that only if RESEND_API_KEY is
+    // configured. A failed or skipped notification never blocks the
+    // warehouse status update itself.
+    if (emailEnabled()) {
+      const customer = await db.prepare('SELECT email, username FROM users WHERE id = ?').get(order.user_id);
+      if (customer && customer.email) {
+        await sendEmail(
+          customer.email,
+          'Your order has arrived — GYD Wallet',
+          `<div style="font-family: -apple-system, sans-serif; max-width: 420px; margin: 0 auto;">
+             <p>Hi ${customer.username},</p>
+             <p>Your order has arrived at our Guyana warehouse. Open the app and go to My Orders to choose whether you'd like to pick it up in person or have it delivered.</p>
+           </div>`
+        );
+      }
+    }
+
+    await logStaffAction(staff, 'dropshipping_marked_arrived', order.id, `Marked dropshipping order ${order.id} arrived at warehouse`);
+    const updated = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
+    sendJson(res, 200, { order: dropshippingOrderPublic(updated) });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/dropshipping-orders/redeem-pickup',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const code = (body.code || '').trim().toUpperCase();
+    if (!code) return badRequest(res, "Enter the customer's pickup code.");
+    const order = await db.prepare('SELECT * FROM dropshipping_orders WHERE warehouse_pickup_code = ?').get(code);
+    if (!order) return badRequest(res, 'No pending pickup with that code.');
+    if (order.status !== 'awaiting_pickup') return badRequest(res, 'This order is no longer awaiting pickup.');
+
+    const rows = await db.raw(
+      `UPDATE dropshipping_orders SET status = 'picked_up', resolved_at = $1
+       WHERE id = $2 AND status = 'awaiting_pickup' RETURNING id`,
+      [now(), order.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This order is no longer awaiting pickup.');
+
+    await logStaffAction(staff, 'dropshipping_pickup_redeemed', order.id, `Redeemed warehouse pickup for dropshipping order ${order.id}`);
+    const updated = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
+    sendJson(res, 200, { order: dropshippingOrderPublic(updated) });
   })
 );
 

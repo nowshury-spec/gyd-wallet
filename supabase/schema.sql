@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS users (
   sessions_invalidated_at TEXT
 );
 
+-- A courier is a third role any existing account can opt into (same idea
+-- as is_business/business_gyd_balance above, just for delivering
+-- dropshipping orders instead of running a storefront) — see
+-- POST /api/courier/opt-in. courier_gyd_balance holds delivery fees earned
+-- from confirmed deliveries (see delivery_code on dropshipping_orders
+-- below) until the courier moves them into their personal balance via
+-- POST /api/courier/wallet/move-to-personal, same one-directional "owner's
+-- draw" pattern as the business wallet.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_courier BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS courier_gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0;
+
 -- Links a users row to a "Continue with Google/Facebook" identity — see
 -- oauth.js and the /api/auth/google/* + /api/auth/facebook/* routes in
 -- server.js. Kept as its own table (rather than google_id/facebook_id
@@ -582,6 +593,131 @@ ALTER TABLE business_orders ENABLE ROW LEVEL SECURITY;
 -- server.js). Null for a generic "pay this amount" checkout with no
 -- cart (the amount field predates the cart and still works standalone).
 ALTER TABLE business_orders ADD COLUMN IF NOT EXISTS items TEXT;
+
+-- ---------------------------------------------------------------------
+-- CJdropshipping-sourced products, alongside the local business directory
+-- above. Deliberately NOT a server-side cart/order model of its own —
+-- see dropshipping_orders below for why. See dropshipping.js and
+-- server.js's "dropshipping" section for how these are used; this feature
+-- is off (no products ever get synced, checkout always refuses) until
+-- CJ_API_KEY and CJ_ACCOUNT_ID are set as real environment variables —
+-- never stored in a database column, unlike an earlier draft of this
+-- integration, so a compromised database row can't leak the credential.
+
+CREATE TABLE IF NOT EXISTS dropshipping_products (
+  id TEXT PRIMARY KEY,
+  cj_product_id TEXT UNIQUE NOT NULL,     -- CJdropshipping's own product id
+  name TEXT NOT NULL,
+  description TEXT,
+  price_usd DOUBLE PRECISION NOT NULL,    -- CJ's price, in USD
+  image_url TEXT,
+  category TEXT,
+  in_stock BOOLEAN NOT NULL DEFAULT true,
+  last_synced_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+ALTER TABLE dropshipping_products ENABLE ROW LEVEL SECURITY;
+
+-- Pins each product's Guyanese-dollar price the moment it's synced from CJ,
+-- rather than recomputing it from price_usd on every request — so the
+-- price a customer sees while browsing is exactly what checkout charges,
+-- never a second, possibly-different conversion done at pay time. Only
+-- moves the next time this product is re-synced. See USD_TO_GYD_RATE in
+-- server.js.
+ALTER TABLE dropshipping_products ADD COLUMN IF NOT EXISTS price_gyd DOUBLE PRECISION NOT NULL DEFAULT 0;
+-- CJ's package weight for this product, in kilograms — the cart's total
+-- weight at checkout decides whether standard or oversized-cargo delivery
+-- pricing applies (see DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG in server.js).
+-- Unverified against a real CJ account, same caveat as the rest of this
+-- integration — see dropshipping.js's file-level comment.
+ALTER TABLE dropshipping_products ADD COLUMN IF NOT EXISTS weight_kg DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- One row per completed (or attempted) dropshipping checkout. There's
+-- deliberately no shopping_carts/cart_items table here — the cart itself
+-- stays client-side, in memory, exactly like the local-business product
+-- cart in app.js (see the `carts` object there), and only becomes a
+-- database row once someone actually pays. `items` holds what was in the
+-- cart at checkout, same "JSON as plain TEXT" convention as
+-- business_orders.items right above, so both features read the same way.
+CREATE TABLE IF NOT EXISTS dropshipping_orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  cj_order_id TEXT,                       -- set once actually placed with CJ
+  -- pending: charged, not yet sent to CJ. placed_with_cj: sent successfully.
+  -- shipped / delivered: updated later as tracking info comes in (no
+  -- webhook receiver exists yet — see server.js's dropshipping section).
+  -- cancelled: checkout failed after charging, and was refunded.
+  status TEXT NOT NULL DEFAULT 'pending',
+  items TEXT NOT NULL,                    -- [{cjProductId, name, priceUsd, quantity}] as JSON
+  total_usd DOUBLE PRECISION NOT NULL,
+  total_gyd DOUBLE PRECISION NOT NULL,    -- items only, before the platform fee
+  platform_fee_gyd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  usd_to_gyd_rate DOUBLE PRECISION NOT NULL, -- rate used at checkout time
+  amount_charged_gyd DOUBLE PRECISION NOT NULL, -- total_gyd + platform_fee_gyd + delivery_fee_gyd — what left the buyer's balance
+  shipping_address TEXT NOT NULL,         -- {name, phone, address, city, country} as JSON
+  tracking_number TEXT,
+  created_at TEXT NOT NULL,
+  placed_at TEXT,
+  resolved_at TEXT
+);
+ALTER TABLE dropshipping_orders ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_dropshipping_orders_user ON dropshipping_orders(user_id);
+
+-- The flat local-delivery charge for getting an order from the Guyana
+-- warehouse to the customer once it's landed — separate from CJ's own
+-- international shipping and from platform_fee_gyd. One of two flat
+-- amounts (DROPSHIP_STANDARD_DELIVERY_GYD or
+-- DROPSHIP_OVERSIZE_DELIVERY_GYD in server.js), by the order's weight, not
+-- item count. Stays 0 until the customer actually chooses delivery (see
+-- `fulfillment` below) — it's never charged at checkout, since nobody
+-- knows yet whether they'll want delivery or to pick the order up
+-- themselves; that choice only happens once the order has actually landed.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS delivery_fee_gyd DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- Frozen at checkout time (summed from each item's weight × quantity) so
+-- the pickup-vs-delivery choice made later — possibly weeks later, once
+-- the order has actually arrived — always uses the same weight number the
+-- order was bought with, never a re-lookup against products that may have
+-- since changed or been removed from the catalog.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS total_weight_kg DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- The customer's choice once their order has arrived at the warehouse —
+-- 'pickup' or 'delivery', NULL until they've picked one (see
+-- POST /api/dropshipping/orders/:id/choose-fulfillment in server.js). This
+-- is also what the two codes below and the courier hand-off exist for.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS fulfillment TEXT;
+
+-- Shown to the customer once they choose pickup; shown at the warehouse
+-- counter to whoever's collecting the order. A staff member enters it to
+-- confirm the handoff (POST /api/staff/dropshipping-orders/:id/redeem-pickup)
+-- — same idea as business_orders.pickup_code above, just for the platform's
+-- own warehouse instead of a business's counter.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS warehouse_pickup_code TEXT UNIQUE;
+
+-- Shown to the customer once they choose delivery; the customer reads it
+-- out to whichever courier shows up at their door. The courier enters it
+-- to confirm the handoff (POST /api/courier/deliveries/:id/confirm), which
+-- is what actually releases delivery_fee_gyd into that courier's balance —
+-- so nobody can claim a delivery, or get paid for one, without the
+-- customer's own code confirming it really happened.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS delivery_code TEXT UNIQUE;
+
+-- Set the moment a courier claims this delivery off the open board (see
+-- POST /api/courier/deliveries/:id/claim) — first to claim it gets it,
+-- nobody is assigned by staff. NULL until claimed.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS courier_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+-- Set by staff once the order is physically confirmed to have landed at
+-- the warehouse (see POST /api/staff/dropshipping-orders/:id/mark-arrived)
+-- — there's no real CJ tracking webhook wired up yet (see dropshipping.js's
+-- file comment), so for now this is a manual step, same as sync-products.
+-- This is also the moment the customer gets notified their order's ready.
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS arrived_at TEXT;
+
+-- Set when a courier claims this delivery (see courier_id above).
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS claimed_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_dropshipping_orders_courier ON dropshipping_orders(courier_id);
 
 -- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app

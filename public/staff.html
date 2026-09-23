@@ -77,6 +77,7 @@
     <nav class="staff-tabs">
       <button class="staff-tab active" data-staff-tab="tickets">Support</button>
       <button class="staff-tab" data-staff-tab="cashouts">Cash-outs</button>
+      <button class="staff-tab" data-staff-tab="dropshipping">Dropshipping</button>
       <button class="staff-tab" data-staff-tab="employees">Employees</button>
       <button class="staff-tab hidden" id="tab-audit-log" data-staff-tab="audit">Audit log</button>
     </nav>
@@ -98,6 +99,29 @@
           <button class="btn small secondary staff-filter-btn" data-cashouts-status="rejected">Rejected</button>
         </div>
         <div id="cashouts-list"><p class="muted">Loading…</p></div>
+      </section>
+
+      <section id="staff-panel-dropshipping" class="staff-panel hidden">
+        <div class="panel" id="redeem-warehouse-pickup-panel">
+          <h2 class="section-title" style="margin-top:0;">Redeem a warehouse pickup</h2>
+          <p class="forgot-intro">Ask the customer for their pickup code and enter it here to hand over their order —
+          this is the same blind, code-based confirmation as a local business pickup order, just for a CJdropshipping
+          order once it's landed at our own warehouse.</p>
+          <form id="redeem-warehouse-pickup-form">
+            <div class="field">
+              <label>Pickup code</label>
+              <input type="text" id="redeem-warehouse-pickup-code" required />
+            </div>
+            <button type="submit" class="btn full">Redeem</button>
+            <div class="error-msg" id="redeem-warehouse-pickup-error"></div>
+            <div class="muted" id="redeem-warehouse-pickup-success" style="font-size:12px; margin-top:6px;"></div>
+          </form>
+        </div>
+        <h2 class="section-title" style="margin-top:22px;">Orders needing attention</h2>
+        <p class="forgot-intro">There's no real tracking feed from CJdropshipping wired up yet, so "Mark arrived" is a
+        manual step — do it once a shipment has actually landed at our warehouse. That's what unlocks the customer's
+        pickup/delivery choice and (if email is configured) sends them a heads-up.</p>
+        <div id="dropshipping-orders-list"><p class="muted">Loading…</p></div>
       </section>
 
       <section id="staff-panel-employees" class="staff-panel hidden">

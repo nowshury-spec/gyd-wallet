@@ -88,6 +88,14 @@
         <label data-i18n="t57">Business name</label>
         <input type="text" id="register-business-name" />
       </div>
+      <details id="terms-preview-details">
+        <summary style="cursor:pointer; font-weight:700; font-size:13.5px;" data-i18n="t409">📜 View Terms &amp; Conditions</summary>
+        <div id="terms-preview-content" style="max-height:220px; overflow-y:auto; font-size:12.5px; line-height:1.55; margin-top:8px; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:8px;"></div>
+      </details>
+      <div class="checkbox-field" style="margin-top:10px;">
+        <input type="checkbox" id="register-agree-terms" />
+        <label for="register-agree-terms" style="margin:0;" data-i18n="t410">I have read and agree to the Terms &amp; Conditions above</label>
+      </div>
       <button type="submit" class="btn full" data-i18n="t152">Create account</button>
       <div class="error-msg" id="register-error"></div>
     </form>
@@ -644,6 +652,8 @@
           <button class="btn secondary small" id="jobs-board-btn" data-i18n="t187">💼 Jobs</button>
           <button class="btn secondary small" id="my-tickets-btn" data-i18n="t188">🎟️ My tickets</button>
           <button class="btn secondary small" id="my-orders-btn" data-i18n="t373">📦 My orders</button>
+          <button class="btn secondary small" id="shop-btn" data-i18n="t386">🛍️ Shop</button>
+          <button class="btn secondary small" id="courier-btn" data-i18n="t395">🚚 Deliver</button>
         </div>
         <h2 class="section-title" data-i18n="t28">Find a business</h2>
         <div class="panel">
@@ -1153,6 +1163,109 @@
         <div id="my-orders-list"><p class="muted" data-i18n="t375">Loading your orders…</p></div>
       </section>
 
+      <!-- SHOP: products sourced from CJdropshipping, separate from the local
+           business directory since these ship from CJ rather than a
+           Guyanese business — see server.js's "dropshipping" section.
+           Reached from the "🛍️ Shop" button on the Business tab. -->
+      <section id="panel-shop" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="shop-back-btn" data-i18n="t376">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t387">Shop</h2>
+        </div>
+        <p class="muted hidden" id="shop-disabled-banner" style="font-size:12.5px;">Dropshipping checkout isn't set up on this server yet — you can browse, but ordering isn't available.</p>
+        <div class="panel">
+          <div id="shop-products-list"><p class="muted">Loading products…</p></div>
+        </div>
+
+        <div class="panel bizpage-cart-bar hidden" id="shop-cart-bar">
+          <div>
+            <div class="bizpage-cart-count" id="shop-cart-count"></div>
+            <div class="bizpage-cart-amount" id="shop-cart-total"></div>
+          </div>
+          <button type="button" class="btn small" id="shop-cart-checkout-btn" data-i18n="t44">Checkout</button>
+        </div>
+
+        <div class="panel hidden" id="shop-checkout-panel">
+          <h2 class="section-title" style="margin-top:0;" data-i18n="t394">Shipping details</h2>
+          <div class="checkout-cart-items" id="shop-checkout-cart-items"></div>
+          <div class="field">
+            <label data-i18n="t388">Full name</label>
+            <input type="text" id="shop-shipping-name" maxlength="100" />
+          </div>
+          <div class="field">
+            <label data-i18n="t389">Phone number</label>
+            <input type="text" id="shop-shipping-phone" maxlength="40" />
+          </div>
+          <div class="field">
+            <label data-i18n="t390">Address</label>
+            <input type="text" id="shop-shipping-address" maxlength="200" />
+          </div>
+          <div class="panel-row">
+            <div class="field">
+              <label data-i18n="t391">City</label>
+              <input type="text" id="shop-shipping-city" maxlength="100" />
+            </div>
+            <div class="field">
+              <label data-i18n="t392">Country</label>
+              <input type="text" id="shop-shipping-country" maxlength="60" value="Guyana" />
+            </div>
+          </div>
+          <p class="muted" id="shop-checkout-total-preview" style="font-size:12.5px; min-height:16px;"></p>
+          <button class="btn full" id="shop-checkout-pay-btn" data-i18n="t393">Place order</button>
+          <div class="error-msg" id="shop-checkout-error"></div>
+          <p class="muted" id="shop-checkout-success" style="font-size:12.5px; margin-top:6px;"></p>
+        </div>
+
+        <h2 class="section-title">Your dropshipping orders</h2>
+        <div id="shop-orders-list"><p class="muted">Loading your orders…</p></div>
+      </section>
+
+      <!-- COURIER: opt-in delivery role — claim orders customers have chosen
+           to have delivered once they've arrived at the warehouse, hand
+           them over, and get paid once the customer's delivery code is
+           entered. See server.js's "courier" section. Reached from the
+           "🚚 Deliver" button on the Business tab. -->
+      <section id="panel-courier" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="courier-back-btn" data-i18n="t396">← Business</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t397">Deliver</h2>
+        </div>
+
+        <div id="courier-optin-section">
+          <div class="panel">
+            <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t398">Become a courier — same login, same personal balance, plus a separate delivery wallet. Claim orders customers have chosen to have delivered, hand them over, and get paid once you enter the code they give you.</p>
+            <button class="btn secondary full" id="upgrade-courier-btn" data-i18n="t399">Become a courier</button>
+            <div class="error-msg" id="upgrade-courier-error"></div>
+            <p class="muted" id="upgrade-courier-success" style="font-size:12.5px; margin-top:8px;"></p>
+          </div>
+        </div>
+
+        <div id="courier-main-section" class="hidden">
+          <h2 class="section-title" data-i18n="t400">Your courier wallet</h2>
+          <div class="panel">
+            <div class="biz-wallet-balance">
+              <span class="biz-wallet-label" data-i18n="t401">Courier balance</span>
+              <span class="biz-wallet-value">GYD <span id="courier-wallet-balance">0.00</span></span>
+            </div>
+            <div class="panel-row" style="margin-top:16px;">
+              <div class="field">
+                <label data-i18n="t81">Move to personal wallet</label>
+                <input type="number" id="courier-wallet-move-amount" min="0.01" step="0.01" placeholder="500" />
+              </div>
+              <button class="btn secondary" id="courier-wallet-move-btn" data-i18n="t189">Move</button>
+            </div>
+            <div class="error-msg" id="courier-wallet-move-error"></div>
+            <p class="muted" id="courier-wallet-move-success" style="font-size:12.5px; margin-top:2px;"></p>
+          </div>
+
+          <h2 class="section-title" data-i18n="t402">Available deliveries</h2>
+          <div id="courier-available-list"><p class="muted" data-i18n="t403">Loading…</p></div>
+
+          <h2 class="section-title" data-i18n="t404">Your deliveries</h2>
+          <div id="courier-mine-list"><p class="muted" data-i18n="t403">Loading…</p></div>
+        </div>
+      </section>
+
       <!-- JOBS BOARD (reached from the "💼 Jobs" button on the Business tab) -->
       <section id="panel-jobs" class="tab-panel hidden">
         <div class="remit-back-row">
@@ -1275,6 +1388,202 @@
             <div class="error-msg" id="upgrade-business-error"></div>
             <p class="muted" id="upgrade-business-success" style="font-size:12.5px; margin-top:8px;"></p>
           </div>
+        </div>
+
+        <h3 class="section-title" style="margin-top:22px;" data-i18n="t405">Legal</h3>
+        <div class="panel">
+          <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t406">The rules for using this app — what it does and doesn't promise, and what's expected of you as an account holder.</p>
+          <button class="btn secondary full" id="terms-btn" data-i18n="t407">📜 Terms &amp; Conditions</button>
+        </div>
+      </section>
+
+      <!-- TERMS & CONDITIONS — reached from Help & Support ("customer
+           service") via the "📜 Terms & Conditions" button, and required
+           reading (checkbox gate) on signup — see #register-terms-field in
+           the auth screen near the top of this file. Placeholder legal
+           text drafted to match this app's actual feature set; see the
+           notice at the top of the document itself before treating it as
+           final, signable legal text. -->
+      <section id="panel-terms" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="terms-back-btn" data-i18n="t408">← Support</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t407">📜 Terms &amp; Conditions</h2>
+        </div>
+        <div class="panel" style="font-size:13.5px; line-height:1.65;">
+          <p class="muted" style="font-size:12px; padding:10px; border-radius:8px; background:rgba(0,0,0,0.05); margin-bottom:16px;">
+            <strong>Draft placeholder — not final, lawyer-reviewed legal text.</strong> This document was written to be a
+            strong starting point for GYD Wallet's actual features, not a substitute for review by counsel licensed in
+            Guyana (and any other jurisdiction you operate in). It should be reviewed and formally approved before you rely
+            on it as a real, binding contract — especially the sections on money movement, business payments, and courier
+            payouts, which are the kind of activity that typically needs its own regulatory licensing (e.g. as a payment
+            service provider or money transmitter) before real funds move through it.
+          </p>
+          <p class="muted" style="font-size:12px; margin-bottom:16px;">Last updated: <span id="terms-last-updated"></span></p>
+
+          <p><strong>PLEASE READ THESE TERMS CAREFULLY BEFORE USING GYD WALLET.</strong> They include a limitation of
+          liability, an indemnification obligation, and a binding arbitration clause with a class-action waiver (Section
+          16) that affects your legal rights.</p>
+
+          <h3 class="section-title" style="margin-top:18px;">1. Acceptance of these terms</h3>
+          <p>By creating an account, checking the box at signup, or otherwise accessing or using GYD Wallet (the "App,"
+          "Service," "we," "us," or "our"), you ("you," "User") agree to be bound by these Terms &amp; Conditions (the
+          "Terms"), including the arbitration agreement and class-action waiver in Section 16. If you do not agree to every
+          part of these Terms, you must not create an account or use the App. We may amend these Terms at any time as
+          described in Section 17; your continued use after an amendment takes effect constitutes acceptance of it.</p>
+
+          <h3 class="section-title">2. Nature of the service — not a bank, not a licensed money transmitter</h3>
+          <p>GYD WALLET IS CURRENTLY A PHASE 1 PROTOTYPE. IT IS NOT A BANK, IS NOT FDIC OR OTHERWISE DEPOSIT-INSURED, AND IS
+          NOT CURRENTLY LICENSED AS A MONEY TRANSMITTER, PAYMENT SERVICE PROVIDER, OR FINANCIAL INSTITUTION IN GUYANA OR ANY
+          OTHER JURISDICTION. Deposits shown in the App are simulated and no real payment processor is connected; a
+          cash-out request only records your request and does not itself cause a real-world payout. Nothing displayed as a
+          "balance" in the App constitutes a real-money deposit account, e-money, or any regulated financial instrument
+          unless and until we tell you clearly, in writing, that it does. You use the App, and treat any balance shown in
+          it, entirely at your own risk.</p>
+
+          <h3 class="section-title">3. Eligibility and account registration</h3>
+          <p>You must be at least 18 years old and capable of forming a binding contract under applicable law to register.
+          By registering you represent and warrant that all information you provide (including your username, email,
+          phone number, and any business details) is accurate, current, and complete, and that you will keep it that way.
+          You may not create more than one personal account, register on behalf of another person without authority to do
+          so, or use the App if you have previously been suspended or removed from it. We reserve the right to refuse
+          registration, or to suspend or terminate any account, at our sole discretion, including under Section 15.</p>
+
+          <h3 class="section-title">4. Account security and your responsibility</h3>
+          <p>You are solely responsible for maintaining the confidentiality of your login credentials and for all activity
+          that occurs under your account, whether or not authorized by you, except to the extent caused solely by our
+          gross negligence or willful misconduct. You must notify us immediately through Help &amp; Support of any
+          unauthorized use of your account or any other breach of security.</p>
+
+          <h3 class="section-title">5. Wallet balances, transfers, and GYD Direct</h3>
+          <p>Your personal GYD balance may be used within the App for peer-to-peer transfers, GYD Direct transfers, payment
+          requests, and moving funds between your personal wallet and any business or courier wallet you hold, subject to
+          any limits, holds, or reviews we impose at our discretion to manage risk, error, fraud, or suspected abuse.
+          <strong>Transfers between accounts are generally final once completed.</strong> We are under no obligation to
+          reverse a completed transfer, including one sent to the wrong recipient or as the result of a scam, though we
+          may attempt to assist at our sole discretion and without any guarantee of recovery. You are solely responsible
+          for verifying a recipient's identity before sending funds.</p>
+
+          <h3 class="section-title">6. Business accounts and payments</h3>
+          <p>A business account is a second role attached to your login, with its own business balance kept separate from
+          personal funds until you elect to move it. If you operate a business through the App — a directory listing,
+          products, pickup or delivery orders, ticketed events, or job postings — you are solely responsible for: the
+          accuracy of everything you list; actually providing, in a timely and lawful manner, whatever you advertise or
+          sell; any tax, licensing, health, safety, or other regulatory obligation that applies to your business outside
+          this App; and honoring the fulfillment choices your own customers make. Funds held for a pickup order are
+          released only on redemption of the customer's pickup code; codes must never be shared except at the moment of
+          actual, verified handoff, and you assume all risk arising from any premature or careless disclosure of a code.</p>
+
+          <h3 class="section-title">7. The dropshipping shop, warehouse arrival, and delivery</h3>
+          <p>Products in the Shop are sourced through an independent third-party supplier (CJdropshipping) and are not
+          manufactured, warehoused (prior to arrival), or guaranteed by us. International shipping to our warehouse may
+          take days to weeks; prices are locked in at the time of order but delivery/pickup fulfillment is decided, and any
+          applicable delivery fee is charged, only once an order has actually arrived. If an order cannot be placed with
+          the supplier after payment, you will be refunded the amount charged, as your sole and exclusive remedy. WE
+          DISCLAIM ALL LIABILITY FOR DELAY, DAMAGE, LOSS, OR NONCONFORMITY OF GOODS ARISING FROM THE SUPPLIER'S OWN
+          SHIPPING, HANDLING, OR MANUFACTURING PROCESSES, TO THE FULLEST EXTENT PERMITTED BY LAW.</p>
+
+          <h3 class="section-title">8. Couriers</h3>
+          <p>Acting as a courier is voluntary and available to any account holder who opts in. Couriers are independent
+          actors, not our employees or agents, and are solely responsible for the safe, lawful, and timely delivery of any
+          order they claim, and for their own conduct during any in-person handoff. A courier is paid the posted delivery
+          fee only upon entering the delivery code the customer discloses to them in person; that code is intentionally
+          never exposed to the courier through the App. We are not a party to, do not supervise, and disclaim all
+          liability for the physical handoff between a courier and a customer, to the fullest extent permitted by law.</p>
+
+          <h3 class="section-title">9. Games — no gambling</h3>
+          <p>Coin Flip, the Slot Machine, and Ludo are provided free of charge, do not use GYD or any other balance, cost
+          nothing to play, and pay out nothing of monetary value. A round or match is recorded solely as a matter of your
+          own game history. No feature of the App constitutes gambling, wagering, or any activity requiring a gaming
+          license, and no game outcome can be converted into or out of real money or any balance held in the App.</p>
+
+          <h3 class="section-title">10. Prohibited conduct</h3>
+          <p>You agree not to, and not to assist any third party to: commit or attempt fraud against us or any user;
+          launder money or structure transactions to evade any limit, control, or reporting obligation; list, sell,
+          purchase, or ship illegal, counterfeit, or stolen goods or services through the business directory or Shop;
+          impersonate any person or entity, or misrepresent your affiliation with any person or entity; harass, threaten,
+          defraud, or abuse another user, including through messaging; access or attempt to access another account or any
+          non-public part of the App without authorization; probe, scan, or test the vulnerability of the App, or
+          circumvent any rate limit, security, or authentication measure; introduce any virus, malware, or other harmful
+          code; reverse-engineer, decompile, or disassemble any part of the App except as permitted by law; or use any
+          automated means (bot, scraper, or similar) to access the App without our prior written consent. We may suspend
+          or terminate, without notice, any account we reasonably believe is engaged in the foregoing.</p>
+
+          <h3 class="section-title">11. Intellectual property</h3>
+          <p>The App, including its software, design, text, graphics, and the "GYD Wallet" name and any associated marks,
+          is owned by us or our licensors and is protected by intellectual property laws. You are granted a limited,
+          non-exclusive, non-transferable, revocable license to use the App for its intended personal or business purpose.
+          Nothing in these Terms transfers any ownership right to you. Content you submit (business listings, messages,
+          reviews, product descriptions, photos) remains yours, but you grant us a worldwide, royalty-free license to host,
+          display, and distribute it as necessary to operate the App.</p>
+
+          <h3 class="section-title">12. DISCLAIMER OF WARRANTIES</h3>
+          <p>THE APP IS PROVIDED "AS IS" AND "AS AVAILABLE," AS AN EARLY-STAGE PROTOTYPE, WITHOUT WARRANTIES OF ANY KIND,
+          WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY,
+          FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE APP WILL BE
+          UNINTERRUPTED, TIMELY, SECURE, ERROR-FREE, OR THAT ANY DEFECT WILL BE CORRECTED, OR THAT THE APP OR THE SERVERS
+          THAT MAKE IT AVAILABLE ARE FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.</p>
+
+          <h3 class="section-title">13. LIMITATION OF LIABILITY</h3>
+          <p>TO THE FULLEST EXTENT PERMITTED BY LAW, IN NO EVENT WILL WE, OUR OFFICERS, DIRECTORS, EMPLOYEES, OR AGENTS BE
+          LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF
+          PROFITS, REVENUE, DATA, OR GOODWILL, ARISING FROM OR RELATED TO YOUR USE OF THE APP, EVEN IF WE HAVE BEEN ADVISED
+          OF THE POSSIBILITY OF SUCH DAMAGES. OUR TOTAL AGGREGATE LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO
+          THESE TERMS OR THE APP WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT ACTUALLY HELD IN YOUR ACCOUNT BALANCE(S) AT
+          THE TIME THE CLAIM AROSE, OR (B) FIVE THOUSAND GUYANESE DOLLARS (GYD 5,000). SOME JURISDICTIONS DO NOT ALLOW
+          CERTAIN LIMITATIONS, SO SOME OF THE ABOVE MAY NOT APPLY TO YOU, AND NOTHING HERE LIMITS LIABILITY THAT CANNOT BE
+          LIMITED BY LAW (INCLUDING FOR OUR OWN FRAUD OR WILLFUL MISCONDUCT).</p>
+
+          <h3 class="section-title">14. Indemnification</h3>
+          <p>You agree to indemnify, defend, and hold harmless us and our officers, directors, employees, and agents from
+          and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising out
+          of or in any way connected with: your access to or use of the App; your breach of these Terms; your violation of
+          any law or the rights of a third party; or, if applicable, your operation of a business, courier activity, or
+          any listing, transaction, or delivery you are party to through the App.</p>
+
+          <h3 class="section-title">15. Suspension and termination</h3>
+          <p>You may stop using the App at any time. We may suspend or terminate your account, with or without notice, if
+          we reasonably believe you have violated these Terms, engaged in fraudulent or illegal activity, or if required by
+          law or to protect the App or other users. Sections 2, 9–14, and 16–21 survive any termination of your account.
+          Where reasonably practicable and not in dispute, we will return any balance that is genuinely, undisputedly
+          yours.</p>
+
+          <h3 class="section-title">16. Dispute resolution: binding arbitration and class-action waiver</h3>
+          <p>Any dispute, claim, or controversy arising out of or relating to these Terms or your use of the App will be
+          resolved by final and binding arbitration, rather than in court, except that either party may bring an
+          individual claim in small-claims court if it qualifies. <strong>YOU AND WE EACH WAIVE THE RIGHT TO A JURY TRIAL
+          AND THE RIGHT TO PARTICIPATE IN A CLASS ACTION, CLASS ARBITRATION, OR REPRESENTATIVE PROCEEDING.</strong> Before
+          starting an arbitration, you agree to first contact us through Help &amp; Support and attempt in good faith to
+          resolve the dispute informally for at least 30 days. This section will be interpreted and enforced under the laws
+          referenced in Section 19; if any part of this arbitration agreement is found unenforceable, the remainder
+          survives, except that the class-action waiver may not be severed from the obligation to arbitrate individual
+          claims.</p>
+
+          <h3 class="section-title">17. Changes to these terms</h3>
+          <p>We may modify these Terms at any time. Material changes will be reflected by an updated "Last updated" date
+          above and, where practical, additional notice within the App. Continued use of the App after a change takes
+          effect constitutes your acceptance of the revised Terms; if you do not agree, you must stop using the App.</p>
+
+          <h3 class="section-title">18. Force majeure</h3>
+          <p>We are not liable for any failure or delay in performance resulting from causes beyond our reasonable control,
+          including acts of God, natural disaster, war, civil unrest, labor disputes, internet or telecommunications
+          failures, third-party service or supplier failures (including CJdropshipping), or governmental action.</p>
+
+          <h3 class="section-title">19. Governing law</h3>
+          <p>These Terms are governed by and construed in accordance with the laws of Guyana, without regard to its
+          conflict-of-laws principles, unless a different arrangement is agreed to in writing.</p>
+
+          <h3 class="section-title">20. Severability; entire agreement; assignment</h3>
+          <p>If any provision of these Terms is held unenforceable, the remaining provisions remain in full force and
+          effect, and the unenforceable provision will be modified to the minimum extent necessary to make it enforceable.
+          These Terms constitute the entire agreement between you and us regarding the App and supersede any prior
+          agreements. You may not assign these Terms or your account without our prior written consent; we may assign
+          these Terms freely, including in connection with a merger, acquisition, or sale of assets. Our failure to
+          enforce any right or provision is not a waiver of that right or provision.</p>
+
+          <h3 class="section-title">21. Electronic communications; contact</h3>
+          <p>By using the App you consent to receive communications from us electronically (in-app, or by email/SMS where
+          you've provided one), and agree that such communications satisfy any legal requirement that they be in writing.
+          Questions about these Terms, or about your account, can be sent through the "Help &amp; Support" form above.</p>
         </div>
       </section>
     </main>

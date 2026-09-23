@@ -106,6 +106,17 @@
     const businessName = document.getElementById('register-business-name').value.trim();
     const errBox = document.getElementById('register-error');
     errBox.textContent = '';
+    // Deliberately not a native `required` attribute on the checkbox — that
+    // would block submission with the browser's own small validation
+    // tooltip instead of this form's own error-message box, which is what
+    // every other validation failure in this form uses (see the empty-cart,
+    // missing-shipping-field, etc. checks elsewhere in this file). This is
+    // the actual, unconditional gate: account creation cannot proceed
+    // without the box checked.
+    if (!document.getElementById('register-agree-terms').checked) {
+      errBox.textContent = 'You must agree to the Terms & Conditions to create an account.';
+      return;
+    }
     try {
       const data = await api('/api/register', 'POST', { username, email, password, isBusiness, businessName });
       setToken(data.token);
@@ -115,6 +126,29 @@
       errBox.textContent = err.message;
     }
   };
+
+  // ---------- terms & conditions ----------
+  //
+  // Single source of truth: the full Terms text only ever lives once, in
+  // #panel-terms (inside the main app, reached from Help & Support). That
+  // markup exists in the page from the start (just hidden behind the
+  // logged-out auth screen), so the signup form's collapsible preview is
+  // simply a mirror of it — copied in once here, rather than maintaining
+  // the same legal text in two places that could drift apart.
+  (function initTerms() {
+    const source = document.querySelector('#panel-terms .panel');
+    const preview = document.getElementById('terms-preview-content');
+    if (source && preview) preview.innerHTML = source.innerHTML;
+    const lastUpdatedEls = document.querySelectorAll('#terms-last-updated');
+    // Hand-set to the date this document was actually drafted — bump this
+    // whenever the Terms text itself changes, same as any real ToS's
+    // "Last updated" line.
+    const TERMS_LAST_UPDATED = 'September 22, 2026';
+    lastUpdatedEls.forEach((el) => { el.textContent = TERMS_LAST_UPDATED; });
+  })();
+
+  document.getElementById('terms-btn').onclick = () => switchTab('terms');
+  document.getElementById('terms-back-btn').onclick = () => switchTab('support');
 
   // ---------- social sign-in (Google / Facebook) ----------
   // Both are full-page redirects (see server.js's /api/auth/*/start
@@ -309,6 +343,8 @@
           (tab === 'bizpage' && b.dataset.tab === 'business') ||
           (tab === 'mytickets' && b.dataset.tab === 'business') ||
           (tab === 'myorders' && b.dataset.tab === 'business') ||
+          (tab === 'shop' && b.dataset.tab === 'business') ||
+          (tab === 'courier' && b.dataset.tab === 'business') ||
           (tab === 'jobs' && b.dataset.tab === 'business') ||
           (tab === 'ludo' && b.dataset.tab === 'games')
       )
@@ -336,6 +372,8 @@
     if (tab === 'ludo') enterLudoTab();
     if (tab === 'mytickets') loadMyTickets();
     if (tab === 'myorders') loadMyOrders();
+    if (tab === 'shop') loadShopProducts();
+    if (tab === 'courier') enterCourierTab();
     if (tab === 'jobs') loadJobsBoard();
     if (tab === 'support') loadSupportTickets();
   }
@@ -3051,6 +3089,429 @@
       errBox.textContent = err.message;
     }
   };
+
+  // ---------- shop (CJdropshipping-sourced products) ----------
+  //
+  // A second, separate cart from the per-business one above — reuses the
+  // exact same `carts` object (see cartItemLine/cartEntries etc. above)
+  // under its own fixed key, and the same product-cart-* visual pieces,
+  // since it's the same "tap to add, quantity steps up, cart bar totals
+  // it up" pattern, just for a different source of products. See
+  // server.js's "dropshipping" section for why checkout can refuse — this
+  // whole feature is off until CJdropshipping API credentials exist.
+
+  const SHOP_CART_KEY = '__dropshipping__';
+  let shopEnabled = false;
+  let shopProductsById = {};
+  let shopFeeRate = 0.03;
+  // Mirrors server.js's DROPSHIP_STANDARD_DELIVERY_GYD /
+  // DROPSHIP_OVERSIZE_DELIVERY_GYD / DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG
+  // — these defaults are only ever shown before the first successful load;
+  // the real numbers always come from the server so this can't drift out
+  // of sync with what checkout actually charges.
+  let shopDelivery = { standardGyd: 500, oversizeGyd: 1500, oversizeThresholdKg: 5 };
+
+  async function loadShopProducts() {
+    const box = document.getElementById('shop-products-list');
+    box.innerHTML = '<p class="muted">Loading products…</p>';
+    try {
+      const data = await api('/api/shop/dropshipping-products');
+      shopEnabled = data.enabled;
+      shopFeeRate = typeof data.feeRate === 'number' ? data.feeRate : shopFeeRate;
+      shopDelivery = data.delivery || shopDelivery;
+      document.getElementById('shop-disabled-banner').classList.toggle('hidden', shopEnabled);
+      shopProductsById = {};
+      data.products.forEach((p) => { shopProductsById[p.id] = p; });
+      renderShopProducts(data.products);
+      loadShopOrders();
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderShopProducts(products) {
+    const box = document.getElementById('shop-products-list');
+    box.innerHTML = '';
+    if (!products || products.length === 0) {
+      box.innerHTML = '<p class="muted">No products available yet — check back soon.</p>';
+      renderShopCartBar();
+      return;
+    }
+    const cart = getCart(SHOP_CART_KEY);
+    products.forEach((p) => {
+      const qty = cart[p.id] ? cart[p.id].quantity : 0;
+      const row = document.createElement('div');
+      row.className = 'product-row';
+      row.innerHTML = `
+        ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
+        <div class="product-info">
+          <div class="product-name">${p.name}</div>
+          ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
+          ${p.weightKg > shopDelivery.oversizeThresholdKg ? `<div class="product-description">⚠️ Oversized — ships with the higher delivery fee</div>` : ''}
+        </div>
+        <div class="product-cart-col">
+          <span class="product-price">GYD ${fmt(p.priceGyd)}</span>
+          ${qty > 0 ? `
+            <div class="product-cart-stepper">
+              <button type="button" class="product-cart-btn" data-action="minus">−</button>
+              <span class="product-cart-qty">${qty}</span>
+              <button type="button" class="product-cart-btn" data-action="plus">+</button>
+            </div>
+          ` : `<button type="button" class="btn secondary small product-cart-add" data-action="plus" ${shopEnabled ? '' : 'disabled'}>+ Add</button>`}
+        </div>
+      `;
+      const plusBtn = row.querySelector('[data-action="plus"]');
+      const minusBtn = row.querySelector('[data-action="minus"]');
+      if (plusBtn) plusBtn.onclick = () => { addToCart(SHOP_CART_KEY, { id: p.id, name: p.name, price: p.priceGyd, weightKg: p.weightKg || 0 }); renderShopProducts(products); };
+      if (minusBtn) minusBtn.onclick = () => { decrementCartItem(SHOP_CART_KEY, p.id); renderShopProducts(products); };
+      box.appendChild(row);
+    });
+    renderShopCartBar();
+  }
+
+  function renderShopCartBar() {
+    const bar = document.getElementById('shop-cart-bar');
+    const count = cartItemCount(SHOP_CART_KEY);
+    if (count === 0) {
+      bar.classList.add('hidden');
+      document.getElementById('shop-checkout-panel').classList.add('hidden');
+      return;
+    }
+    bar.classList.remove('hidden');
+    document.getElementById('shop-cart-count').textContent = count === 1 ? '1 item' : `${count} items`;
+    document.getElementById('shop-cart-total').textContent = `GYD ${fmt(cartTotal(SHOP_CART_KEY))}`;
+    document.getElementById('shop-cart-checkout-btn').onclick = () => openShopCheckout();
+  }
+
+  function openShopCheckout() {
+    const entries = cartEntries(SHOP_CART_KEY);
+    const items = entries.map((e) => ({
+      productId: e.product.id, name: e.product.name, price: e.product.price, quantity: e.quantity,
+    }));
+    const box = document.getElementById('shop-checkout-cart-items');
+    box.innerHTML = items.map((item) => `<div class="checkout-cart-item-row">${cartItemLine(item)}</div>`).join('');
+    document.getElementById('shop-checkout-error').textContent = '';
+    document.getElementById('shop-checkout-success').textContent = '';
+    const subtotal = cartItemsTotal(items);
+    const fee = Math.round(subtotal * shopFeeRate * 100) / 100;
+    // Just a preview — the server always recomputes this itself, same
+    // "never trust the client for money" rule as everywhere else, so this
+    // can only ever match what's actually charged. No delivery fee shown
+    // here anymore — nobody knows yet whether this will end up picked up
+    // or delivered, so that charge (see shopDelivery.standardGyd /
+    // oversizeGyd) only happens later, once the order has arrived and the
+    // customer actually picks a fulfillment option under "My orders".
+    document.getElementById('shop-checkout-total-preview').textContent =
+      `Items: GYD ${fmt(subtotal)} · Platform fee (${Math.round(shopFeeRate * 100)}%): GYD ${fmt(fee)} · `
+      + `Total charged now: GYD ${fmt(subtotal + fee)} — delivery/pickup is decided once it arrives.`;
+    const panel = document.getElementById('shop-checkout-panel');
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('shop-checkout-pay-btn').onclick = async () => {
+    const errBox = document.getElementById('shop-checkout-error');
+    const successBox = document.getElementById('shop-checkout-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    const items = cartEntries(SHOP_CART_KEY).map((e) => ({ productId: e.product.id, quantity: e.quantity }));
+    if (items.length === 0) return (errBox.textContent = 'Your cart is empty.');
+    const shippingAddress = {
+      name: document.getElementById('shop-shipping-name').value.trim(),
+      phone: document.getElementById('shop-shipping-phone').value.trim(),
+      address: document.getElementById('shop-shipping-address').value.trim(),
+      city: document.getElementById('shop-shipping-city').value.trim(),
+      country: document.getElementById('shop-shipping-country').value.trim() || 'Guyana',
+    };
+    if (!shippingAddress.name || !shippingAddress.phone || !shippingAddress.address || !shippingAddress.city) {
+      return (errBox.textContent = 'Fill in your name, phone, address, and city.');
+    }
+    try {
+      const data = await api('/api/dropshipping/checkout', 'POST', { items, shippingAddress });
+      state.user = data.user;
+      renderWho();
+      successBox.textContent = `Order placed! Total charged: GYD ${fmt(data.order.amountChargedGyd)}.`;
+      carts[SHOP_CART_KEY] = {};
+      renderShopProducts(Object.values(shopProductsById));
+      document.getElementById('shop-checkout-panel').classList.add('hidden');
+      loadShopOrders();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('shop-btn').onclick = () => switchTab('shop');
+  document.getElementById('shop-back-btn').onclick = () => switchTab('business');
+
+  const SHOP_ORDER_STATUS_LABELS = {
+    pending: 'pending',
+    placed_with_cj: 'on the way to our warehouse',
+    arrived_at_warehouse: 'arrived — choose pickup or delivery',
+    awaiting_pickup: 'ready for pickup',
+    awaiting_courier: 'waiting for a courier',
+    out_for_delivery: 'out for delivery',
+    picked_up: 'picked up',
+    delivered: 'delivered',
+    cancelled: 'refunded',
+  };
+  function warehousePickupQrUrl(code) {
+    return qrImageUrl(`gydwarehouse:${code}`);
+  }
+  function deliveryCodeQrUrl(code) {
+    return qrImageUrl(`gyddelivery:${code}`);
+  }
+
+  async function loadShopOrders() {
+    const box = document.getElementById('shop-orders-list');
+    box.innerHTML = '<p class="muted">Loading your orders…</p>';
+    try {
+      const data = await api('/api/dropshipping/orders/mine');
+      renderShopOrders(data.orders);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderShopOrders(orders) {
+    const box = document.getElementById('shop-orders-list');
+    box.innerHTML = '';
+    if (!orders || orders.length === 0) {
+      box.innerHTML = '<p class="muted">No orders yet.</p>';
+      return;
+    }
+    orders.forEach((o) => {
+      const card = document.createElement('div');
+      card.className = 'panel ticket-card';
+      const statusLabel = SHOP_ORDER_STATUS_LABELS[o.status] || o.status;
+      const pillClass = o.status === 'cancelled' ? 'declined'
+        : ['pending', 'placed_with_cj', 'arrived_at_warehouse', 'awaiting_pickup', 'awaiting_courier', 'out_for_delivery'].includes(o.status) ? 'pending'
+        : 'completed';
+      // Once an order has landed, its own frozen weight tells us which
+      // delivery tier it would fall into — same numbers the server will
+      // actually charge (see shopDelivery above), just previewed here so
+      // the customer knows what delivery would cost before choosing it.
+      const isOversize = o.totalWeightKg > shopDelivery.oversizeThresholdKg;
+      const previewDeliveryFee = isOversize ? shopDelivery.oversizeGyd : shopDelivery.standardGyd;
+      card.innerHTML = `
+        <div class="ticket-card-info">
+          <div class="event-title-row">
+            <span class="event-name">GYD ${fmt(o.amountChargedGyd)}</span>
+            <span class="pill ${pillClass}">${statusLabel}</span>
+          </div>
+          <div class="product-description">${o.items.map((i) => cartItemLine({ ...i, price: i.priceGyd })).join('<br/>')}</div>
+          ${o.status === 'arrived_at_warehouse' ? `
+            <div class="muted" style="font-size:12px; margin-top:6px;">Your order has arrived! Pick it up for free, or have it delivered for GYD ${fmt(previewDeliveryFee)}${isOversize ? ' (oversized cargo)' : ''}.</div>
+          ` : ''}
+          ${o.fulfillment === 'delivery' && o.deliveryFeeGyd > 0 ? `
+            <div class="muted" style="font-size:12px;">Delivery fee: GYD ${fmt(o.deliveryFeeGyd)}</div>
+          ` : ''}
+          ${o.trackingNumber ? `<div class="muted" style="font-size:12px;">Tracking: ${o.trackingNumber}</div>` : ''}
+        </div>
+        ${o.status === 'arrived_at_warehouse' ? `
+          <div class="ticket-card-actions" style="display:flex; gap:8px; margin-top:8px;">
+            <button type="button" class="btn secondary small" data-action="pickup">Pick up in person</button>
+            <button type="button" class="btn small" data-action="delivery">Have it delivered — GYD ${fmt(previewDeliveryFee)}</button>
+          </div>
+          <div class="error-msg" data-fulfillment-error></div>
+        ` : ''}
+        ${o.status === 'awaiting_pickup' && o.warehousePickupCode ? `
+          <div class="ticket-card-qr">
+            <img src="${warehousePickupQrUrl(o.warehousePickupCode)}" alt="Warehouse pickup code QR" width="140" height="140" />
+            <code>${o.warehousePickupCode}</code>
+          </div>
+          <div class="muted" style="font-size:12px;">Show this code at the warehouse counter.</div>
+        ` : ''}
+        ${(o.status === 'awaiting_courier' || o.status === 'out_for_delivery') && o.deliveryCode ? `
+          <div class="ticket-card-qr">
+            <img src="${deliveryCodeQrUrl(o.deliveryCode)}" alt="Delivery code QR" width="140" height="140" />
+            <code>${o.deliveryCode}</code>
+          </div>
+          <div class="muted" style="font-size:12px;">${o.status === 'awaiting_courier' ? "Waiting for a courier to claim this — read this code out to them when they arrive." : 'A courier is on the way — read this code out to them when they hand over your order.'}</div>
+        ` : ''}
+      `;
+      if (o.status === 'arrived_at_warehouse') {
+        const errBox = card.querySelector('[data-fulfillment-error]');
+        card.querySelector('[data-action="pickup"]').onclick = () => chooseShopFulfillment(o.id, 'pickup', errBox);
+        card.querySelector('[data-action="delivery"]').onclick = () => chooseShopFulfillment(o.id, 'delivery', errBox);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  async function chooseShopFulfillment(orderId, fulfillment, errBox) {
+    if (errBox) errBox.textContent = '';
+    try {
+      const data = await api(`/api/dropshipping/orders/${orderId}/choose-fulfillment`, 'POST', { fulfillment });
+      if (data.user) { state.user = data.user; renderWho(); }
+      loadShopOrders();
+    } catch (err) {
+      if (errBox) errBox.textContent = err.message;
+      else alert(err.message);
+    }
+  }
+
+  // ---------- courier (dropshipping delivery) ----------
+
+  document.getElementById('courier-btn').onclick = () => switchTab('courier');
+  document.getElementById('courier-back-btn').onclick = () => switchTab('business');
+
+  function enterCourierTab() {
+    const isCourier = !!(state.user && state.user.isCourier);
+    document.getElementById('courier-optin-section').classList.toggle('hidden', isCourier);
+    document.getElementById('courier-main-section').classList.toggle('hidden', !isCourier);
+    if (isCourier) {
+      document.getElementById('courier-wallet-balance').textContent = fmt(state.user.courierGydBalance || 0);
+      loadCourierAvailable();
+      loadCourierMine();
+    }
+  }
+
+  document.getElementById('upgrade-courier-btn').onclick = async () => {
+    const errBox = document.getElementById('upgrade-courier-error');
+    const successBox = document.getElementById('upgrade-courier-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    try {
+      await api('/api/account/upgrade-to-courier', 'POST', {});
+      await refreshMe();
+      successBox.textContent = "You're set up as a courier.";
+      enterCourierTab();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  document.getElementById('courier-wallet-move-btn').onclick = async () => {
+    const errBox = document.getElementById('courier-wallet-move-error');
+    const successBox = document.getElementById('courier-wallet-move-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    const amount = Number(document.getElementById('courier-wallet-move-amount').value);
+    if (!amount || amount <= 0) return (errBox.textContent = 'Enter a positive amount.');
+    try {
+      const data = await api('/api/courier/wallet/move-to-personal', 'POST', { amount });
+      state.user = data.user;
+      renderWho();
+      document.getElementById('courier-wallet-balance').textContent = fmt(state.user.courierGydBalance || 0);
+      document.getElementById('courier-wallet-move-amount').value = '';
+      successBox.textContent = `Moved GYD ${fmt(amount)} to your personal wallet.`;
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
+
+  async function loadCourierAvailable() {
+    const box = document.getElementById('courier-available-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api('/api/courier/available-deliveries');
+      renderCourierAvailable(data.deliveries);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderCourierAvailable(deliveries) {
+    const box = document.getElementById('courier-available-list');
+    box.innerHTML = '';
+    if (!deliveries || deliveries.length === 0) {
+      box.innerHTML = '<p class="muted">No deliveries waiting right now — check back later.</p>';
+      return;
+    }
+    deliveries.forEach((d) => {
+      const addr = d.shippingAddress || {};
+      const card = document.createElement('div');
+      card.className = 'panel ticket-card';
+      card.innerHTML = `
+        <div class="ticket-card-info">
+          <div class="event-title-row">
+            <span class="event-name">GYD ${fmt(d.deliveryFeeGyd)}${d.isOversizeCargo ? ' · oversized cargo' : ''}</span>
+          </div>
+          <div class="product-description">${d.items.map((i) => cartItemLine({ ...i, price: i.priceGyd })).join('<br/>')}</div>
+          <div class="muted" style="font-size:12px;">${addr.name || ''} · ${addr.address || ''}, ${addr.city || ''}${addr.phone ? ` · ${addr.phone}` : ''}</div>
+        </div>
+      `;
+      const claimBtn = document.createElement('button');
+      claimBtn.className = 'btn small';
+      claimBtn.style.marginTop = '8px';
+      claimBtn.textContent = 'Claim this delivery';
+      claimBtn.onclick = async () => {
+        try {
+          await api(`/api/courier/deliveries/${d.id}/claim`, 'POST', {});
+          loadCourierAvailable();
+          loadCourierMine();
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      card.appendChild(claimBtn);
+      box.appendChild(card);
+    });
+  }
+
+  async function loadCourierMine() {
+    const box = document.getElementById('courier-mine-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api('/api/courier/deliveries/mine');
+      renderCourierMine(data.deliveries);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderCourierMine(deliveries) {
+    const box = document.getElementById('courier-mine-list');
+    box.innerHTML = '';
+    if (!deliveries || deliveries.length === 0) {
+      box.innerHTML = '<p class="muted">You haven\'t claimed any deliveries yet.</p>';
+      return;
+    }
+    deliveries.forEach((d) => {
+      const addr = d.shippingAddress || {};
+      const outForDelivery = d.status === 'out_for_delivery';
+      const card = document.createElement('div');
+      card.className = 'panel ticket-card';
+      card.innerHTML = `
+        <div class="ticket-card-info">
+          <div class="event-title-row">
+            <span class="event-name">GYD ${fmt(d.deliveryFeeGyd)}${d.isOversizeCargo ? ' · oversized cargo' : ''}</span>
+            <span class="pill ${outForDelivery ? 'pending' : 'completed'}">${outForDelivery ? 'out for delivery' : 'delivered'}</span>
+          </div>
+          <div class="product-description">${d.items.map((i) => cartItemLine({ ...i, price: i.priceGyd })).join('<br/>')}</div>
+          <div class="muted" style="font-size:12px;">${addr.name || ''} · ${addr.address || ''}, ${addr.city || ''}${addr.phone ? ` · ${addr.phone}` : ''}</div>
+        </div>
+        ${outForDelivery ? `
+          <div class="panel-row" style="margin-top:8px;">
+            <div class="field">
+              <label>Code from customer</label>
+              <input type="text" data-delivery-code maxlength="20" placeholder="Ask the customer to read it out" />
+            </div>
+            <button type="button" class="btn small" data-action="confirm">Confirm delivery</button>
+          </div>
+          <div class="error-msg" data-confirm-error></div>
+        ` : ''}
+      `;
+      if (outForDelivery) {
+        const errBox = card.querySelector('[data-confirm-error]');
+        card.querySelector('[data-action="confirm"]').onclick = async () => {
+          errBox.textContent = '';
+          const code = card.querySelector('[data-delivery-code]').value.trim();
+          if (!code) return (errBox.textContent = 'Enter the code the customer gives you.');
+          try {
+            const data = await api(`/api/courier/deliveries/${d.id}/confirm`, 'POST', { code });
+            state.user = data.user;
+            renderWho();
+            document.getElementById('courier-wallet-balance').textContent = fmt(state.user.courierGydBalance || 0);
+            loadCourierMine();
+          } catch (err) {
+            errBox.textContent = err.message;
+          }
+        };
+      }
+      box.appendChild(card);
+    });
+  }
 
   // ---------- messaging ----------
 

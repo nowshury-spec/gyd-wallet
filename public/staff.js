@@ -198,6 +198,7 @@
     document.querySelectorAll('.staff-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `staff-panel-${tab}`));
     if (tab === 'tickets') loadTickets();
     if (tab === 'cashouts') loadCashouts();
+    if (tab === 'dropshipping') loadDropshippingOrders();
     if (tab === 'employees') loadEmployees();
     if (tab === 'audit') loadAuditLog();
   }
@@ -418,6 +419,91 @@
       alert(err.message);
     }
   }
+
+  // ---------- dropshipping (warehouse arrivals & pickups) ----------
+
+  const DROPSHIPPING_STATUS_LABELS = {
+    pending: 'pending',
+    placed_with_cj: 'on the way — mark arrived once it lands',
+    arrived_at_warehouse: 'arrived — waiting on customer to choose pickup or delivery',
+    awaiting_pickup: 'ready — waiting for customer pickup',
+    awaiting_courier: 'waiting for a courier to claim it',
+    out_for_delivery: 'out for delivery',
+    picked_up: 'picked up',
+    delivered: 'delivered',
+    cancelled: 'cancelled/refunded',
+  };
+
+  async function loadDropshippingOrders() {
+    const box = document.getElementById('dropshipping-orders-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api('/api/staff/dropshipping-orders');
+      renderDropshippingOrders(data.orders);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${err.message}</p>`;
+    }
+  }
+
+  function renderDropshippingOrders(orders) {
+    const box = document.getElementById('dropshipping-orders-list');
+    box.innerHTML = '';
+    if (!orders || orders.length === 0) {
+      box.innerHTML = '<p class="muted">Nothing needs attention right now.</p>';
+      return;
+    }
+    orders.forEach((o) => {
+      const label = DROPSHIPPING_STATUS_LABELS[o.status] || o.status;
+      const card = document.createElement('div');
+      card.className = 'staff-item';
+      card.innerHTML = `
+        <div class="staff-item-top">
+          <strong>@${o.customerUsername} · GYD ${fmt(o.amountChargedGyd)}</strong>
+          <span class="pill ${o.status === 'cancelled' ? 'rejected' : 'pending'}">${o.status}</span>
+        </div>
+        <div class="staff-item-meta">${label} · placed ${timeAgo(o.createdAt)}${o.trackingNumber ? ` · tracking ${o.trackingNumber}` : ''}</div>
+        <div class="staff-item-body">${o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}</div>
+        ${
+          o.status === 'placed_with_cj'
+            ? `<div class="staff-actions"><button class="btn small dropshipping-mark-arrived-btn">Mark arrived at warehouse</button></div>`
+            : ''
+        }
+      `;
+      if (o.status === 'placed_with_cj') {
+        card.querySelector('.dropshipping-mark-arrived-btn').onclick = () => markDropshippingArrived(o.id);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  async function markDropshippingArrived(id) {
+    if (!confirm('Mark this order as arrived at the warehouse? This lets the customer choose pickup or delivery, and emails them if email is configured.')) return;
+    try {
+      await api(`/api/staff/dropshipping-orders/${id}/mark-arrived`, 'POST');
+      loadDropshippingOrders();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  document.getElementById('redeem-warehouse-pickup-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const errBox = document.getElementById('redeem-warehouse-pickup-error');
+    const successBox = document.getElementById('redeem-warehouse-pickup-success');
+    errBox.textContent = '';
+    successBox.textContent = '';
+    const codeInput = document.getElementById('redeem-warehouse-pickup-code');
+    const code = codeInput.value.trim();
+    if (!code) return;
+    try {
+      await api('/api/staff/dropshipping-orders/redeem-pickup', 'POST', { code });
+      successBox.textContent = 'Order handed over — marked picked up.';
+      codeInput.value = '';
+      loadDropshippingOrders();
+    } catch (err) {
+      errBox.textContent = err.message;
+    }
+  };
 
   // ---------- employees ----------
 
