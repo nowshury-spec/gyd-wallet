@@ -10,11 +10,12 @@
 //      staff member who has added a phone number but no email (or prefers
 //      SMS) under the Employees tab.
 //
-// Fully optional: with the Twilio env vars unset, smsEnabled() returns
-// false and every caller in server.js falls back to the existing behavior
-// (share the code yourself / on-screen code), so the app keeps working
-// exactly as before for anyone who hasn't set this up. See README's
-// "Setting up real SMS delivery" for how to turn it on.
+// Optional: with the Twilio env vars unset, smsEnabled() returns false —
+// GYD Direct senders share the reference code themselves, and staff need an
+// email on file to receive login codes. See README's "Setting up real SMS
+// delivery" for how to turn it on. Once enabled, restrict Twilio's
+// Geographic Permissions to the countries you actually text (e.g. Guyana)
+// so the account can't be used to text premium-rate numbers abroad.
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -25,10 +26,8 @@ function smsEnabled() {
 }
 
 // Sends one text message. Never throws — a send failure (bad credentials,
-// an undeliverable number, a Twilio outage) comes back as
-// { sent: false, reason } instead, so a caller can fall back to its
-// existing "share this yourself" / on-screen behavior rather than blocking
-// the whole action over an SMS provider hiccup.
+// an undeliverable number, a Twilio outage, a 10-second timeout) comes back
+// as { sent: false, reason } for the caller to report.
 async function sendSms(to, body) {
   if (!smsEnabled()) return { sent: false, reason: 'not_configured' };
   try {
@@ -41,6 +40,7 @@ async function sendSms(to, body) {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
       return { sent: false, reason: `twilio_http_${res.status}` };

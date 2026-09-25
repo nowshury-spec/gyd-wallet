@@ -34,7 +34,8 @@ it:
 
 ```
 SUPABASE_URL=https://<your-project-ref>.supabase.co
-SUPABASE_KEY=<your project's SECRET key (sb_secret_... or the legacy service_role key)>
+SUPABASE_KEY=<your project's service_role key — the legacy one starting with eyJ (see "How the database works")>
+SESSION_SECRET=<any random string of 32+ characters, e.g. from: openssl rand -hex 32>
 node server.js
 ```
 
@@ -48,7 +49,7 @@ This repo includes a `render.yaml` blueprint for [Render](https://render.com), s
 
 1. Push this repo to GitHub (or GitLab).
 2. In Render, create a new **Blueprint** and point it at the repo — it reads `render.yaml` and sets up the web service automatically, starting on the free plan.
-3. Create a free project at [supabase.com](https://supabase.com), run `supabase/schema.sql` against it (SQL Editor → paste → Run) to create the tables and the `exec_query` function the app talks to, then set `SUPABASE_URL` and `SUPABASE_KEY` (its Project URL and its **secret** key — `sb_secret_...`, or the legacy `service_role` key — from Project Settings → API; never the anon/publishable key, see **How the database works**) as environment variables on the Render service.
+3. Create a free project at [supabase.com](https://supabase.com), run `supabase/schema.sql` against it (SQL Editor → paste → Run) to create the tables and the `exec_query` function the app talks to, then set `SUPABASE_URL` and `SUPABASE_KEY` (its Project URL and its **legacy `service_role` key** — the long one starting with `eyJ`, from Project Settings → API Keys → Legacy API keys; never the anon/publishable key, see **How the database works**). `render.yaml` also has Render generate a `SESSION_SECRET`; if you created the service by hand rather than from the blueprint, add one yourself (any random string of 32+ characters) as environment variables on the Render service.
 4. Render gives you a live `https://<something>.onrender.com` URL once the first deploy finishes.
 
 **Why Supabase instead of a Render disk**: Render's free web services don't get a persistent disk, so anything written to the container's own filesystem resets on every redeploy or the free plan's auto-sleep-and-wake cycle. Rather than paying for a Render disk, the database lives in a separate free Supabase Postgres project instead — see **How the database works** below for how the app talks to it without adding any npm dependency.
@@ -69,15 +70,27 @@ converting the `?` placeholders used throughout `server.js` into Postgres's
 
 `exec_query` can read and write every table regardless of row-level
 permissions, so it is granted **only** to Supabase's `service_role` — the
-role behind the project's **secret** key. `SUPABASE_KEY` must be that
-secret key (`sb_secret_...`, or the legacy `service_role` key), kept
-server-side only. It must never be the anon/publishable key: Supabase
-designs that key to be public, and an earlier version of this schema
-granted `exec_query` to it, which meant anyone holding it could run any SQL
-against the whole database.
+role behind the project's service_role key. `SUPABASE_KEY` must be that
+key, kept server-side only. It must never be the anon/publishable key:
+Supabase designs that key to be public, and an earlier version of this
+schema granted `exec_query` to it, which meant anyone holding it could run
+any SQL against the whole database. (The app logs an error at startup if
+it's given the public key.)
 
-**Upgrading an existing deployment:** set `SUPABASE_KEY` to the secret key
-on Render (and redeploy) *first*, and only then re-run
+**Which service_role key:** Supabase projects have two formats.
+
+- **Legacy `service_role` key** (a long JWT starting with `eyJ`, under
+  Project Settings → API Keys → *Legacy API keys*): **recommended**. It
+  works for database queries *and* photo uploads, with every version of
+  `db.js`.
+- **New secret key** (`sb_secret_...`): works for database queries with the
+  current `db.js`, which sends it only in the `apikey` header as Supabase
+  requires. An older `db.js` that also sent it as `Authorization: Bearer`
+  fails outright with it. Direct Storage uploads with `sb_secret_` keys have
+  been reported not to work, so photo uploads may fail with one.
+
+**Upgrading an existing deployment:** set `SUPABASE_KEY` to the
+service_role key on Render (and redeploy) *first*, and only then re-run
 `supabase/schema.sql` — it revokes the old anon grant, so doing it the
 other way round cuts the running app off from its database.
 
@@ -408,7 +421,13 @@ Real orders don't go straight from "paid for" to "in the customer's hands" — C
 
 The auth screen can show "Continue with Google" and "Continue with Facebook" buttons alongside the regular username/password login and signup forms. `oauth.js` adds this using each provider's own OAuth 2.0 HTTP endpoints, reached with Node's built-in `fetch()` — same zero-npm-dependency approach as `email.js` and `sms.js` — and, like those, each provider only turns on once it's configured. Both are optional and independent of each other: with neither set up, the auth screen just shows the password form the way it always has; with one set up but not the other, only that one button appears.
 
-Signing in with either provider either logs into an existing account (if that Google/Facebook account has signed in before, or its verified email matches an existing password account) or creates a brand-new one automatically — no password is set on a new account created this way, though its owner can still add one later through the normal "Forgot your password?" flow once they've added an email.
+Signing in with either provider either logs into an existing account (if that Google/Facebook account has signed in before, or — **Google only** — its Google-verified email matches an existing account whose own email has been verified by redeeming an emailed reset code) or creates a brand-new one automatically — no password is set on a new account created this way, though its owner can still add one later through the normal "Forgot your password?" flow once they've added an email.
+
+How the sign-in is protected:
+
+- **Only a verified email can merge accounts.** A Google login merges into an existing account only when both sides have verified the email. Facebook doesn't say whether an email is verified, so a Facebook login always gets its own account and never merges by email. Otherwise, anyone who controlled a Facebook login carrying your email could take over your account.
+- **A sign-in only counts in the browser that started it.** The page stores a one-time random value when you click the button, and the result is accepted only if it comes back with that value. A link crafted by someone else (for example one carrying their own session, to trick you into using their account) is ignored.
+- **Session tokens stay out of server logs.** The result comes back after the `#` in the address, which browsers never send to the server.
 
 **Setting up Google (free):**
 
@@ -447,6 +466,8 @@ The Help & Support screen ("customer service" in the app) has a "Legal" section 
 To update the Terms later, edit the content inside `#panel-terms .panel` in `index.html` and bump the `TERMS_LAST_UPDATED` constant in `initTerms()` in `app.js` — both the in-app page and the signup preview pick up the change automatically.
 
 ## How product photos are stored
+
+*(Business page gallery photos are different: those are uploaded to the public `business-photos` Supabase Storage bucket through `db.js`'s `storageUpload`/`storageDelete` — which were missing from `db.js` until the security update, so gallery uploads always failed before it. This section is about product photos.)*
 
 There's no file-upload endpoint or file storage in this zero-dependency prototype, so a product photo never becomes a file on the server at all. Instead, the browser reads the chosen photo, draws it onto an off-screen canvas resized to a maximum of 500px on its longest side, re-encodes that as a compressed JPEG, and sends the whole thing as a `data:image/...;base64,...` string in the same JSON request that creates the product — the server just validates it looks like an image and isn't unreasonably large (capped at roughly 1.5MB of raw image data), then stores that string as a normal text column. That keeps the feature genuinely working without adding an image-processing library or a place to store uploaded files, at the cost of every photo living inline in the SQLite database rather than as a separate optimized asset — fine for a demo, not how you'd want to do it at real scale (a real build would upload to object storage and store a URL instead).
 
@@ -533,20 +554,23 @@ npm test          # same as: node --test test/*.test.js
 
 No `npm install` is needed — the suite uses Node's built-in test runner. It does need **PostgreSQL 15+ server binaries** installed locally (`initdb`, `pg_ctl`, `psql`; e.g. `apt install postgresql` or `brew install postgresql`). Set `PG_BIN` to their directory if they aren't found automatically.
 
-Each test file starts its own throwaway Postgres, loads `supabase/schema.sql` into it (twice, to prove it can be re-run), and runs the real `server.js` against it. The modules `server.js` requires (`db.js`, `auth.js`, `email.js`, …) are replaced by simple stand-ins in `test/shims/`; the database stand-in still sends every query through the real `exec_query` function, as the `service_role` role, so the actual SQL, placeholder substitution and grants are what get tested. The suite covers the money flows (transfers, ticket sales and refunds, pickup orders, delivery fees, courier payouts), the auth code flows, account-identity rules, GYD Direct pickup limits, rate limiting, and the database grants — including concurrent-request races for the flows where double-spending or overselling would be possible.
+Each test file starts its own throwaway Postgres, loads `supabase/schema.sql` into it (twice, to prove it can be re-run), and runs the real `server.js`, `db.js`, `auth.js` and `ludo.js` against it. `db.js` talks to `test/fake-supabase.js`, a small stand-in for Supabase's two HTTP APIs: RPC calls go to the real `exec_query` in that Postgres under the role the API key maps to (so the grants are really tested), and Storage keeps objects in memory. It also applies Supabase's header rules for both key formats. Only the modules that call third-party services (`email.js`, `sms.js`, `oauth.js`, `dropshipping.js`) are replaced by stand-ins in `test/shims/`.
+
+The suite covers the money flows (transfers, requests, charge requests, ticket sales and refunds, pickup orders, delivery fees, courier payouts), the auth code flows, social sign-in, account-identity rules, GYD Direct limits, rate limiting, photo storage, API-key handling and the database grants. `test/double-spend.test.js` and the oversell test cover double-submit races. Queries genuinely run concurrently in Postgres, and `slowWrites` stretches each write so the two requests are sure to overlap. Without that stretch, a missing lock can go unnoticed; these tests were checked to fail when the protection is removed.
 
 ## Deployment settings added in the security update
 
 | Variable | Default | What it's for |
 | --- | --- | --- |
-| `SUPABASE_KEY` | — | Must now be the project's **secret** key (see **How the database works**). |
+| `SUPABASE_KEY` | — | Must now be the project's **service_role** key — preferably the legacy one starting with `eyJ` (see **How the database works**). |
+| `SESSION_SECRET` | generated by Render (`render.yaml`) | Signs login sessions. Without it, sessions are signed with a key kept on Render's temporary disk, so everyone is logged out on every deploy and every time the free instance sleeps and wakes. Changing it logs everyone out once. |
 | `SHOW_CODES_ON_SCREEN` | off | Demo/dev only: show reset/username/staff codes on screen when email isn't configured (see **Setting up real email delivery**). |
 | `CLIENT_IP_HEADER` | `true-client-ip` on Render, otherwise unset | A header your edge proxy sets to the real client IP, overwriting whatever the client sent (Render/Cloudflare: `true-client-ip`). Used for per-IP rate limiting. No change is needed on Render. |
 | `TRUSTED_PROXY_HOPS` | `1` | Only used when there's no `CLIENT_IP_HEADER`: how many reverse proxies append to `X-Forwarded-For` in front of the app. The real client IP is read that many entries from the right, so a client-supplied `X-Forwarded-For` can't be used to dodge rate limits. Set `0` if nothing sits in front of the app. |
 
 **Upgrade order for an existing deployment** (the order matters):
 
-1. Switch `SUPABASE_KEY` on Render to the project's secret key and let it redeploy (still the old code).
+1. Switch `SUPABASE_KEY` on Render to the project's **legacy `service_role` key** (starts with `eyJ`) and let it redeploy (still the old code). Don't use an `sb_secret_...` key at this step: the old `db.js` can't send that format correctly and the app would lose its database. While you're in Render's Environment tab, also add `SESSION_SECRET` (any random string of 32+ characters) if Render hasn't generated one.
 2. Re-run `supabase/schema.sql` in the Supabase SQL Editor. It adds the new columns, tables and functions, converts money columns to exact decimals, and revokes the old public access to `exec_query`. The old code keeps working against the new schema. Doing this before step 1 cuts the running app off from its database.
 3. Configure email (and have staff add their email under **Employees → My email**), or set `SHOW_CODES_ON_SCREEN=true` temporarily, so staff can still log in once the new code is live.
 4. Deploy the new code. Deploying it before step 2 breaks logins, because the new code expects the new tables.

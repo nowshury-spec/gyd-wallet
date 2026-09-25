@@ -76,3 +76,14 @@ test('failed claims are rate limited per account', async () => {
   }
   assert.equal(last.status, 429);
 });
+
+test('GYD Direct sends are capped per account per hour (SMS-pumping protection)', async () => {
+  const sender = await env.makeUser({ balance: 100000 });
+  const statuses = [];
+  for (let i = 0; i < 11; i++) {
+    const r = await env.api('POST', '/api/remit', { token: sender.token, body: { recipientName: 'Jo', recipientPhone: '+5926000000', amount: 1 } });
+    statuses.push(r.status);
+  }
+  assert.deepEqual(statuses.slice(0, 10), Array(10).fill(201));
+  assert.equal(statuses[10], 429);
+});

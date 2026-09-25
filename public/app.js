@@ -176,12 +176,29 @@
   // nothing to await here. The buttons themselves start hidden and only
   // appear once we've confirmed the corresponding provider is actually
   // configured, so a not-yet-set-up provider never shows a dead button.
-  document.getElementById('google-signin-btn').onclick = () => {
-    window.location.href = '/api/auth/google/start';
-  };
-  document.getElementById('facebook-signin-btn').onclick = () => {
-    window.location.href = '/api/auth/facebook/start';
-  };
+  //
+  // Each sign-in carries a one-time random nonce kept in this tab's
+  // sessionStorage; the result is only accepted if it comes back with the
+  // same nonce (see the boot code at the bottom, and oauthState in
+  // server.js). That stops a link someone else crafted from logging this
+  // browser into THEIR account.
+  const OAUTH_NONCE_KEY = 'gyd_oauth_nonce';
+  function startSocialSignIn(provider) {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const nonce = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    try {
+      sessionStorage.setItem(OAUTH_NONCE_KEY, nonce);
+    } catch {
+      // Without sessionStorage the result can't be verified, so it would be
+      // rejected on return anyway — say so now instead.
+      document.getElementById('login-error').textContent = 'Sign-in with Google/Facebook needs browser storage enabled.';
+      return;
+    }
+    window.location.href = `/api/auth/${provider}/start?nonce=${encodeURIComponent(nonce)}`;
+  }
+  document.getElementById('google-signin-btn').onclick = () => startSocialSignIn('google');
+  document.getElementById('facebook-signin-btn').onclick = () => startSocialSignIn('facebook');
 
   (async function loadSocialProviders() {
     try {
@@ -4366,19 +4383,33 @@
   (async function boot() {
     // A "Continue with Google/Facebook" sign-in lands back here as a full
     // page redirect (see server.js's /api/auth/*/callback routes) with the
-    // result in the URL, since there's no in-page JS running mid-navigation
-    // to hand it a JSON response the normal way. Pick it up once, then
-    // scrub the URL so refreshing the page doesn't try to reuse it.
-    const urlParams = new URLSearchParams(window.location.search);
-    const oauthToken = urlParams.get('oauth_token');
-    const oauthError = urlParams.get('oauth_error');
-    if (oauthToken || oauthError) {
+    // result in the URL #fragment. Pick it up once, then scrub the URL so a
+    // refresh doesn't reuse it. The result is only trusted if its nonce
+    // matches the one this tab stored when it started the sign-in — a token
+    // in a link someone else made is ignored.
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const oauthToken = hashParams.get('oauth_token');
+    const oauthError = hashParams.get('oauth_error');
+    const oauthNonce = hashParams.get('oauth_nonce');
+    // Old-style ?oauth_token= links are never honoured; just clean them up.
+    const legacyParams = new URLSearchParams(window.location.search);
+    const hadLegacy = legacyParams.has('oauth_token') || legacyParams.has('oauth_error');
+    if (oauthToken || oauthError || hadLegacy) {
       window.history.replaceState({}, '', window.location.pathname);
-    }
-    if (oauthToken) {
-      setToken(oauthToken);
-    } else if (oauthError) {
-      document.getElementById('login-error').textContent = oauthError;
+      let expectedNonce = null;
+      try {
+        expectedNonce = sessionStorage.getItem(OAUTH_NONCE_KEY);
+        sessionStorage.removeItem(OAUTH_NONCE_KEY);
+      } catch {}
+      const nonceMatches = !!(oauthNonce && expectedNonce && oauthNonce === expectedNonce);
+      const loginError = document.getElementById('login-error');
+      if (oauthToken && nonceMatches) {
+        setToken(oauthToken);
+      } else if (oauthToken || hadLegacy) {
+        loginError.textContent = "That sign-in link wasn't started from this browser, so it was ignored. Please sign in again.";
+      } else if (oauthError) {
+        loginError.textContent = nonceMatches ? oauthError : "Sign-in didn't complete — please try again.";
+      }
     }
 
     if (!state.token) return;

@@ -9,6 +9,12 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22.22.2
+      # Signs every login session. Render generates a random value once and
+      # keeps it across deploys (it isn't stored in this file). Without it,
+      # auth.js falls back to a file on the free plan's temporary disk, and
+      # everyone gets logged out on every deploy or wake-from-sleep.
+      - key: SESSION_SECRET
+        generateValue: true
       # SUPABASE_URL and SUPABASE_KEY are NOT set here on purpose — they're
       # secrets, so set them in the Render dashboard (Environment tab)
       # instead of committing them to this file. See README's "Deploying

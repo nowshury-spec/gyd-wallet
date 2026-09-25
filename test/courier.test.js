@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { setup, uniqueName } = require('./harness');
-const { hashPassword } = require('./shims/auth');
+const { hashPassword } = require('../auth');
 
 let env;
 let staffToken;
@@ -89,4 +89,23 @@ test('re-running the schema closes pre-existing duplicate pending applications',
   ]);
   const [idx] = env.query(`SELECT count(*)::int AS n FROM pg_indexes WHERE indexname = 'uniq_courier_applications_one_pending'`);
   assert.equal(idx.n, 1);
+});
+
+test('confirming the same delivery twice at once pays the courier only once', async () => {
+  const courier = await approvedCourier();
+  const customer = await env.makeUser();
+  const code = `DC${Date.now()}`;
+  env.sql(`INSERT INTO dropshipping_orders (id, user_id, status, items, total_usd, total_gyd, platform_fee_gyd, total_weight_kg, usd_to_gyd_rate, amount_charged_gyd, shipping_address, created_at, delivery_fee_gyd, delivery_code, courier_id)
+           VALUES ('deliv-race', '${customer.id}', 'out_for_delivery', '[]', 1, 210, 6, 1, 210, 216, '{}', now()::text, 500, '${code}', '${courier.id}');`);
+  const undo = env.slowWrites('users');
+  let results;
+  try {
+    results = await Promise.all(
+      [1, 2].map(() => env.api('POST', '/api/courier/deliveries/deliv-race/confirm', { token: courier.token, body: { code } }))
+    );
+  } finally {
+    undo();
+  }
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 400]);
+  assert.equal(env.balanceOf(courier.id).c, 500);
 });

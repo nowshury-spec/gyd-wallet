@@ -6,11 +6,11 @@
 // everywhere, since there was never a real email integration) into
 // something only the actual account holder can see.
 //
-// Fully optional: with no RESEND_API_KEY set, emailEnabled() returns false
-// and every caller in server.js falls back to the old on-screen behavior,
-// so the app keeps working exactly as before for anyone who hasn't set
-// this up yet. See README's "Setting up real email delivery" for how to
-// turn it on.
+// With no RESEND_API_KEY set, emailEnabled() returns false and the features
+// that need email (password reset, username reminders, staff login codes)
+// are unavailable — codes are only ever shown on screen in the explicit
+// SHOW_CODES_ON_SCREEN demo mode. See README's "Setting up real email
+// delivery" for how to turn it on.
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'GYD Wallet <onboarding@resend.dev>';
@@ -20,9 +20,9 @@ function emailEnabled() {
 }
 
 // Sends one email. Never throws — a send failure (bad key, Resend outage,
-// no network) comes back as { sent: false, reason } instead, so a caller
-// can fall back to showing the code on screen rather than locking someone
-// out entirely over an email provider hiccup.
+// no network, a 10-second timeout) comes back as { sent: false, reason }
+// for the caller to report. Callers never fall back to showing a code on
+// screen, since that would hand it to whoever asked.
 async function sendEmail(to, subject, html) {
   if (!RESEND_API_KEY) return { sent: false, reason: 'not_configured' };
   try {
@@ -33,6 +33,7 @@ async function sendEmail(to, subject, html) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ from: RESEND_FROM_EMAIL, to, subject, html }),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
       return { sent: false, reason: `resend_http_${res.status}` };

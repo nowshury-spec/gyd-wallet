@@ -298,7 +298,7 @@ async function findOrCreateOAuthUser(provider, profile) {
       // else's address, wait for them to "Continue with Google", and end
       // up sharing their account — with a password the attacker knows.
       if (!existing.email_verified) {
-        throw new Error(
+        throw userFacingError(
           'An account with this email already exists. Log in with its password first — or use "Forgot your password?" ' +
             'to confirm you own this email — then Continue with Google will work.'
         );
@@ -570,56 +570,87 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
 // pieces, and README's "Setting up social sign-in" for the env vars this
 // is gated behind (both providers off is a normal, fully working state —
 // the buttons just don't show).
-function oauthState(provider) {
-  return sign({ purpose: 'oauth_state', provider, nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + 10 * 60 * 1000 });
+// The sign-in result is bound to the browser that STARTED the sign-in:
+// app.js generates a random nonce, keeps it in sessionStorage, and passes it
+// to /start; it's sealed inside the signed `state` that round-trips through
+// Google/Facebook, and handed back with the result. app.js only accepts a
+// token whose nonce matches the one it stored. That blocks two attacks:
+//   * a "planted session" link — /#oauth_token=<attacker's own token> — that
+//     would otherwise silently log a victim into the attacker's account;
+//   * login CSRF — sending a victim the attacker's own callback URL.
+// The result is returned in the URL #fragment, which browsers never send to
+// a server, so session tokens stay out of Render's request logs (a ?query
+// string is logged).
+const OAUTH_NONCE_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+function oauthState(provider, clientNonce) {
+  return sign({
+    purpose: 'oauth_state',
+    provider,
+    cn: clientNonce,
+    nonce: crypto.randomBytes(8).toString('hex'),
+    exp: Date.now() + 10 * 60 * 1000,
+  });
 }
 
-function validOauthState(token, provider) {
+// Returns the verified state payload, or null.
+function readOauthState(token, provider) {
   const data = verify(token);
-  return !!(data && data.purpose === 'oauth_state' && data.provider === provider);
+  return data && data.purpose === 'oauth_state' && data.provider === provider && OAUTH_NONCE_RE.test(data.cn || '') ? data : null;
 }
+
+// An error whose message is safe and meant to be shown to the person signing
+// in. Anything else (a database error, say) is logged and replaced with a
+// generic message, so internal details never end up in the URL.
+function userFacingError(message) {
+  const err = new Error(message);
+  err.userFacing = true;
+  return err;
+}
+
+function oauthResultUrl(fields) {
+  return '/#' + new URLSearchParams(fields).toString();
+}
+
+const SOCIAL = {
+  google: { label: 'Google', enabled: googleEnabled, authUrl: googleAuthUrl, profileFromCode: googleProfileFromCode },
+  facebook: { label: 'Facebook', enabled: facebookEnabled, authUrl: facebookAuthUrl, profileFromCode: facebookProfileFromCode },
+};
 
 on('GET', '/api/auth/social-providers', async (req, res) => {
   sendJson(res, 200, { google: googleEnabled(), facebook: facebookEnabled() });
 });
 
-on('GET', '/api/auth/google/start', async (req, res) => {
-  if (!googleEnabled()) return sendJson(res, 503, { error: 'Google sign-in is not set up yet.' });
-  redirect(res, googleAuthUrl(oauthState('google')));
-});
+for (const [provider, p] of Object.entries(SOCIAL)) {
+  on('GET', `/api/auth/${provider}/start`, async (req, res, params, query) => {
+    if (!p.enabled()) return sendJson(res, 503, { error: `${p.label} sign-in is not set up yet.` });
+    const clientNonce = String(query.nonce || '');
+    if (!OAUTH_NONCE_RE.test(clientNonce)) {
+      return badRequest(res, 'Start sign-in from the app — please reload the page and try again.');
+    }
+    redirect(res, p.authUrl(oauthState(provider, clientNonce)));
+  });
 
-on('GET', '/api/auth/google/callback', async (req, res, params, query) => {
-  if (!googleEnabled()) return redirect(res, '/?oauth_error=' + encodeURIComponent('Google sign-in is not set up yet.'));
-  try {
-    if (query.error) throw new Error('Google sign-in was cancelled.');
-    if (!validOauthState(query.state, 'google')) throw new Error('That sign-in link expired — please try again.');
-    const profile = await googleProfileFromCode(query.code);
-    const user = await findOrCreateOAuthUser('google', profile);
-    const token = makeSessionToken(user.id);
-    redirect(res, '/?oauth_token=' + encodeURIComponent(token));
-  } catch (err) {
-    redirect(res, '/?oauth_error=' + encodeURIComponent(err.message));
-  }
-});
-
-on('GET', '/api/auth/facebook/start', async (req, res) => {
-  if (!facebookEnabled()) return sendJson(res, 503, { error: 'Facebook sign-in is not set up yet.' });
-  redirect(res, facebookAuthUrl(oauthState('facebook')));
-});
-
-on('GET', '/api/auth/facebook/callback', async (req, res, params, query) => {
-  if (!facebookEnabled()) return redirect(res, '/?oauth_error=' + encodeURIComponent('Facebook sign-in is not set up yet.'));
-  try {
-    if (query.error) throw new Error('Facebook sign-in was cancelled.');
-    if (!validOauthState(query.state, 'facebook')) throw new Error('That sign-in link expired — please try again.');
-    const profile = await facebookProfileFromCode(query.code);
-    const user = await findOrCreateOAuthUser('facebook', profile);
-    const token = makeSessionToken(user.id);
-    redirect(res, '/?oauth_token=' + encodeURIComponent(token));
-  } catch (err) {
-    redirect(res, '/?oauth_error=' + encodeURIComponent(err.message));
-  }
-});
+  on('GET', `/api/auth/${provider}/callback`, async (req, res, params, query) => {
+    const state = readOauthState(query.state, provider);
+    // Without a valid state there's no browser nonce to bind a message to,
+    // so app.js will show its own generic message instead.
+    if (!state) return redirect(res, oauthResultUrl({ oauth_error: 'expired' }));
+    const nonce = state.cn;
+    try {
+      if (!p.enabled()) throw userFacingError(`${p.label} sign-in is not set up yet.`);
+      if (query.error) throw userFacingError(`${p.label} sign-in was cancelled.`);
+      const profile = await p.profileFromCode(query.code);
+      const user = await findOrCreateOAuthUser(provider, profile);
+      const token = makeSessionToken(user.id);
+      redirect(res, oauthResultUrl({ oauth_token: token, oauth_nonce: nonce }));
+    } catch (err) {
+      if (!err.userFacing) console.error(`${p.label} sign-in failed:`, err);
+      const message = err.userFacing ? err.message : `${p.label} sign-in didn't complete — please try again.`;
+      redirect(res, oauthResultUrl({ oauth_error: message, oauth_nonce: nonce }));
+    }
+  });
+}
 
 const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_RESET_CODE_ATTEMPTS = 5; // guesses allowed before a fresh code is required
@@ -1154,6 +1185,11 @@ const REMIT_LOOKUPS_PER_USER = 20;
 const REMIT_LOOKUPS_PER_IP = 60;
 const REMIT_FAILED_CLAIMS_PER_USER = 10;
 const REMIT_FAILED_CLAIMS_PER_IP = 30;
+// Sending is limited too: with SMS configured, every transfer texts the
+// recipient's phone, and deposits are simulated (free) — so without a cap,
+// anyone could make this server send unlimited texts to any number at the
+// app owner's expense ("SMS pumping"), including to premium-rate numbers.
+const REMIT_SENDS_PER_USER_PER_HOUR = 10;
 
 // Case-, space- and spacing-insensitive name comparison.
 function normalizeName(n) {
@@ -1202,6 +1238,9 @@ on(
     if (!recipientPhone) return badRequest(res, "Enter the recipient's phone number.");
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount to send.');
 
+    const sendKey = `remit-send-user:${user.id}`;
+    if (await rateLimited(res, [[sendKey, REMIT_SENDS_PER_USER_PER_HOUR]])) return;
+
     const fee = remittanceFee(amount);
     const total = Math.round((amount + fee) * 100) / 100;
     if (user.gyd_balance < total) return badRequest(res, `Not enough GYD — sending ${fmtNum(amount)} plus a ${fmtNum(fee)} fee needs ${fmtNum(total)}.`);
@@ -1220,6 +1259,7 @@ on(
     );
     if (rows.length === 0) return badRequest(res, 'Not enough GYD.');
 
+    await rateLimitRecord(sendKey, 60 * 60 * 1000);
     await logTx({ type: 'remit_send', fromUser: user.id, amount: total, currency: 'GYD', note: `To ${recipientName}, ref ${referenceCode}` });
 
     // With real SMS delivery configured (see sms.js), text the reference
@@ -1456,9 +1496,15 @@ on(
     // business" — it lands in their business wallet, not their personal one.
     const requesterIsBusiness = await isBusinessAccount(request.from_user);
     const creditColumn = requesterIsBusiness ? 'business_gyd_balance' : 'gyd_balance';
+    // `FOR UPDATE` locks the request row while its status is checked. Without
+    // it, two simultaneous "pay" taps could both read 'pending' (every part
+    // of one statement reads the same starting snapshot, and Postgres only
+    // re-checks the row being UPDATED — the payer's balance row — not this
+    // one), so both would charge. With the lock, the second request waits,
+    // re-reads the row, sees it's no longer 'pending', and does nothing.
     const rows = await db.raw(
       `WITH req AS (
-         SELECT amount, from_user FROM money_requests WHERE id = $1 AND to_user = $2 AND status = 'pending'
+         SELECT amount, from_user FROM money_requests WHERE id = $1 AND to_user = $2 AND status = 'pending' FOR UPDATE
        ), debit AS (
          UPDATE users SET gyd_balance = gyd_balance - (SELECT amount FROM req)
          WHERE id = $2 AND EXISTS (SELECT 1 FROM req) AND gyd_balance >= (SELECT amount FROM req)
@@ -1468,7 +1514,7 @@ on(
          WHERE id = (SELECT from_user FROM req) AND EXISTS (SELECT 1 FROM debit)
          RETURNING 1
        ), upd AS (
-         UPDATE money_requests SET status = 'paid', resolved_at = $3 WHERE id = $1 AND EXISTS (SELECT 1 FROM debit) RETURNING 1
+         UPDATE money_requests SET status = 'paid', resolved_at = $3 WHERE id = $1 AND status = 'pending' AND EXISTS (SELECT 1 FROM debit) RETURNING 1
        )
        SELECT gyd_balance FROM debit`,
       [request.id, user.id, now()]
@@ -1880,9 +1926,11 @@ function resolveChargeRequest(action) {
       // can't double-charge the customer — see the cashout/transfer
       // comments above for why this matters now that every query is a
       // separate network round trip.
+      // FOR UPDATE: see the money-request "pay" route above — without the
+      // row lock, two simultaneous approvals could both charge.
       const rows = await db.raw(
         `WITH req AS (
-           SELECT amount, business_id FROM charge_requests WHERE id = $1 AND customer_id = $2 AND status = 'pending'
+           SELECT amount, business_id FROM charge_requests WHERE id = $1 AND customer_id = $2 AND status = 'pending' FOR UPDATE
          ), debit AS (
            UPDATE users SET gyd_balance = gyd_balance - (SELECT amount FROM req)
            WHERE id = $2 AND EXISTS (SELECT 1 FROM req) AND gyd_balance >= (SELECT amount FROM req)
@@ -1892,7 +1940,7 @@ function resolveChargeRequest(action) {
            WHERE id = (SELECT business_id FROM req) AND EXISTS (SELECT 1 FROM debit)
            RETURNING 1
          ), upd AS (
-           UPDATE charge_requests SET status = 'approved', resolved_at = $3 WHERE id = $1 AND EXISTS (SELECT 1 FROM debit) RETURNING 1
+           UPDATE charge_requests SET status = 'approved', resolved_at = $3 WHERE id = $1 AND status = 'pending' AND EXISTS (SELECT 1 FROM debit) RETURNING 1
          )
          SELECT gyd_balance FROM debit`,
         [request.id, user.id, now()]
@@ -2227,7 +2275,8 @@ on(
     try {
       url = await db.storageUpload('business-photos', storagePath, Buffer.from(validated.base64, 'base64'), validated.mime);
     } catch (err) {
-      return sendJson(res, 502, { error: `Could not upload that photo: ${err.message}` });
+      console.error('Business photo upload failed:', err.message);
+      return sendJson(res, 502, { error: 'Could not upload that photo right now — please try again.' });
     }
     await db.prepare(
       'INSERT INTO business_photos (id, business_id, url, storage_path, created_at) VALUES (?, ?, ?, ?, ?)'
@@ -2244,7 +2293,12 @@ on(
     const row = await db.prepare('SELECT * FROM business_photos WHERE id = ?').get(params.id);
     if (!row) return sendJson(res, 404, { error: 'Photo not found.' });
     if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This photo is not yours to remove.' });
-    await db.storageDelete('business-photos', row.storage_path);
+    try {
+      await db.storageDelete('business-photos', row.storage_path);
+    } catch (err) {
+      console.error('Business photo delete failed:', err.message);
+      return sendJson(res, 502, { error: 'Could not remove that photo right now — please try again.' });
+    }
     await db.prepare('DELETE FROM business_photos WHERE id = ?').run(params.id);
     const rows = await db.prepare('SELECT * FROM business_photos WHERE business_id = ? ORDER BY created_at ASC').all(user.id);
     sendJson(res, 200, { photos: rows.map(businessPhotoPublic) });
@@ -3844,16 +3898,16 @@ on(
     // the courier board and, on delivery confirmation, paid the courier a
     // fee the customer never paid (money created from nothing).
     //
-    // Here `gate` just checks the order is still claimable, `debit` only
-    // succeeds if the funds are there (its own WHERE guarantees it, and the
-    // check is re-applied on the contended user row under READ COMMITTED —
-    // the same atomic pattern used for charge-requests and ticket sales
-    // above), and the order UPDATE is guarded on `EXISTS (debit)`. If the
-    // debit fails, the order is simply left untouched — no compensating
-    // revert to get wrong.
+    // Here `gate` checks the order is still claimable AND locks its row
+    // (FOR UPDATE), so a second simultaneous request waits, re-reads the
+    // order, and finds it no longer 'arrived_at_warehouse' instead of paying
+    // the fee a second time. `debit` only succeeds if the funds are there,
+    // and the order UPDATE is guarded on `EXISTS (debit)`. If the debit
+    // fails, the order is simply left untouched — no compensating revert to
+    // get wrong.
     const rows = await db.raw(
       `WITH gate AS (
-         SELECT id FROM dropshipping_orders WHERE id = $3 AND status = 'arrived_at_warehouse'
+         SELECT id FROM dropshipping_orders WHERE id = $3 AND status = 'arrived_at_warehouse' FOR UPDATE
        ), debit AS (
          UPDATE users SET gyd_balance = gyd_balance - $1
          WHERE id = $4 AND gyd_balance >= $1 AND EXISTS (SELECT 1 FROM gate)
@@ -4155,12 +4209,22 @@ function serveStatic(req, res, parsedUrl) {
 // restricting where scripts/styles/images/connections are allowed to come
 // from so an injected `<script src="evil.example">` (if one ever slipped
 // through) would simply be refused by the browser.
+// Business photos are served straight from the Supabase Storage bucket, so
+// images from the Supabase project's own origin must be allowed.
+const SUPABASE_ORIGIN = (() => {
+  try {
+    return new URL(process.env.SUPABASE_URL).origin;
+  } catch {
+    return '';
+  }
+})();
+
 const CSP =
   "default-src 'self'; " +
   "script-src 'self'; " +
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
   "font-src https://fonts.gstatic.com; " +
-  "img-src 'self' data: https://api.qrserver.com; " +
+  `img-src 'self' data: https://api.qrserver.com${SUPABASE_ORIGIN ? ` ${SUPABASE_ORIGIN}` : ''}; ` +
   "connect-src 'self'; " +
   // No plugins/embeds and no nested frames: an injected <object>, <embed>,
   // or <iframe> can't load anything, closing those off as HTML-injection

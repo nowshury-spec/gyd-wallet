@@ -63,14 +63,20 @@ test('legacy collision: a bare name matching two accounts is refused, $paytag st
   assert.equal(lookup.status, 409);
 });
 
-async function googleSignIn(profile) {
-  const start = await env.api('GET', '/api/auth/google/start');
+// Drives the real /start → provider → /callback round trip. The fake
+// provider's "code" is just the profile JSON (see test/shims/others.js).
+async function socialSignIn(provider, profile, { nonce = 'n_' + Math.random().toString(36).slice(2).padEnd(20, 'x') } = {}) {
+  const start = await env.api('GET', `/api/auth/${provider}/start?nonce=${nonce}`);
+  assert.equal(start.status, 302, JSON.stringify(start.data));
   const state = new URL(start.headers.get('location'), 'http://x').searchParams.get('state');
   const code = Buffer.from(JSON.stringify(profile)).toString('base64url');
-  const cb = await env.api('GET', `/api/auth/google/callback?state=${encodeURIComponent(state)}&code=${code}`);
+  const cb = await env.api('GET', `/api/auth/${provider}/callback?state=${encodeURIComponent(state)}&code=${code}`);
   const loc = new URL(cb.headers.get('location'), 'http://x');
-  return { token: loc.searchParams.get('oauth_token'), error: loc.searchParams.get('oauth_error') };
+  assert.equal(loc.search, '', 'nothing may be returned in the query string (it would be logged)');
+  const frag = new URLSearchParams(loc.hash.slice(1));
+  return { token: frag.get('oauth_token'), error: frag.get('oauth_error'), nonce: frag.get('oauth_nonce'), sentNonce: nonce };
 }
+const googleSignIn = (profile) => socialSignIn('google', profile);
 
 test('Google sign-in does NOT link into an account whose email was never verified (pre-account takeover)', async () => {
   const victimEmail = `${uniqueName('victim')}@example.test`;
@@ -97,4 +103,31 @@ test('Google sign-in with a new email creates a verified account', async () => {
   assert.ok(r.token, r.error);
   const [row] = env.query(`SELECT email_verified FROM users WHERE email = '${email}'`);
   assert.equal(row.email_verified, true);
+});
+
+test('social sign-in must be started with a browser nonce, which comes back with the result', async () => {
+  const noNonce = await env.api('GET', '/api/auth/google/start');
+  assert.equal(noNonce.status, 400);
+  const r = await socialSignIn('google', { providerUserId: uniqueName('g'), email: `${uniqueName('n')}@example.test`, name: 'N' });
+  assert.ok(r.token);
+  assert.equal(r.nonce, r.sentNonce);
+});
+
+test('a forged or expired sign-in state yields only a generic error, with no nonce', async () => {
+  const code = Buffer.from(JSON.stringify({ providerUserId: 'x', email: null })).toString('base64url');
+  const cb = await env.api('GET', `/api/auth/google/callback?state=forged&code=${code}`);
+  const frag = new URLSearchParams(new URL(cb.headers.get('location'), 'http://x').hash.slice(1));
+  assert.equal(frag.get('oauth_token'), null);
+  assert.equal(frag.get('oauth_nonce'), null);
+  assert.equal(frag.get('oauth_error'), 'expired');
+});
+
+test('a Facebook sign-in never merges into an existing account by email', async () => {
+  const u = await env.makeUser();
+  env.sql(`UPDATE users SET email_verified = true WHERE id = '${u.id}';`);
+  const r = await socialSignIn('facebook', { providerUserId: uniqueName('fb'), email: u.email, emailVerified: false, name: 'FB Person' });
+  assert.ok(r.token, r.error);
+  const me = await env.api('GET', '/api/me', { token: r.token });
+  assert.notEqual(me.data.user.id, u.id, 'must be a separate account');
+  assert.equal(me.data.user.email, null);
 });

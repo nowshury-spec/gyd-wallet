@@ -45,11 +45,36 @@ async function makeEvent(biz, { capacity = null, ticketPrice = 1000 } = {}) {
   return r.data.events[0];
 }
 
+// Test-only: make inserting tickets take a moment, so that concurrent
+// purchases are guaranteed to be inside the "count seats → insert tickets"
+// window at the same time. Without this the window is far shorter than the
+// timing jitter between requests, and a missing lock could go unnoticed
+// (this test was checked to FAIL with purchase_event_tickets' row lock
+// removed, and pass with it).
+function slowTicketInserts(on) {
+  const r = env.sql(
+    on
+      ? `CREATE OR REPLACE FUNCTION test_slow_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.3); RETURN NULL; END $$;
+         DROP TRIGGER IF EXISTS test_slow_ticket_insert ON event_tickets;
+         CREATE TRIGGER test_slow_ticket_insert BEFORE INSERT ON event_tickets FOR EACH STATEMENT EXECUTE FUNCTION test_slow_insert();`
+      : `DROP TRIGGER IF EXISTS test_slow_ticket_insert ON event_tickets;`
+  );
+  assert.ok(r.ok, r.err);
+}
+
 test('concurrent buyers cannot oversell an event', async () => {
   const biz = await env.makeUser({ business: true });
   const ev = await makeEvent(biz, { capacity: 3, ticketPrice: 1000 });
   const buyers = await Promise.all(Array.from({ length: 8 }, () => env.makeUser({ balance: 5000 })));
-  const results = await Promise.all(buyers.map((b) => env.api('POST', `/api/events/${ev.id}/purchase`, { token: b.token, body: { quantity: 1 } })));
+  env.supabase.stats.maxInFlight = 0;
+  slowTicketInserts(true);
+  let results;
+  try {
+    results = await Promise.all(buyers.map((b) => env.api('POST', `/api/events/${ev.id}/purchase`, { token: b.token, body: { quantity: 1 } })));
+  } finally {
+    slowTicketInserts(false);
+  }
+  assert.ok(env.supabase.stats.maxInFlight >= 4, `queries must really overlap (max in flight: ${env.supabase.stats.maxInFlight})`);
   const ok = results.filter((r) => r.status === 201);
   assert.equal(ok.length, 3, results.map((r) => r.status).join(','));
   const [{ n }] = env.query(`SELECT count(*)::int AS n FROM event_tickets WHERE event_id = '${ev.id}'`);

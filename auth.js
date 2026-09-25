@@ -8,7 +8,25 @@ const DATA_DIR = path.join(__dirname, 'data');
 const SECRET_PATH = path.join(DATA_DIR, 'session-secret.key');
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
+// The key that signs every session token. In production it MUST come from
+// the SESSION_SECRET environment variable (render.yaml asks Render to
+// generate one). The file fallback below is for local development only: on
+// Render's free plan the disk is wiped on every deploy and every time the
+// instance sleeps and wakes, so a file-based secret was regenerated each
+// time — which silently invalidated every customer and staff session. Two
+// instances would also each have had their own secret.
 function getSecret() {
+  const fromEnv = process.env.SESSION_SECRET;
+  if (fromEnv) {
+    if (fromEnv.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters long.');
+    return fromEnv;
+  }
+  if (process.env.RENDER === 'true') {
+    console.warn(
+      'WARNING: SESSION_SECRET is not set — using a secret stored on local disk, which Render wipes on every deploy/restart, ' +
+        'logging everyone out. Set SESSION_SECRET (see render.yaml / README).'
+    );
+  }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(SECRET_PATH)) {
     fs.writeFileSync(SECRET_PATH, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });

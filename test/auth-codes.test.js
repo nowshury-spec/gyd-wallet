@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, uniqueName } = require('./harness');
-const { hashPassword } = require('./shims/auth');
+const { hashPassword } = require('../auth');
 
 let env;
 test.before(async () => {

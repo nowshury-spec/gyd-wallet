@@ -1,6 +1,10 @@
 // Integration-test harness: a throwaway local Postgres loaded with the real
-// supabase/schema.sql, plus the real server.js running against it through
-// test-only stand-ins for the modules it requires (see test/shims/).
+// supabase/schema.sql, plus the real server.js, db.js, auth.js and ludo.js
+// running against it. db.js talks to a small fake of Supabase's HTTP APIs
+// (test/fake-supabase.js) that forwards every query to the real exec_query
+// in that Postgres. Only the modules that call third-party services —
+// email.js, sms.js, oauth.js, dropshipping.js — are replaced with stand-ins
+// (see test/shims/).
 //
 // Needs PostgreSQL 15+ server binaries (initdb, pg_ctl, psql) installed
 // locally. Set PG_BIN to their directory if they aren't found automatically.
@@ -13,6 +17,11 @@ const { spawn, spawnSync, execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const others = require('./shims/others');
+const { startFakeSupabase } = require('./fake-supabase');
+
+// Tests require the real auth.js (for hashPassword); give it a secret via the
+// environment so it never writes a key file into the project directory.
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 function findPgBin() {
   if (process.env.PG_BIN) return process.env.PG_BIN;
@@ -80,9 +89,9 @@ async function startServer(env, extraEnv = {}) {
     env: {
       ...process.env,
       PORT: String(env.port),
-      TEST_PSQL: env.psql,
-      TEST_PG_HOST: env.sockDir,
-      TEST_PG_PORT: String(env.pgPort),
+      SUPABASE_URL: env.supabase.url,
+      SUPABASE_KEY: env.secretKey,
+      SESSION_SECRET: env.sessionSecret,
       TEST_MAILBOX: env.mailbox,
       TRUSTED_PROXY_HOPS: '1',
       ...extraEnv,
@@ -117,6 +126,7 @@ async function stopServer(env) {
 
 async function stopEnv(env) {
   await stopServer(env);
+  if (env.supabase) await env.supabase.close();
   try {
     runPg(path.join(env.bin, 'pg_ctl'), ['-D', env.dataDir, '-m', 'immediate', 'stop']);
   } catch {}
@@ -176,6 +186,22 @@ function balanceOf(env, userId) {
   return row;
 }
 
+// Test-only: make every write to `table` pause for `seconds`, so concurrent
+// requests are guaranteed to overlap inside the database — the window where
+// a real race would bite is otherwise far shorter than request timing jitter.
+// Returns a function that removes the delay again.
+function slowWrites(env, table, seconds = 0.3) {
+  const trig = `test_slow_${table}`;
+  const r = sqlOn(
+    env,
+    `CREATE OR REPLACE FUNCTION test_slow_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(${Number(seconds)}); RETURN NEW; END $$;
+     DROP TRIGGER IF EXISTS ${trig} ON ${table};
+     CREATE TRIGGER ${trig} BEFORE UPDATE ON ${table} FOR EACH ROW EXECUTE FUNCTION test_slow_row();`
+  );
+  if (!r.ok) throw new Error(r.err);
+  return () => sqlOn(env, `DROP TRIGGER IF EXISTS ${trig} ON ${table};`);
+}
+
 function attach(env) {
   env.sqlFile = (file) => sqlFileOn(env, file);
   env.sql = (q, opts) => sqlOn(env, q, opts);
@@ -185,6 +211,7 @@ function attach(env) {
   env.startServer = (e) => startServer(env, e);
   env.makeUser = (o) => makeUser(env, o);
   env.balanceOf = (id) => balanceOf(env, id);
+  env.slowWrites = (table, seconds) => slowWrites(env, table, seconds);
   return env;
 }
 
@@ -215,9 +242,21 @@ async function startEnv() {
   fs.mkdirSync(appDir);
   fs.copyFileSync(path.join(ROOT, 'server.js'), path.join(appDir, 'server.js'));
   fs.cpSync(path.join(ROOT, 'public'), path.join(appDir, 'public'), { recursive: true });
-  for (const m of ['db', 'auth', 'email']) fs.copyFileSync(path.join(__dirname, 'shims', `${m}.js`), path.join(appDir, `${m}.js`));
-  for (const m of ['sms', 'dropshipping', 'oauth', 'ludo']) fs.writeFileSync(path.join(appDir, `${m}.js`), others[m]);
+  for (const m of ['db', 'auth', 'ludo']) fs.copyFileSync(path.join(ROOT, `${m}.js`), path.join(appDir, `${m}.js`));
+  fs.copyFileSync(path.join(__dirname, 'shims', 'email.js'), path.join(appDir, 'email.js'));
+  for (const m of ['sms', 'dropshipping', 'oauth']) fs.writeFileSync(path.join(appDir, `${m}.js`), others[m]);
   env.appDir = appDir;
+
+  env.secretKey = `sb_secret_${crypto.randomBytes(16).toString('hex')}`;
+  env.anonKey = `sb_publishable_${crypto.randomBytes(16).toString('hex')}`;
+  env.sessionSecret = crypto.randomBytes(32).toString('hex'); // stays the same across restarts, like on Render
+  // A JWT-shaped legacy service_role key, to test db.js's other header mode.
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  env.legacyServiceKey = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ role: 'service_role' })}.${crypto.randomBytes(16).toString('base64url')}`;
+  env.supabase = await startFakeSupabase({
+    psql: env.psql, host: env.sockDir, port: env.pgPort,
+    secretKey: env.secretKey, anonKey: env.anonKey, legacyServiceKey: env.legacyServiceKey,
+  });
   env.stop = () => stopEnv(env);
   return env;
 }

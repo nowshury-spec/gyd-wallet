@@ -13,16 +13,17 @@
 // goes through ONE Postgres function — exec_query — reached over Supabase's
 // REST API (PostgREST). exec_query takes the raw SQL text plus a JSON array
 // of parameters, substitutes the parameters in safely (using Postgres's own
-// quote_literal(), not string concatenation), and returns the resulting
-// rows as JSON. That keeps almost all of the SQL text in server.js
+// quote_literal(), in a single pass over the query — see the comment on
+// exec_query in schema.sql for why a single pass matters), and returns the
+// resulting rows as JSON. That keeps almost all of the SQL text in server.js
 // unchanged from the SQLite version — only `?` placeholders become `$1,
 // $2, ...`, which this file does automatically (see toPgPlaceholders).
 //
 // The exec_query function itself is SECURITY DEFINER, owned by the
-// database's postgres role, so it can read/write every table regardless of
-// what the calling API key's own role is allowed to touch directly — the
-// anon key used below is only ever used server-side (never sent to the
-// browser) specifically so it can be trusted with that.
+// database's postgres role, so it can read/write every table. That's why
+// it's granted ONLY to service_role: SUPABASE_KEY must be the project's
+// service_role key, never the public anon/publishable key (see README's
+// "How the database works").
 //
 // See supabase/schema.sql for the table definitions and the exec_query
 // function, both applied directly to the Supabase project via its
@@ -37,7 +38,40 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   );
 }
 
-const RPC_URL = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/exec_query`;
+const BASE_URL = SUPABASE_URL.replace(/\/$/, '');
+const RPC_URL = `${BASE_URL}/rest/v1/rpc/exec_query`;
+const DB_TIMEOUT_MS = 15000;
+const STORAGE_TIMEOUT_MS = 30000;
+
+// Supabase has two kinds of API key, and they must be sent differently:
+//   * legacy keys (anon / service_role) are JWTs ("eyJ..."): send them in
+//     both the apikey and Authorization: Bearer headers;
+//   * the newer opaque keys (sb_publishable_... / sb_secret_...) must go in
+//     the apikey header ONLY — Supabase rejects them in Authorization:
+//     Bearer ("Invalid JWT"), so sending them there breaks every request.
+const KEY_IS_JWT = /^eyJ[\w-]*\.[\w-]+\.[\w-]+$/.test(SUPABASE_KEY);
+function authHeaders() {
+  return KEY_IS_JWT ? { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } : { apikey: SUPABASE_KEY };
+}
+
+// Loudly flag the one misconfiguration that would take the app down after
+// schema.sql is re-run: using the PUBLIC key, which can no longer call
+// exec_query (and must never be able to).
+(function warnIfPublicKey() {
+  let role = null;
+  if (SUPABASE_KEY.startsWith('sb_publishable_')) role = 'anon';
+  else if (KEY_IS_JWT) {
+    try {
+      role = JSON.parse(Buffer.from(SUPABASE_KEY.split('.')[1], 'base64url').toString()).role || null;
+    } catch {}
+  }
+  if (role === 'anon') {
+    console.error(
+      'ERROR: SUPABASE_KEY is the public anon/publishable key. The database only accepts the service_role key ' +
+        '(Supabase dashboard → Project Settings → API Keys). See README "How the database works".'
+    );
+  }
+})();
 
 // Every real query in this app goes through here. query uses Postgres-style
 // $1, $2, ... placeholders (see toPgPlaceholders below) — params is a plain
@@ -47,12 +81,11 @@ async function rawQuery(query, params = []) {
   try {
     res = await fetch(RPC_URL, {
       method: 'POST',
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, params }),
+      // Without a timeout, a stalled connection would hang the request (and
+      // anything waiting on it) forever.
+      signal: AbortSignal.timeout(DB_TIMEOUT_MS),
     });
   } catch (networkErr) {
     throw new Error(`Could not reach the database: ${networkErr.message}`);
@@ -132,8 +165,61 @@ async function atomicTransfer(fromId, amount, toId, creditBusinessWallet) {
   return rows[0] ? rows[0].gyd_balance : null;
 }
 
+// ---------- Supabase Storage (business photos) ----------
+//
+// server.js has always called these for the business photo gallery, but
+// they were missing from this file — so every photo upload failed with
+// "db.storageUpload is not a function". Objects go into a public bucket
+// (see business-photos in schema.sql), so the returned URL works directly
+// in an <img> tag; writes and deletes need the service_role key.
+
+function objectUrl(bucket, objectPath) {
+  const encoded = String(objectPath).split('/').map(encodeURIComponent).join('/');
+  return `${BASE_URL}/storage/v1/object/${encodeURIComponent(bucket)}/${encoded}`;
+}
+
+// Uploads `body` (a Buffer) and returns its public URL. Throws on failure.
+async function storageUpload(bucket, objectPath, body, contentType) {
+  let res;
+  try {
+    res = await fetch(objectUrl(bucket, objectPath), {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': contentType, 'x-upsert': 'false' },
+      body,
+      signal: AbortSignal.timeout(STORAGE_TIMEOUT_MS),
+    });
+  } catch (networkErr) {
+    throw new Error(`Could not reach storage: ${networkErr.message}`);
+  }
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(`Storage upload failed (HTTP ${res.status})${detail && detail.message ? `: ${detail.message}` : ''}`);
+  }
+  const encoded = String(objectPath).split('/').map(encodeURIComponent).join('/');
+  return `${BASE_URL}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encoded}`;
+}
+
+// Deletes one object. An object that's already gone counts as success.
+async function storageDelete(bucket, objectPath) {
+  let res;
+  try {
+    res = await fetch(objectUrl(bucket, objectPath), {
+      method: 'DELETE',
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(STORAGE_TIMEOUT_MS),
+    });
+  } catch (networkErr) {
+    throw new Error(`Could not reach storage: ${networkErr.message}`);
+  }
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Storage delete failed (HTTP ${res.status})`);
+  }
+}
+
 module.exports = {
   prepare,
   raw: rawQuery,
   atomicTransfer,
+  storageUpload,
+  storageDelete,
 };

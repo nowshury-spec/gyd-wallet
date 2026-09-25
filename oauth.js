@@ -25,6 +25,14 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 // this is ever deployed somewhere else (a custom domain, a staging copy).
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://gyd-wallet.onrender.com').replace(/\/$/, '');
 
+// Errors thrown here carry messages meant for the person signing in, so
+// server.js may show them; anything else it replaces with a generic message.
+function userError(message) {
+  const err = new Error(message);
+  err.userFacing = true;
+  return err;
+}
+
 function googleEnabled() {
   return !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 }
@@ -83,10 +91,10 @@ async function googleProfileFromCode(code) {
     });
     tokenData = await tokenRes.json().catch(() => ({}));
   } catch (networkErr) {
-    throw new Error('Could not reach Google. Please try again.');
+    throw userError('Could not reach Google. Please try again.');
   }
   if (!tokenRes.ok || !tokenData.access_token) {
-    throw new Error(tokenData.error_description || 'Google did not complete sign-in.');
+    throw userError(tokenData.error_description || 'Google did not complete sign-in.');
   }
 
   const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -94,7 +102,7 @@ async function googleProfileFromCode(code) {
   });
   const profile = await profileRes.json().catch(() => ({}));
   if (!profileRes.ok || !profile.sub) {
-    throw new Error('Could not read your Google profile.');
+    throw userError('Could not read your Google profile.');
   }
 
   return {
@@ -119,26 +127,28 @@ async function facebookProfileFromCode(code) {
     tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${tokenParams.toString()}`);
     tokenData = await tokenRes.json().catch(() => ({}));
   } catch (networkErr) {
-    throw new Error('Could not reach Facebook. Please try again.');
+    throw userError('Could not reach Facebook. Please try again.');
   }
   if (!tokenRes.ok || !tokenData.access_token) {
-    throw new Error((tokenData.error && tokenData.error.message) || 'Facebook did not complete sign-in.');
+    throw userError((tokenData.error && tokenData.error.message) || 'Facebook did not complete sign-in.');
   }
 
   const profileParams = new URLSearchParams({ fields: 'id,name,email', access_token: tokenData.access_token });
   const profileRes = await fetch(`https://graph.facebook.com/me?${profileParams.toString()}`);
   const profile = await profileRes.json().catch(() => ({}));
   if (!profileRes.ok || !profile.id) {
-    throw new Error('Could not read your Facebook profile.');
+    throw userError('Could not read your Facebook profile.');
   }
 
   return {
     providerUserId: profile.id,
-    // Facebook only includes an email if the person has one on file with
-    // Facebook AND grants the permission — neither is guaranteed, so this
-    // can legitimately come back empty. server.js handles that the same
-    // way it already handles any account created without an email.
     email: profile.email ? profile.email.toLowerCase() : null,
+    // Unlike Google, Facebook's API gives no "this email is verified" flag,
+    // so the email is NOT treated as proof of owning that address:
+    // server.js won't use it to link into an existing GYD Wallet account
+    // (which would hand that account to whoever controls the Facebook
+    // login). A Facebook sign-in always gets its own account instead.
+    emailVerified: false,
     name: profile.name || null,
   };
 }

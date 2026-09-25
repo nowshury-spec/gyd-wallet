@@ -1,4 +1,5 @@
-// Test-only stand-ins for sms.js, dropshipping.js, oauth.js and ludo.js.
+// Test-only stand-ins for sms.js, dropshipping.js and oauth.js (the modules
+// that call third-party services).
 // harness.js writes each one out as its own module file.
 
 exports.sms = `
@@ -20,17 +21,9 @@ exports.oauth = `
 const decode = (code) => JSON.parse(Buffer.from(String(code), 'base64url').toString());
 module.exports = {
   googleEnabled: () => true,
-  facebookEnabled: () => false,
-  googleAuthUrl: (state) => '/fake-google?state=' + encodeURIComponent(state),
-  facebookAuthUrl: () => '',
+  facebookEnabled: () => true,
+  googleAuthUrl: (state) => (process.env.TEST_FAKE_PROVIDER_URL || '/fake-google') + '?state=' + encodeURIComponent(state),
+  facebookAuthUrl: (state) => '/fake-facebook?state=' + encodeURIComponent(state),
   googleProfileFromCode: async (code) => decode(code),
   facebookProfileFromCode: async (code) => decode(code),
-};`;
-
-exports.ludo = `
-module.exports = {
-  LUDO_COLOR_SETS: { 2: ['red', 'yellow'], 4: ['red', 'green', 'yellow', 'blue'] },
-  ludoLegalMoves: () => [],
-  ludoApplyMove: () => ({ captured: false, finished: false }),
-  ludoHasWon: () => false,
 };`;
