@@ -72,12 +72,17 @@
         <div class="staff-summary-num" id="summary-pending-cashouts">—</div>
         <div class="staff-summary-label">Pending cash-outs</div>
       </div>
+      <div class="staff-summary-card">
+        <div class="staff-summary-num" id="summary-pending-courier-applications">—</div>
+        <div class="staff-summary-label">Pending courier applications</div>
+      </div>
     </div>
 
     <nav class="staff-tabs">
       <button class="staff-tab active" data-staff-tab="tickets">Support</button>
       <button class="staff-tab" data-staff-tab="cashouts">Cash-outs</button>
       <button class="staff-tab" data-staff-tab="dropshipping">Dropshipping</button>
+      <button class="staff-tab" data-staff-tab="couriers">Couriers</button>
       <button class="staff-tab" data-staff-tab="employees">Employees</button>
       <button class="staff-tab hidden" id="tab-audit-log" data-staff-tab="audit">Audit log</button>
     </nav>
@@ -122,6 +127,18 @@
         manual step — do it once a shipment has actually landed at our warehouse. That's what unlocks the customer's
         pickup/delivery choice and (if email is configured) sends them a heads-up.</p>
         <div id="dropshipping-orders-list"><p class="muted">Loading…</p></div>
+      </section>
+
+      <section id="staff-panel-couriers" class="staff-panel hidden">
+        <div class="staff-panel-toolbar">
+          <button class="btn small staff-filter-btn active" data-couriers-status="pending">Pending</button>
+          <button class="btn small secondary staff-filter-btn" data-couriers-status="approved">Approved</button>
+          <button class="btn small secondary staff-filter-btn" data-couriers-status="rejected">Rejected</button>
+          <button class="btn small secondary staff-filter-btn" data-couriers-status="revoked">Revoked</button>
+        </div>
+        <p class="forgot-intro">Anyone who applies to become a courier lands here first — nothing about their account
+        changes until you approve them.</p>
+        <div id="couriers-list"><p class="muted">Loading…</p></div>
       </section>
 
       <section id="staff-panel-employees" class="staff-panel hidden">

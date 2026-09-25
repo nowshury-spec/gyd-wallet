@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_salt TEXT NOT NULL,
   is_business INTEGER NOT NULL DEFAULT 0,
   business_name TEXT,
-  gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
-  business_gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+  gyd_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+  business_gyd_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   -- Session-revocation control: every login token embeds the moment it was
   -- issued (see auth.js's `iat`). "Log out of all other devices"
@@ -60,16 +60,65 @@ CREATE TABLE IF NOT EXISTS users (
   sessions_invalidated_at TEXT
 );
 
--- A courier is a third role any existing account can opt into (same idea
+-- A courier is a third role any existing account can apply for (same idea
 -- as is_business/business_gyd_balance above, just for delivering
--- dropshipping orders instead of running a storefront) — see
--- POST /api/courier/opt-in. courier_gyd_balance holds delivery fees earned
--- from confirmed deliveries (see delivery_code on dropshipping_orders
--- below) until the courier moves them into their personal balance via
--- POST /api/courier/wallet/move-to-personal, same one-directional "owner's
--- draw" pattern as the business wallet.
+-- dropshipping orders instead of running a storefront). Unlike becoming a
+-- business, this ISN'T a self-serve flip — is_courier only ever gets set
+-- true by a staff member approving a courier_applications row below (see
+-- POST /api/staff/courier-applications/:id/approve); applying
+-- (POST /api/account/apply-courier) only ever creates that pending row.
+-- courier_gyd_balance holds delivery fees earned from confirmed deliveries
+-- (see delivery_code on dropshipping_orders below) until the courier moves
+-- them into their personal balance via POST /api/courier/wallet/move-to-personal,
+-- same one-directional "owner's draw" pattern as the business wallet.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_courier BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS courier_gyd_balance DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS courier_gyd_balance NUMERIC(14,2) NOT NULL DEFAULT 0;
+
+-- Whether this account has PROVEN it controls its email address: set when
+-- the account was created from a provider-verified Google/Facebook email,
+-- or when a password-reset code that was actually emailed to it gets
+-- redeemed (see password_resets.sent_via_email). A plain password signup
+-- doesn't verify its email, so it starts false. "Continue with Google" only
+-- links into an existing account whose email is verified — otherwise anyone
+-- could sign up with someone else's email first and then inherit that
+-- person's Google sign-in (see findOrCreateOAuthUser in server.js).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
+
+-- One row per courier application. A user can apply more than once over
+-- time (e.g. after a rejection), so this is its own table rather than a
+-- single status column on users — same reasoning as cashout_requests and
+-- support_tickets being their own queues rather than columns bolted onto
+-- users. 'pending' rows are what shows up in the staff portal's Couriers
+-- tab; 'approved' is what actually flips users.is_courier to true (see the
+-- comment above); 'rejected' just leaves a record — the user can apply
+-- again, which inserts a new row rather than reusing the rejected one, so
+-- the full history of attempts is kept.
+CREATE TABLE IF NOT EXISTS courier_applications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected' | 'revoked'
+  note TEXT, -- optional message from the applicant, shown to staff
+  staff_note TEXT, -- optional reason, set by staff on reject
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT -- staff_accounts.id of whoever approved/rejected it (plain text, same as cashout_requests.resolved_by — no FK, staff accounts aren't part of this migration's scope)
+);
+ALTER TABLE courier_applications ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_courier_applications_user ON courier_applications(user_id);
+CREATE INDEX IF NOT EXISTS idx_courier_applications_status ON courier_applications(status);
+-- At most ONE pending application per user, enforced by the database: two
+-- quick taps on "Apply" used to race past the app's own "already pending?"
+-- check and queue duplicates. Any duplicates that already exist are closed
+-- first (keeping each user's earliest), so this index can be created.
+UPDATE courier_applications a
+SET status = 'rejected', staff_note = COALESCE(a.staff_note, 'Duplicate application (closed automatically)'),
+    resolved_at = COALESCE(a.resolved_at, a.created_at)
+WHERE a.status = 'pending' AND EXISTS (
+  SELECT 1 FROM courier_applications b
+  WHERE b.user_id = a.user_id AND b.status = 'pending' AND (b.created_at, b.id) < (a.created_at, a.id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_courier_applications_one_pending
+  ON courier_applications(user_id) WHERE status = 'pending';
 
 -- Links a users row to a "Continue with Google/Facebook" identity — see
 -- oauth.js and the /api/auth/google/* + /api/auth/facebook/* routes in
@@ -89,12 +138,19 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
   UNIQUE (provider, provider_user_id)
 );
 
+-- Backfill users.email_verified (see above): accounts whose email came from
+-- (and matches) a linked Google/Facebook identity were verified by it.
+UPDATE users u SET email_verified = true
+WHERE email_verified = false AND u.email IS NOT NULL AND EXISTS (
+  SELECT 1 FROM oauth_identities o WHERE o.user_id = u.id AND LOWER(o.email) = LOWER(u.email)
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
   from_user TEXT,
   to_user TEXT,
-  amount DOUBLE PRECISION NOT NULL,
+  amount NUMERIC(14,2) NOT NULL,
   currency TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'completed',
   note TEXT,
@@ -104,7 +160,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS cashout_requests (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  amount_gyd DOUBLE PRECISION NOT NULL,
+  amount_gyd NUMERIC(14,2) NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | rejected
   created_at TEXT NOT NULL,
   -- Who on staff (staff_accounts.id) resolved this, and when — see the
@@ -136,7 +192,7 @@ CREATE TABLE IF NOT EXISTS charge_requests (
   id TEXT PRIMARY KEY,
   business_id TEXT NOT NULL,
   customer_id TEXT NOT NULL,
-  amount DOUBLE PRECISION NOT NULL,
+  amount NUMERIC(14,2) NOT NULL,
   memo TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL,
@@ -164,14 +220,20 @@ CREATE TABLE IF NOT EXISTS remittances (
   from_user TEXT NOT NULL,
   recipient_name TEXT NOT NULL,
   recipient_phone TEXT NOT NULL,
-  amount DOUBLE PRECISION NOT NULL,
-  fee DOUBLE PRECISION NOT NULL,
+  amount NUMERIC(14,2) NOT NULL,
+  fee NUMERIC(14,2) NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | cancelled
   claimed_by_user_id TEXT,
   created_at TEXT NOT NULL,
   completed_at TEXT,
   cancelled_at TEXT
 );
+-- How many pickup attempts have been made against this transfer's code
+-- (right or wrong name). After MAX_REMIT_CLAIM_ATTEMPTS in server.js the
+-- transfer can no longer be picked up — the sender cancels it (full refund)
+-- and resends — so someone who learns or guesses a reference code can't
+-- just keep trying names until one matches.
+ALTER TABLE remittances ADD COLUMN IF NOT EXISTS claim_attempts INTEGER NOT NULL DEFAULT 0;
 
 -- A business's public "storefront" page: category + free-text keywords make
 -- it findable in the directory search below, and the tagline/description/
@@ -194,7 +256,7 @@ CREATE TABLE IF NOT EXISTS business_profiles (
   phone TEXT,
   location TEXT,
   offers_delivery INTEGER NOT NULL DEFAULT 0,
-  delivery_fee DOUBLE PRECISION NOT NULL DEFAULT 0,
+  delivery_fee NUMERIC(14,2) NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   -- Used to be a staff review gate (pending | approved | rejected) that held
   -- a brand new business page out of the directory until staff approved it.
@@ -216,7 +278,7 @@ CREATE TABLE IF NOT EXISTS business_products (
   id TEXT PRIMARY KEY,
   business_id TEXT NOT NULL,
   name TEXT NOT NULL,
-  price DOUBLE PRECISION NOT NULL,
+  price NUMERIC(14,2) NOT NULL,
   description TEXT,
   image_data TEXT,
   created_at TEXT NOT NULL
@@ -231,7 +293,7 @@ CREATE TABLE IF NOT EXISTS money_requests (
   id TEXT PRIMARY KEY,
   from_user TEXT NOT NULL,
   to_user TEXT NOT NULL,
-  amount DOUBLE PRECISION NOT NULL,
+  amount NUMERIC(14,2) NOT NULL,
   note TEXT,
   status TEXT NOT NULL DEFAULT 'pending', -- pending | paid | declined | cancelled
   created_at TEXT NOT NULL,
@@ -269,7 +331,7 @@ CREATE TABLE IF NOT EXISTS business_events (
   description TEXT,
   location TEXT,
   event_date TEXT NOT NULL,
-  ticket_price DOUBLE PRECISION NOT NULL,
+  ticket_price NUMERIC(14,2) NOT NULL,
   capacity INTEGER,
   status TEXT NOT NULL DEFAULT 'active', -- active | cancelled
   created_at TEXT NOT NULL
@@ -288,9 +350,9 @@ CREATE TABLE IF NOT EXISTS event_tickets (
   event_id TEXT NOT NULL,
   buyer_user_id TEXT NOT NULL,
   ticket_code TEXT UNIQUE NOT NULL,
-  price_paid DOUBLE PRECISION NOT NULL,
-  platform_fee DOUBLE PRECISION NOT NULL,
-  status TEXT NOT NULL DEFAULT 'valid', -- valid | checked_in
+  price_paid NUMERIC(14,2) NOT NULL,
+  platform_fee NUMERIC(14,2) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'valid', -- valid | checked_in | refunded (event cancelled)
   purchased_at TEXT NOT NULL,
   checked_in_at TEXT
 );
@@ -356,6 +418,10 @@ CREATE TABLE IF NOT EXISTS password_resets (
   -- server.js locks the code out after MAX_RESET_CODE_ATTEMPTS misses.
   attempts INTEGER NOT NULL DEFAULT 0
 );
+-- True when this code was emailed (rather than shown on screen in
+-- SHOW_CODES_ON_SCREEN demo mode) — so redeeming it proves inbox control
+-- and marks users.email_verified.
+ALTER TABLE password_resets ADD COLUMN IF NOT EXISTS sent_via_email BOOLEAN NOT NULL DEFAULT false;
 
 -- Employee/staff logins for the internal staff portal (public/staff.html) —
 -- completely separate from the `users` table above (customers and
@@ -530,11 +596,12 @@ ALTER TABLE business_photos ENABLE ROW LEVEL SECURITY;
 
 -- The bucket backing business_photos above, made public for reads (so a
 -- photo's URL just works in an <img> tag with no auth), with write access
--- scoped to it via storage.objects RLS policies. Granted to the anon role
--- — the same key db.js uses for every query in this app via exec_query —
--- which is safe for the same reason that's safe there: this key is never
--- sent to a browser, and every call that reaches these endpoints already
--- passes through this app's own requireBusiness auth check first.
+-- scoped to it via storage.objects RLS policies. Writes and deletes are
+-- granted ONLY to service_role — the role behind the secret key db.js uses
+-- (see exec_query below). They used to be granted to anon, but Supabase's
+-- anon/publishable key is designed to be public, so anyone holding it could
+-- upload to or wipe this bucket directly. Reads stay open to anon: the
+-- bucket is public so photo URLs work in a plain <img> tag anyway.
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('business-photos', 'business-photos', true)
 ON CONFLICT (id) DO NOTHING;
@@ -548,13 +615,13 @@ CREATE POLICY "gyd_wallet_business_photos_read"
 DROP POLICY IF EXISTS "gyd_wallet_business_photos_write" ON storage.objects;
 CREATE POLICY "gyd_wallet_business_photos_write"
   ON storage.objects FOR INSERT
-  TO anon
+  TO service_role
   WITH CHECK (bucket_id = 'business-photos');
 
 DROP POLICY IF EXISTS "gyd_wallet_business_photos_delete" ON storage.objects;
 CREATE POLICY "gyd_wallet_business_photos_delete"
   ON storage.objects FOR DELETE
-  TO anon
+  TO service_role
   USING (bucket_id = 'business-photos');
 
 -- A pickup order's hold-until-pickup escrow (see server.js's "pickup orders"
@@ -570,7 +637,7 @@ CREATE TABLE IF NOT EXISTS business_orders (
   id TEXT PRIMARY KEY,
   business_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   customer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  amount DOUBLE PRECISION NOT NULL,
+  amount NUMERIC(14,2) NOT NULL,
   pickup_code TEXT UNIQUE NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | cancelled
   release_reason TEXT,
@@ -609,7 +676,7 @@ CREATE TABLE IF NOT EXISTS dropshipping_products (
   cj_product_id TEXT UNIQUE NOT NULL,     -- CJdropshipping's own product id
   name TEXT NOT NULL,
   description TEXT,
-  price_usd DOUBLE PRECISION NOT NULL,    -- CJ's price, in USD
+  price_usd NUMERIC(14,2) NOT NULL,    -- CJ's price, in USD
   image_url TEXT,
   category TEXT,
   in_stock BOOLEAN NOT NULL DEFAULT true,
@@ -624,7 +691,7 @@ ALTER TABLE dropshipping_products ENABLE ROW LEVEL SECURITY;
 -- never a second, possibly-different conversion done at pay time. Only
 -- moves the next time this product is re-synced. See USD_TO_GYD_RATE in
 -- server.js.
-ALTER TABLE dropshipping_products ADD COLUMN IF NOT EXISTS price_gyd DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE dropshipping_products ADD COLUMN IF NOT EXISTS price_gyd NUMERIC(14,2) NOT NULL DEFAULT 0;
 -- CJ's package weight for this product, in kilograms — the cart's total
 -- weight at checkout decides whether standard or oversized-cargo delivery
 -- pricing applies (see DROPSHIP_OVERSIZE_WEIGHT_THRESHOLD_KG in server.js).
@@ -649,11 +716,11 @@ CREATE TABLE IF NOT EXISTS dropshipping_orders (
   -- cancelled: checkout failed after charging, and was refunded.
   status TEXT NOT NULL DEFAULT 'pending',
   items TEXT NOT NULL,                    -- [{cjProductId, name, priceUsd, quantity}] as JSON
-  total_usd DOUBLE PRECISION NOT NULL,
-  total_gyd DOUBLE PRECISION NOT NULL,    -- items only, before the platform fee
-  platform_fee_gyd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_usd NUMERIC(14,2) NOT NULL,
+  total_gyd NUMERIC(14,2) NOT NULL,    -- items only, before the platform fee
+  platform_fee_gyd NUMERIC(14,2) NOT NULL DEFAULT 0,
   usd_to_gyd_rate DOUBLE PRECISION NOT NULL, -- rate used at checkout time
-  amount_charged_gyd DOUBLE PRECISION NOT NULL, -- total_gyd + platform_fee_gyd + delivery_fee_gyd — what left the buyer's balance
+  amount_charged_gyd NUMERIC(14,2) NOT NULL, -- total_gyd + platform_fee_gyd + delivery_fee_gyd — what left the buyer's balance
   shipping_address TEXT NOT NULL,         -- {name, phone, address, city, country} as JSON
   tracking_number TEXT,
   created_at TEXT NOT NULL,
@@ -672,7 +739,7 @@ CREATE INDEX IF NOT EXISTS idx_dropshipping_orders_user ON dropshipping_orders(u
 -- `fulfillment` below) — it's never charged at checkout, since nobody
 -- knows yet whether they'll want delivery or to pick the order up
 -- themselves; that choice only happens once the order has actually landed.
-ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS delivery_fee_gyd DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS delivery_fee_gyd NUMERIC(14,2) NOT NULL DEFAULT 0;
 
 -- Frozen at checkout time (summed from each item's weight × quantity) so
 -- the pickup-vs-delivery choice made later — possibly weeks later, once
@@ -720,6 +787,216 @@ ALTER TABLE dropshipping_orders ADD COLUMN IF NOT EXISTS claimed_at TEXT;
 CREATE INDEX IF NOT EXISTS idx_dropshipping_orders_courier ON dropshipping_orders(courier_id);
 
 -- ---------------------------------------------------------------------
+-- Money is stored as exact decimals (NUMERIC(14,2), i.e. to the cent), not
+-- floating point. It used to be DOUBLE PRECISION, where amounts like 0.1 +
+-- 0.2 don't add up exactly and balances slowly accumulate rounding error;
+-- server.js also rejects amounts with fractions of a cent (positiveAmount).
+-- These ALTERs convert an existing project in place, rounding any stored
+-- value to the nearest cent; on a fresh project they're no-ops. (Weights and
+-- the USD→GYD exchange rate aren't money and stay floating point.)
+-- ---------------------------------------------------------------------
+ALTER TABLE users ALTER COLUMN gyd_balance TYPE NUMERIC(14,2) USING round(gyd_balance::numeric, 2);
+ALTER TABLE users ALTER COLUMN business_gyd_balance TYPE NUMERIC(14,2) USING round(business_gyd_balance::numeric, 2);
+ALTER TABLE users ALTER COLUMN courier_gyd_balance TYPE NUMERIC(14,2) USING round(courier_gyd_balance::numeric, 2);
+ALTER TABLE transactions ALTER COLUMN amount TYPE NUMERIC(14,2) USING round(amount::numeric, 2);
+ALTER TABLE cashout_requests ALTER COLUMN amount_gyd TYPE NUMERIC(14,2) USING round(amount_gyd::numeric, 2);
+ALTER TABLE charge_requests ALTER COLUMN amount TYPE NUMERIC(14,2) USING round(amount::numeric, 2);
+ALTER TABLE remittances ALTER COLUMN amount TYPE NUMERIC(14,2) USING round(amount::numeric, 2);
+ALTER TABLE remittances ALTER COLUMN fee TYPE NUMERIC(14,2) USING round(fee::numeric, 2);
+ALTER TABLE business_profiles ALTER COLUMN delivery_fee TYPE NUMERIC(14,2) USING round(delivery_fee::numeric, 2);
+ALTER TABLE business_products ALTER COLUMN price TYPE NUMERIC(14,2) USING round(price::numeric, 2);
+ALTER TABLE money_requests ALTER COLUMN amount TYPE NUMERIC(14,2) USING round(amount::numeric, 2);
+ALTER TABLE business_events ALTER COLUMN ticket_price TYPE NUMERIC(14,2) USING round(ticket_price::numeric, 2);
+ALTER TABLE event_tickets ALTER COLUMN price_paid TYPE NUMERIC(14,2) USING round(price_paid::numeric, 2);
+ALTER TABLE event_tickets ALTER COLUMN platform_fee TYPE NUMERIC(14,2) USING round(platform_fee::numeric, 2);
+ALTER TABLE business_orders ALTER COLUMN amount TYPE NUMERIC(14,2) USING round(amount::numeric, 2);
+ALTER TABLE dropshipping_products ALTER COLUMN price_usd TYPE NUMERIC(14,2) USING round(price_usd::numeric, 2);
+ALTER TABLE dropshipping_products ALTER COLUMN price_gyd TYPE NUMERIC(14,2) USING round(price_gyd::numeric, 2);
+ALTER TABLE dropshipping_orders ALTER COLUMN total_usd TYPE NUMERIC(14,2) USING round(total_usd::numeric, 2);
+ALTER TABLE dropshipping_orders ALTER COLUMN total_gyd TYPE NUMERIC(14,2) USING round(total_gyd::numeric, 2);
+ALTER TABLE dropshipping_orders ALTER COLUMN platform_fee_gyd TYPE NUMERIC(14,2) USING round(platform_fee_gyd::numeric, 2);
+ALTER TABLE dropshipping_orders ALTER COLUMN amount_charged_gyd TYPE NUMERIC(14,2) USING round(amount_charged_gyd::numeric, 2);
+ALTER TABLE dropshipping_orders ALTER COLUMN delivery_fee_gyd TYPE NUMERIC(14,2) USING round(delivery_fee_gyd::numeric, 2);
+
+-- Rate-limit counters (see rateLimitPeek/rateLimitRecord in server.js).
+-- Kept in the database rather than server memory so limits survive deploys
+-- and restarts and are shared by every running instance. reset_at is a Unix
+-- time in milliseconds; expired rows are ignored and periodically deleted.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at BIGINT NOT NULL
+);
+ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------
+-- purchase_event_tickets: buy tickets as ONE transaction. Locks the event
+-- row first (FOR UPDATE), so concurrent purchases of the same event run one
+-- at a time; the count of tickets already sold is then read AFTER the lock,
+-- so it includes tickets a just-finished purchase inserted. The previous
+-- version checked capacity and inserted the tickets in separate statements,
+-- so two buyers could both be sold the last seat. Nothing is written until
+-- every check has passed, and the tickets are inserted in the same
+-- transaction as the payment — an error anywhere (e.g. a ticket-code
+-- collision) rolls the whole purchase back.
+-- Returns {ok: true, balance, total, fee} or {error: <reason>, ...}.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.purchase_event_tickets(
+  p_event_id text, p_buyer_id text, p_quantity int, p_codes jsonb, p_fee_rate numeric, p_now text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  ev business_events%ROWTYPE;
+  sold int;
+  fee_each numeric;
+  total numeric;
+  total_fee numeric;
+  new_balance numeric;
+BEGIN
+  IF p_quantity < 1 OR jsonb_array_length(p_codes) <> p_quantity THEN
+    RETURN jsonb_build_object('error', 'bad_request');
+  END IF;
+  SELECT * INTO ev FROM business_events WHERE id = p_event_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'not_found'); END IF;
+  IF ev.status <> 'active' THEN RETURN jsonb_build_object('error', 'not_active'); END IF;
+  IF ev.business_id = p_buyer_id THEN RETURN jsonb_build_object('error', 'own_event'); END IF;
+
+  SELECT count(*) INTO sold FROM event_tickets WHERE event_id = p_event_id AND status <> 'refunded';
+  IF ev.capacity IS NOT NULL AND sold + p_quantity > ev.capacity THEN
+    RETURN jsonb_build_object('error', 'sold_out', 'remaining', GREATEST(0, ev.capacity - sold));
+  END IF;
+
+  fee_each := round(ev.ticket_price * p_fee_rate, 2);
+  total := round(ev.ticket_price * p_quantity, 2);
+  total_fee := round(fee_each * p_quantity, 2);
+
+  UPDATE users SET gyd_balance = gyd_balance - total
+  WHERE id = p_buyer_id AND gyd_balance >= total
+  RETURNING gyd_balance INTO new_balance;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'insufficient_funds', 'total', total); END IF;
+
+  UPDATE users SET business_gyd_balance = business_gyd_balance + (total - total_fee) WHERE id = ev.business_id;
+
+  INSERT INTO event_tickets (id, event_id, buyer_user_id, ticket_code, price_paid, platform_fee, status, purchased_at)
+  SELECT gen_random_uuid()::text, p_event_id, p_buyer_id, c, ev.ticket_price, fee_each, 'valid', p_now
+  FROM jsonb_array_elements_text(p_codes) AS c;
+
+  RETURN jsonb_build_object('ok', true, 'balance', new_balance, 'total', total, 'fee', total_fee);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.purchase_event_tickets(text, text, int, jsonb, numeric, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------
+-- cancel_event_with_refunds: cancelling an event now refunds every ticket
+-- holder in full, as ONE transaction. (Before, cancelling just flipped the
+-- event's status: buyers kept worthless tickets and the business kept the
+-- money.) Each buyer gets back exactly what they paid; the business wallet
+-- gives back what it received for those tickets (price minus the platform
+-- fee), and the platform absorbs its own fee. If the business wallet
+-- doesn't hold enough to cover that, nothing happens and the event stays
+-- active — the business has to contact support rather than leave buyers
+-- unpaid. Shares the event-row lock with purchase_event_tickets, so a sale
+-- can't slip in between the refunds and the status change.
+-- Returns {ok: true, refunded_tickets, refunded_total} or {error: <reason>, ...}.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.cancel_event_with_refunds(p_event_id text, p_business_id text, p_now text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  ev business_events%ROWTYPE;
+  n_tickets int;
+  gross numeric;
+  net numeric;
+BEGIN
+  SELECT * INTO ev FROM business_events WHERE id = p_event_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'not_found'); END IF;
+  IF ev.business_id <> p_business_id THEN RETURN jsonb_build_object('error', 'forbidden'); END IF;
+  IF ev.status = 'cancelled' THEN RETURN jsonb_build_object('error', 'already_cancelled'); END IF;
+
+  SELECT count(*), COALESCE(sum(price_paid), 0), COALESCE(sum(price_paid - platform_fee), 0)
+  INTO n_tickets, gross, net
+  FROM event_tickets WHERE event_id = p_event_id AND status <> 'refunded';
+
+  IF net > 0 THEN
+    UPDATE users SET business_gyd_balance = business_gyd_balance - net
+    WHERE id = ev.business_id AND business_gyd_balance >= net;
+    IF NOT FOUND THEN
+      RETURN jsonb_build_object('error', 'insufficient_business_funds', 'needed', net);
+    END IF;
+  END IF;
+
+  WITH per_buyer AS (
+    SELECT buyer_user_id, sum(price_paid) AS refund
+    FROM event_tickets WHERE event_id = p_event_id AND status <> 'refunded'
+    GROUP BY buyer_user_id
+  ), credited AS (
+    UPDATE users u SET gyd_balance = u.gyd_balance + pb.refund
+    FROM per_buyer pb WHERE u.id = pb.buyer_user_id
+    RETURNING u.id
+  )
+  INSERT INTO transactions (id, type, from_user, to_user, amount, currency, status, note, created_at)
+  SELECT gen_random_uuid()::text, 'event_ticket_refund', ev.business_id, pb.buyer_user_id, pb.refund, 'GYD', 'completed',
+         'Refund — "' || ev.title || '" was cancelled', p_now
+  FROM per_buyer pb;
+
+  UPDATE event_tickets SET status = 'refunded' WHERE event_id = p_event_id AND status <> 'refunded';
+  UPDATE business_events SET status = 'cancelled' WHERE id = p_event_id;
+
+  RETURN jsonb_build_object('ok', true, 'refunded_tickets', n_tickets, 'refunded_total', gross);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.cancel_event_with_refunds(text, text, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------
+-- revoke_courier: take courier access away again (there was previously no
+-- way to undo an approval). As ONE transaction it
+--   * hands any delivery the courier had claimed but not delivered back to
+--     the open board, so the customer's order isn't stuck with them;
+--   * moves whatever is in their courier wallet into their personal
+--     balance — those are fees they already earned, and once is_courier is
+--     false they could no longer reach that wallet themselves;
+--   * turns is_courier off and marks their approved application 'revoked'.
+-- Returns {ok: true, swept, released} or {error: 'not_a_courier'}.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.revoke_courier(p_user_id text, p_staff_id text, p_reason text, p_now text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  swept numeric;
+  released int;
+BEGIN
+  SELECT courier_gyd_balance INTO swept FROM users WHERE id = p_user_id AND is_courier FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'not_a_courier'); END IF;
+
+  UPDATE dropshipping_orders SET courier_id = NULL, status = 'awaiting_courier', claimed_at = NULL
+  WHERE courier_id = p_user_id AND status = 'out_for_delivery';
+  GET DIAGNOSTICS released = ROW_COUNT;
+
+  UPDATE users SET is_courier = false, gyd_balance = gyd_balance + courier_gyd_balance, courier_gyd_balance = 0
+  WHERE id = p_user_id;
+
+  IF swept > 0 THEN
+    INSERT INTO transactions (id, type, from_user, to_user, amount, currency, status, note, created_at)
+    VALUES (gen_random_uuid()::text, 'courier_wallet_transfer', NULL, p_user_id, swept, 'GYD', 'completed',
+            'Courier access ended — courier wallet moved to personal wallet', p_now);
+  END IF;
+
+  UPDATE courier_applications SET status = 'revoked', resolved_at = p_now, resolved_by = p_staff_id,
+         staff_note = NULLIF(p_reason, '')
+  WHERE user_id = p_user_id AND status = 'approved';
+
+  RETURN jsonb_build_object('ok', true, 'swept', swept, 'released', released);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter
 -- placeholders (db.js converts server.js's SQLite-style `?` placeholders
@@ -731,12 +1008,17 @@ CREATE INDEX IF NOT EXISTS idx_dropshipping_orders_courier ON dropshipping_order
 -- It's SECURITY DEFINER — it always runs with the privileges of whoever
 -- owns it (the account this file is run as, typically the project's
 -- built-in postgres role), regardless of which API key called it. That's
--- what lets the app's anon/publishable key both read AND write every
--- table below even though that key's own database role has no direct
--- grants on them — see the GRANT at the bottom, and README.md's "How the
--- database works" for why that's an intentional, contained trade-off
--- (the anon key here is used only server-side, from db.js, and must never
--- be sent to a browser).
+-- what lets the app's key both read AND write every table below even
+-- though that key's own database role has no direct grants on them.
+--
+-- Because it runs arbitrary SQL with the owner's privileges, it is granted
+-- ONLY to service_role — the role behind the project's SECRET key
+-- (sb_secret_... / the legacy service_role key), which must be what
+-- SUPABASE_KEY is set to. It used to be granted to anon too, and the README
+-- said to use the anon/publishable key; but Supabase designs that key to
+-- be public, so anyone who got hold of it could call exec_query directly
+-- and read or rewrite the entire database. See the REVOKE at the bottom,
+-- which also strips that old grant from an already-deployed project.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.exec_query(query text, params jsonb DEFAULT '[]'::jsonb)
 RETURNS jsonb
@@ -745,31 +1027,61 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  i int;
   n int;
   elem jsonb;
-  lit text;
-  final_query text := query;
+  tok text;
+  pidx int;
+  cursor_pos int := 1;
+  start_pos int;
+  end_pos int;
+  final_query text := '';
   rec RECORD;
   rows_arr jsonb := '[]'::jsonb;
   produces_rows boolean;
 BEGIN
   n := jsonb_array_length(params);
-  -- Substitute highest-numbered placeholder first so replacing $1 doesn't
-  -- also clobber the "$1" inside "$10", "$11", etc.
-  FOR i IN REVERSE n..1 LOOP
-    elem := params -> (i-1);
-    IF elem IS NULL OR jsonb_typeof(elem) = 'null' THEN
-      lit := 'NULL';
-    ELSIF jsonb_typeof(elem) = 'number' THEN
-      lit := elem::text;
-    ELSIF jsonb_typeof(elem) = 'boolean' THEN
-      lit := elem::text;
-    ELSE
-      lit := quote_literal(elem #>> '{}');
+
+  -- Replace $1, $2, ... with their literal values in a SINGLE left-to-right
+  -- pass. This is deliberately NOT a regexp_replace over the whole string,
+  -- which the earlier version did and which was injectable:
+  --   * A global regexp_replace re-scans the ENTIRE (growing) result on each
+  --     placeholder, so a value that itself contained the text "$2" would be
+  --     re-expanded on the $2 pass. Every value was quoted, but an
+  --     attacker-controlled value (a username, memo, business name, ...)
+  --     could smuggle another placeholder's expansion into an UNquoted spot,
+  --     concatenating one column's contents into another and exfiltrating or
+  --     overwriting arbitrary rows.
+  --   * regexp_replace's replacement string also interprets \1..\9 / \& as
+  --     backreferences, so a value containing a backslash-digit could inject.
+  -- Here we only ever read from the ORIGINAL `query`: copy the text between
+  -- placeholders verbatim, then append a safely-built literal token. The
+  -- output buffer is never re-parsed for placeholders, so no value can ever
+  -- introduce a new one. Numbers/booleans are emitted unquoted (their jsonb
+  -- lexical form is already safe); everything else goes through quote_literal
+  -- (NULL handled explicitly), preserving the exact quoting and type
+  -- coercion the rest of the app already relies on.
+  LOOP
+    start_pos := regexp_instr(query, '\$\d+', cursor_pos);
+    EXIT WHEN start_pos = 0;
+    end_pos := regexp_instr(query, '\$\d+', cursor_pos, 1, 1); -- position just past the match
+    pidx := substring(query FROM start_pos + 1 FOR end_pos - start_pos - 1)::int;
+    IF pidx < 1 OR pidx > n THEN
+      RAISE EXCEPTION 'parameter $% is out of range (got % params)', pidx, n;
     END IF;
-    final_query := regexp_replace(final_query, '\$' || i::text || '(?!\d)', lit, 'g');
+    elem := params -> (pidx - 1);
+    IF elem IS NULL OR jsonb_typeof(elem) = 'null' THEN
+      tok := 'NULL';
+    ELSIF jsonb_typeof(elem) = 'number' THEN
+      tok := elem::text;
+    ELSIF jsonb_typeof(elem) = 'boolean' THEN
+      tok := elem::text;
+    ELSE
+      tok := quote_literal(elem #>> '{}');
+    END IF;
+    final_query := final_query || substring(query FROM cursor_pos FOR start_pos - cursor_pos) || tok;
+    cursor_pos := end_pos;
   END LOOP;
+  final_query := final_query || substring(query FROM cursor_pos);
 
   -- A plain write with no RETURNING (e.g. a bare UPDATE) produces no result
   -- set at all — trying to iterate it would error — so it's just executed
@@ -796,5 +1108,10 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- IMPORTANT when upgrading an existing deployment: switch SUPABASE_KEY to
+-- the secret key BEFORE re-running this file, or the running app loses
+-- database access the moment the REVOKE below executes. See the upgrade
+-- order in README.md ("Deployment settings added in the security update").
 REVOKE ALL ON FUNCTION public.exec_query(text, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.exec_query(text, jsonb) TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exec_query(text, jsonb) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exec_query(text, jsonb) TO service_role;

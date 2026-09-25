@@ -31,6 +31,26 @@
     return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // Escape a value before interpolating it into an innerHTML template. This
+  // app renders plenty of data that OTHER users control — usernames and
+  // $paytags, business names/taglines/descriptions, product names, review
+  // and tip text, chat messages, GYD Direct recipient names — so any one of
+  // those going in unescaped is a stored-XSS vector against whoever views
+  // it. The page CSP (script-src 'self') blocks injected <script> and inline
+  // event handlers from actually executing, but we escape at every HTML sink
+  // regardless: it also stops plain HTML injection (defacement, spoofed
+  // controls) and keeps the app safe if the CSP is ever relaxed. Use this
+  // for HTML contexts only — never for a value going into a JS string, URL,
+  // or attribute that needs its own encoding.
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function timeAgo(iso) {
     const diff = Date.now() - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
@@ -201,8 +221,8 @@
       // Real email delivery (see email.js) skips the on-screen code
       // entirely — data.sent means it's on its way to the inbox instead.
       document.getElementById('reset-code-display').innerHTML = data.sent
-        ? `We've emailed a reset code to <strong style="font-size:16px; letter-spacing:normal;">${email}</strong>. It expires in ${data.expiresInMinutes} minutes.`
-        : `Since GYD Wallet doesn't send real emails yet, here's your simulated reset code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+        ? `If an account uses <strong style="font-size:16px; letter-spacing:normal;">${esc(email)}</strong>, we've emailed it a reset code. It expires in ${esc(data.expiresInMinutes)} minutes.`
+        : `Demo mode — this server shows reset codes on screen instead of emailing them:<strong>${esc(data.code)}</strong>It expires in ${esc(data.expiresInMinutes)} minutes.`;
       document.getElementById('reset-code').value = '';
       document.getElementById('reset-new-password').value = '';
       document.getElementById('reset-error').textContent = '';
@@ -248,8 +268,8 @@
     try {
       const data = await api('/api/auth/forgot-username', 'POST', { email });
       document.getElementById('username-result-display').innerHTML = data.sent
-        ? `We've emailed your username to <strong class="username-value">${email}</strong>.`
-        : `Here's the username on that account:<strong class="username-value">${data.username}</strong>`;
+        ? `If an account uses <strong class="username-value">${esc(email)}</strong>, we've emailed its username there.`
+        : `Here's the username on that account:<strong class="username-value">${esc(data.username)}</strong>`;
       switchAuthTab('username-result');
     } catch (err) {
       errBox.textContent = err.message;
@@ -739,7 +759,7 @@
     tbody.innerHTML = '';
     for (const u of data.users) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>$${u.paytag}</td><td>${u.username}</td><td class="muted">${u.isBusiness ? `Business · ${u.businessName}` : 'Personal'}</td>`;
+      tr.innerHTML = `<td>$${esc(u.paytag)}</td><td>${esc(u.username)}</td><td class="muted">${u.isBusiness ? `Business · ${esc(u.businessName)}` : 'Personal'}</td>`;
       tr.style.cursor = 'pointer';
       tr.onclick = () => {
         document.getElementById('pay-to').value = u.paytag ? `$${u.paytag}` : u.username;
@@ -779,7 +799,7 @@
         row.className = 'remit-list-row';
         const label = document.createElement('div');
         label.innerHTML = `<div><strong>$${r.fromPaytag}</strong> wants GYD ${fmt(r.amount)}</div>${
-          r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${r.note}</div>` : ''
+          r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${esc(r.note)}</div>` : ''
         }`;
         row.appendChild(label);
         const btnGroup = document.createElement('div');
@@ -812,7 +832,7 @@
         const pillClass = r.status === 'paid' ? 'completed' : r.status === 'pending' ? 'pending' : 'declined';
         const label = document.createElement('div');
         label.innerHTML = `<div><strong>$${r.toPaytag}</strong> · GYD ${fmt(r.amount)} <span class="pill ${pillClass}">${requestStatusLabel(r.status)}</span></div>${
-          r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${r.note}</div>` : ''
+          r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${esc(r.note)}</div>` : ''
         }`;
         row.appendChild(label);
         if (r.status === 'pending') {
@@ -1106,9 +1126,9 @@
           ? `<button class="btn small" data-approve="${r.id}">Approve</button> <button class="btn secondary small" data-decline="${r.id}">Decline</button>`
           : '';
       tr.innerHTML = `
-        <td>${r.business_name || r.business_username}</td>
+        <td>${esc(r.business_name || r.business_username)}</td>
         <td>${fmt(r.amount)}</td>
-        <td class="muted">${r.memo || '—'}</td>
+        <td class="muted">${esc(r.memo || '—')}</td>
         <td><span class="pill ${r.status}">${r.status}</span></td>
         <td>${actionCell}</td>
       `;
@@ -1132,7 +1152,7 @@
         tr.innerHTML = `
           <td>${r.customer_username}</td>
           <td>${fmt(r.amount)}</td>
-          <td class="muted">${r.memo || '—'}</td>
+          <td class="muted">${esc(r.memo || '—')}</td>
           <td><span class="pill ${r.status}">${r.status}</span></td>
         `;
         sentBody.appendChild(tr);
@@ -1541,7 +1561,7 @@
       const data = await api('/api/business/products');
       renderMyProducts(data.products);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -1556,10 +1576,10 @@
       const row = document.createElement('div');
       row.className = 'product-row';
       row.innerHTML = `
-        ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
+        ${p.imageUrl ? `<img class="product-thumb" src="${esc(p.imageUrl)}" alt="${esc(p.name)}" />` : ''}
         <div class="product-info">
-          <div class="product-name">${p.name}</div>
-          ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
+          <div class="product-name">${esc(p.name)}</div>
+          ${p.description ? `<div class="product-description">${esc(p.description)}</div>` : ''}
         </div>
         <div style="display:flex; align-items:center; gap:10px;">
           <span class="product-price">GYD ${fmt(p.price)}</span>
@@ -1605,7 +1625,12 @@
 
   function fmtEventDate(iso) {
     const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
+    // An event's date is free text the business types (the server doesn't
+    // constrain its format), and this value is interpolated into innerHTML,
+    // so an unparseable date must be escaped before it's handed back. The
+    // parsed path below returns a locale string with no HTML-significant
+    // characters, so it needs no escaping.
+    if (isNaN(d.getTime())) return esc(iso);
     return d.toLocaleString(undefined, {
       weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
     });
@@ -1618,7 +1643,7 @@
       const data = await api('/api/business/events');
       renderMyEvents(data.events);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -1642,10 +1667,10 @@
       row.innerHTML = `
         <div class="event-info">
           <div class="event-title-row">
-            <span class="event-name">${ev.title}</span>
+            <span class="event-name">${esc(ev.title)}</span>
             ${statusPill}
           </div>
-          <div class="muted" style="font-size:12px;">${fmtEventDate(ev.eventDate)}${ev.location ? ' · ' + ev.location : ''}</div>
+          <div class="muted" style="font-size:12px;">${fmtEventDate(ev.eventDate)}${ev.location ? ' · ' + esc(ev.location) : ''}</div>
           <div class="muted" style="font-size:12px; margin-top:2px;">GYD ${fmt(ev.ticketPrice)}/ticket · ${soldText}</div>
         </div>
         <div class="event-actions"></div>
@@ -1663,10 +1688,11 @@
         cancelBtn.className = 'btn secondary small';
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = async () => {
-          if (!confirm(`Cancel "${ev.title}"? Existing tickets stay valid, but no new ones can be sold.`)) return;
+          if (!confirm(`Cancel "${ev.title}"? Every ticket sold will be refunded in full, paid back out of your business wallet. This can't be undone.`)) return;
           try {
             const data = await api(`/api/business/events/${ev.id}/cancel`, 'POST', {});
             renderMyEvents(data.events);
+            if (data.refundedTickets) alert(`Cancelled. ${data.refundedTickets} ticket(s) refunded — GYD ${fmt(data.refundedTotal)} in total.`);
           } catch (err) {
             alert(err.message);
           }
@@ -1718,14 +1744,14 @@
         <tbody>${data.tickets
           .map(
             (t) =>
-              `<tr><td>${t.buyerUsername}</td><td><code>${t.ticketCode}</code></td><td><span class="pill ${
+              `<tr><td>${esc(t.buyerUsername)}</td><td><code>${esc(t.ticketCode)}</code></td><td><span class="pill ${
                 t.status === 'checked_in' ? 'completed' : 'pending'
               }">${t.status === 'checked_in' ? 'checked in' : 'valid'}</span></td></tr>`
           )
           .join('')}</tbody>
       </table></div>`;
     } catch (err) {
-      box.innerHTML = `<p class="muted" style="font-size:12px;">${err.message}</p>`;
+      box.innerHTML = `<p class="muted" style="font-size:12px;">${esc(err.message)}</p>`;
     }
   }
 
@@ -1775,7 +1801,7 @@
       const data = await api('/api/business/jobs');
       renderMyJobs(data.jobs);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -1795,11 +1821,11 @@
       row.innerHTML = `
         <div class="event-info">
           <div class="event-title-row">
-            <span class="event-name">${j.title}</span>
+            <span class="event-name">${esc(j.title)}</span>
             ${statusPill}
           </div>
           ${details ? `<div class="muted" style="font-size:12px;">${details}</div>` : ''}
-          <div class="product-description" style="margin-top:2px;">${j.description}</div>
+          <div class="product-description" style="margin-top:2px;">${esc(j.description)}</div>
         </div>
         <div class="event-actions"></div>
       `;
@@ -1883,7 +1909,7 @@
       const data = await api(`/api/jobs?${params.toString()}`);
       renderJobsBoard(data.jobs);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -1906,16 +1932,16 @@
         <div class="job-card-top">
           <div class="job-logo" style="background:${hexToRgba(themeColor, 0.18)};">${logoEmoji}</div>
           <div class="job-main">
-            <div class="job-title">${j.title}</div>
-            <div class="job-company">${j.business.name}</div>
-            ${j.location ? `<div class="job-location">${j.location}</div>` : ''}
+            <div class="job-title">${esc(j.title)}</div>
+            <div class="job-company">${esc(j.business.name)}</div>
+            ${j.location ? `<div class="job-location">${esc(j.location)}</div>` : ''}
           </div>
         </div>
         <div class="job-tag-row">
           ${j.jobType ? `<span class="job-tag tag-type">${j.jobType}</span>` : ''}
-          ${j.payInfo ? `<span class="job-tag tag-pay">${j.payInfo}</span>` : ''}
+          ${j.payInfo ? `<span class="job-tag tag-pay">${esc(j.payInfo)}</span>` : ''}
         </div>
-        <div class="job-snippet">${j.description}</div>
+        <div class="job-snippet">${esc(j.description)}</div>
         <div class="job-card-footer">
           <span class="job-posted-ago">Posted ${timeAgo(j.createdAt)}</span>
           <button type="button" class="job-apply-btn">Apply</button>
@@ -1968,10 +1994,10 @@
       row.innerHTML = `
         <div class="event-info">
           <div class="event-title-row">
-            <span class="event-name">${j.title}</span>
+            <span class="event-name">${esc(j.title)}</span>
           </div>
           ${details ? `<div class="muted" style="font-size:12px;">${details}</div>` : ''}
-          <div class="product-description" style="margin-top:2px;">${j.description}</div>
+          <div class="product-description" style="margin-top:2px;">${esc(j.description)}</div>
         </div>
         <div class="event-actions"></div>
       `;
@@ -2001,11 +2027,13 @@
       const data = await api(`/api/business/events/tickets/${encodeURIComponent(code)}/check-in`, 'POST', {});
       document.getElementById('checkin-code').value = '';
       if (data.ok) {
-        resultBox.innerHTML = `<p><span class="pill completed">Checked in</span> ${data.ticket.buyerUsername} — ${data.eventTitle}</p>`;
+        resultBox.innerHTML = `<p><span class="pill completed">Checked in</span> ${esc(data.ticket.buyerUsername)} — ${esc(data.eventTitle)}</p>`;
       } else if (data.reason === 'already_checked_in') {
-        resultBox.innerHTML = `<p><span class="pill pending">Already checked in</span> ${data.ticket.buyerUsername} — ${data.eventTitle}${
+        resultBox.innerHTML = `<p><span class="pill pending">Already checked in</span> ${esc(data.ticket.buyerUsername)} — ${esc(data.eventTitle)}${
           data.ticket.checkedInAt ? ' (' + fmtEventDate(data.ticket.checkedInAt) + ')' : ''
         }</p>`;
+      } else if (data.reason === 'refunded') {
+        resultBox.innerHTML = `<p><span class="pill declined">Refunded — do not admit</span> ${esc(data.ticket.buyerUsername)} — ${esc(data.eventTitle)}</p>`;
       }
       loadMyEvents();
     } catch (err) {
@@ -2114,7 +2142,7 @@
       const data = await api('/api/business/orders');
       renderMyPendingOrders(data.orders);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -2130,7 +2158,7 @@
       row.className = 'product-row';
       row.innerHTML = `
         <div class="product-info">
-          <div class="product-name">${o.customerUsername} · GYD ${fmt(o.amount)}</div>
+          <div class="product-name">${esc(o.customerUsername)} · GYD ${fmt(o.amount)}</div>
           ${o.items && o.items.length
             ? `<div class="product-description">${o.items.map(cartItemLine).join('<br/>')}</div>`
             : ''}
@@ -2191,7 +2219,7 @@
       const data = await api('/api/me/tickets');
       renderMyTickets(data.tickets);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -2209,11 +2237,11 @@
       card.innerHTML = `
         <div class="ticket-card-info">
           <div class="event-title-row">
-            <span class="event-name">${t.event.title}</span>
+            <span class="event-name">${esc(t.event.title)}</span>
             <span class="pill ${checkedIn ? 'completed' : 'pending'}">${checkedIn ? 'checked in' : 'valid'}</span>
           </div>
-          <div class="muted" style="font-size:12px;">${fmtEventDate(t.event.date)}${t.event.location ? ' · ' + t.event.location : ''}</div>
-          <div class="muted" style="font-size:12px;">${t.business.name || t.business.username} · GYD ${fmt(t.pricePaid)}</div>
+          <div class="muted" style="font-size:12px;">${fmtEventDate(t.event.date)}${t.event.location ? ' · ' + esc(t.event.location) : ''}</div>
+          <div class="muted" style="font-size:12px;">${esc(t.business.name || t.business.username)} · GYD ${fmt(t.pricePaid)}</div>
           ${
             t.event.status === 'cancelled'
               ? '<div style="font-size:12px; color:var(--bad); font-weight:700; margin-top:4px;">This event was cancelled.</div>'
@@ -2242,7 +2270,7 @@
       const data = await api('/api/orders/mine');
       renderMyOrders(data.orders);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -2261,7 +2289,7 @@
       card.innerHTML = `
         <div class="ticket-card-info">
           <div class="event-title-row">
-            <span class="event-name">${o.businessName || o.businessUsername}</span>
+            <span class="event-name">${esc(o.businessName || o.businessUsername)}</span>
             <span class="pill ${pending ? 'pending' : o.status === 'completed' ? 'completed' : 'declined'}">${statusLabel}</span>
           </div>
           <div class="muted" style="font-size:12px;">GYD ${fmt(o.amount)}</div>
@@ -2323,7 +2351,7 @@
       const data = await api('/api/support/tickets/mine');
       renderSupportTickets(data.tickets);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -2344,12 +2372,12 @@
           <span class="pill ${t.status}">${t.status}</span>
         </div>
         <div class="muted" style="font-size:12px; margin:4px 0 8px;">${timeAgo(t.createdAt)}</div>
-        <div style="font-size:13px;">${t.message}</div>
+        <div style="font-size:13px;">${esc(t.message)}</div>
         ${
           t.staffReply
             ? `<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
                  <div class="muted" style="font-size:11px; font-weight:700; margin-bottom:4px;">SUPPORT REPLY</div>
-                 <div style="font-size:13px;">${t.staffReply}</div>
+                 <div style="font-size:13px;">${esc(t.staffReply)}</div>
                </div>`
             : '<div class="muted" style="font-size:12px; margin-top:8px;">Waiting on a reply…</div>'
         }
@@ -2422,17 +2450,17 @@
         card.innerHTML = `
           <div class="directory-logo" style="background:${b.coverPhotoUrl ? `url('${b.coverPhotoUrl}') center/cover` : hexToRgba(b.themeColor, 0.18)};">${b.coverPhotoUrl ? '' : (b.logoEmoji || '🏢')}</div>
           <div class="directory-info">
-            <div class="biz-name">${b.businessName}</div>
-            <div class="biz-tagline">${b.tagline || ''}</div>
+            <div class="biz-name">${esc(b.businessName)}</div>
+            <div class="biz-tagline">${esc(b.tagline || '')}</div>
             ${starSummaryHtml(b.avgRating, b.reviewCount, true)}
           </div>
-          <span class="pill" style="background:${hexToRgba(b.themeColor, 0.16)}; color:${b.themeColor};">${b.category}</span>
+          <span class="pill" style="background:${hexToRgba(b.themeColor, 0.16)}; color:${b.themeColor};">${esc(b.category)}</span>
         `;
         card.onclick = () => openBusinessPage(b.username);
         box.appendChild(card);
       });
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -2615,14 +2643,14 @@
       row.innerHTML = `
         <div class="review-row-top">
           <span class="star-glyphs">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
-          <strong>@${r.reviewerUsername}</strong>
+          <strong>@${esc(r.reviewerUsername)}</strong>
           ${
             b.isOwnBusiness
               ? `<button type="button" class="link-btn remove-review-btn" style="margin-left:auto; font-size:11px;">Remove</button>`
               : `<button type="button" class="link-btn report-review-btn" style="margin-left:auto; font-size:11px;">Report</button>`
           }
         </div>
-        ${r.comment ? `<div class="product-description" style="margin-top:4px;">${r.comment}</div>` : ''}
+        ${r.comment ? `<div class="product-description" style="margin-top:4px;">${esc(r.comment)}</div>` : ''}
       `;
       if (b.isOwnBusiness) {
         row.querySelector('.remove-review-btn').onclick = () => removeReviewAsBusiness(username, r.id);
@@ -2722,14 +2750,14 @@
       row.className = 'review-row';
       row.innerHTML = `
         <div class="review-row-top">
-          <strong>@${t.username}</strong>
+          <strong>@${esc(t.username)}</strong>
           ${
             b.isOwnBusiness
               ? `<button type="button" class="link-btn remove-tip-btn" style="margin-left:auto; font-size:11px;">Remove</button>`
               : ''
           }
         </div>
-        <div class="product-description" style="margin-top:4px;">${t.text}</div>
+        <div class="product-description" style="margin-top:4px;">${esc(t.text)}</div>
       `;
       if (b.isOwnBusiness) {
         row.querySelector('.remove-tip-btn').onclick = () => removeTipAsBusiness(username, t.id);
@@ -2798,11 +2826,11 @@
       row.innerHTML = `
         <div class="event-info">
           <div class="event-title-row">
-            <span class="event-name">${ev.title}</span>
+            <span class="event-name">${esc(ev.title)}</span>
             ${availability}
           </div>
-          <div class="muted" style="font-size:12px;">${fmtEventDate(ev.eventDate)}${ev.location ? ' · ' + ev.location : ''}</div>
-          ${ev.description ? `<div class="product-description" style="margin-top:2px;">${ev.description}</div>` : ''}
+          <div class="muted" style="font-size:12px;">${fmtEventDate(ev.eventDate)}${ev.location ? ' · ' + esc(ev.location) : ''}</div>
+          ${ev.description ? `<div class="product-description" style="margin-top:2px;">${esc(ev.description)}</div>` : ''}
           <div style="font-weight:800; font-size:13.5px; margin-top:4px;">GYD ${fmt(ev.ticketPrice)} / ticket</div>
         </div>
         <div class="event-actions"></div>
@@ -2904,7 +2932,10 @@
   // price it was bought at, and the name, e.g. "4 x GYD 100.00 Cupcakes"
   // (not just "4x Cupcakes"), so nothing has to be inferred or re-priced.
   function cartItemLine(item) {
-    return `${item.quantity} x GYD ${fmt(item.price)} ${item.name}`;
+    // Rendered via innerHTML by several callers (cart bar, order cards,
+    // dropshipping deliveries), so the product name — which a business, or a
+    // synced third-party catalog, controls — must be escaped here.
+    return `${item.quantity} x GYD ${fmt(item.price)} ${esc(item.name)}`;
   }
   function cartItemsTotal(items) {
     return items.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -2942,10 +2973,10 @@
       const row = document.createElement('div');
       row.className = 'product-row';
       row.innerHTML = `
-        ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
+        ${p.imageUrl ? `<img class="product-thumb" src="${esc(p.imageUrl)}" alt="${esc(p.name)}" />` : ''}
         <div class="product-info">
-          <div class="product-name">${p.name}</div>
-          ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
+          <div class="product-name">${esc(p.name)}</div>
+          ${p.description ? `<div class="product-description">${esc(p.description)}</div>` : ''}
         </div>
         <div class="product-cart-col">
           <span class="product-price">GYD ${fmt(p.price)}</span>
@@ -3125,7 +3156,7 @@
       renderShopProducts(data.products);
       loadShopOrders();
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -3143,10 +3174,10 @@
       const row = document.createElement('div');
       row.className = 'product-row';
       row.innerHTML = `
-        ${p.imageUrl ? `<img class="product-thumb" src="${p.imageUrl}" alt="${p.name}" />` : ''}
+        ${p.imageUrl ? `<img class="product-thumb" src="${esc(p.imageUrl)}" alt="${esc(p.name)}" />` : ''}
         <div class="product-info">
-          <div class="product-name">${p.name}</div>
-          ${p.description ? `<div class="product-description">${p.description}</div>` : ''}
+          <div class="product-name">${esc(p.name)}</div>
+          ${p.description ? `<div class="product-description">${esc(p.description)}</div>` : ''}
           ${p.weightKg > shopDelivery.oversizeThresholdKg ? `<div class="product-description">⚠️ Oversized — ships with the higher delivery fee</div>` : ''}
         </div>
         <div class="product-cart-col">
@@ -3268,7 +3299,7 @@
       const data = await api('/api/dropshipping/orders/mine');
       renderShopOrders(data.orders);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -3355,27 +3386,72 @@
   document.getElementById('courier-btn').onclick = () => switchTab('courier');
   document.getElementById('courier-back-btn').onclick = () => switchTab('business');
 
-  function enterCourierTab() {
+  async function enterCourierTab() {
+    // Approval happens on the staff side, with no direct signal to this
+    // open tab, so refresh the account here rather than trusting a
+    // possibly-stale state.user.isCourier from whenever the app was
+    // loaded (the 15s background poll would catch it eventually too,
+    // but re-checking on entry means an approved applicant sees their
+    // dashboard the moment they open this tab, not up to 15s later).
+    await refreshMe().catch(() => {});
     const isCourier = !!(state.user && state.user.isCourier);
-    document.getElementById('courier-optin-section').classList.toggle('hidden', isCourier);
-    document.getElementById('courier-main-section').classList.toggle('hidden', !isCourier);
+    const optinSection = document.getElementById('courier-optin-section');
+    const pendingSection = document.getElementById('courier-pending-section');
+    const mainSection = document.getElementById('courier-main-section');
+    const rejectedNote = document.getElementById('courier-rejected-note');
+
     if (isCourier) {
+      optinSection.classList.add('hidden');
+      pendingSection.classList.add('hidden');
+      mainSection.classList.remove('hidden');
       document.getElementById('courier-wallet-balance').textContent = fmt(state.user.courierGydBalance || 0);
       loadCourierAvailable();
       loadCourierMine();
+      return;
+    }
+
+    mainSection.classList.add('hidden');
+    let application = null;
+    try {
+      const data = await api('/api/account/courier-application', 'GET');
+      application = data.application || null;
+    } catch (err) {
+      // couldn't load application status; fall back to the apply form
+    }
+
+    if (application && application.status === 'pending') {
+      optinSection.classList.add('hidden');
+      pendingSection.classList.remove('hidden');
+    } else {
+      pendingSection.classList.add('hidden');
+      optinSection.classList.remove('hidden');
+      if (application && application.status === 'rejected') {
+        rejectedNote.textContent = application.staffNote
+          ? `Your previous application was declined: ${application.staffNote}. You can apply again below.`
+          : 'Your previous application was declined. You can apply again below.';
+        rejectedNote.classList.remove('hidden');
+      } else if (application && application.status === 'revoked') {
+        rejectedNote.textContent =
+          (application.staffNote ? `Your courier access was ended: ${application.staffNote}. ` : 'Your courier access was ended. ') +
+          'Any courier earnings were moved to your personal wallet. You can apply again below.';
+        rejectedNote.classList.remove('hidden');
+      } else {
+        rejectedNote.textContent = '';
+        rejectedNote.classList.add('hidden');
+      }
     }
   }
 
-  document.getElementById('upgrade-courier-btn').onclick = async () => {
-    const errBox = document.getElementById('upgrade-courier-error');
-    const successBox = document.getElementById('upgrade-courier-success');
+  document.getElementById('apply-courier-btn').onclick = async () => {
+    const errBox = document.getElementById('apply-courier-error');
+    const successBox = document.getElementById('apply-courier-success');
     errBox.textContent = '';
     successBox.textContent = '';
+    const note = document.getElementById('courier-apply-note').value.trim();
     try {
-      await api('/api/account/upgrade-to-courier', 'POST', {});
-      await refreshMe();
-      successBox.textContent = "You're set up as a courier.";
-      enterCourierTab();
+      await api('/api/account/apply-courier', 'POST', { note: note || undefined });
+      successBox.textContent = "Application submitted — we'll review it soon.";
+      await enterCourierTab();
     } catch (err) {
       errBox.textContent = err.message;
     }
@@ -3407,7 +3483,7 @@
       const data = await api('/api/courier/available-deliveries');
       renderCourierAvailable(data.deliveries);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -3428,7 +3504,7 @@
             <span class="event-name">GYD ${fmt(d.deliveryFeeGyd)}${d.isOversizeCargo ? ' · oversized cargo' : ''}</span>
           </div>
           <div class="product-description">${d.items.map((i) => cartItemLine({ ...i, price: i.priceGyd })).join('<br/>')}</div>
-          <div class="muted" style="font-size:12px;">${addr.name || ''} · ${addr.address || ''}, ${addr.city || ''}${addr.phone ? ` · ${addr.phone}` : ''}</div>
+          <div class="muted" style="font-size:12px;">${esc(addr.name || '')} · ${esc(addr.address || '')}, ${esc(addr.city || '')}${addr.phone ? ` · ${esc(addr.phone)}` : ''}</div>
         </div>
       `;
       const claimBtn = document.createElement('button');
@@ -3456,7 +3532,7 @@
       const data = await api('/api/courier/deliveries/mine');
       renderCourierMine(data.deliveries);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -3479,7 +3555,7 @@
             <span class="pill ${outForDelivery ? 'pending' : 'completed'}">${outForDelivery ? 'out for delivery' : 'delivered'}</span>
           </div>
           <div class="product-description">${d.items.map((i) => cartItemLine({ ...i, price: i.priceGyd })).join('<br/>')}</div>
-          <div class="muted" style="font-size:12px;">${addr.name || ''} · ${addr.address || ''}, ${addr.city || ''}${addr.phone ? ` · ${addr.phone}` : ''}</div>
+          <div class="muted" style="font-size:12px;">${esc(addr.name || '')} · ${esc(addr.address || '')}, ${esc(addr.city || '')}${addr.phone ? ` · ${esc(addr.phone)}` : ''}</div>
         </div>
         ${outForDelivery ? `
           <div class="panel-row" style="margin-top:8px;">
@@ -3530,7 +3606,7 @@
       const item = document.createElement('div');
       item.className = 'thread-item' + (t.username === state.activeThreadUsername ? ' active' : '');
       item.innerHTML = `
-        <div class="uname">${t.username}${t.isBusiness ? ' 🏢' : ''}</div>
+        <div class="uname">${esc(t.username)}${t.isBusiness ? ' 🏢' : ''}</div>
         <div class="preview">${t.fromMe ? 'You: ' : ''}${t.lastMessage}</div>
       `;
       item.onclick = () => openThread(t.username);
@@ -3641,7 +3717,8 @@
   function refreshMyQrCode() {
     const amount = document.getElementById('qr-fixed-amount').value.trim();
     const memo = document.getElementById('qr-memo').value.trim();
-    const payload = buildPayPayload({ to: state.user.paytag, amount, memo });
+    // "$" marks it unambiguously as a $paytag (see resolveHandle in server.js).
+    const payload = buildPayPayload({ to: `$${state.user.paytag}`, amount, memo });
     document.getElementById('qr-image').src = qrImageUrl(payload);
     document.getElementById('qr-payload-text').textContent = payload;
   }
@@ -3766,8 +3843,8 @@
     let recipientInfo = { username: parsed.to, isBusiness: false, businessName: null };
     try {
       recipientInfo = await api(`/api/users/${encodeURIComponent(parsed.to)}`);
-    } catch {
-      errBox.textContent = 'No user with that username.';
+    } catch (err) {
+      errBox.textContent = err.message || 'No user with that username.';
       return;
     }
 
@@ -3779,7 +3856,10 @@
     document.getElementById('qr-confirm-memo').value = parsed.memo || '';
     document.getElementById('qr-confirm-error').textContent = '';
     document.getElementById('qr-pay-confirm').classList.remove('hidden');
-    document.getElementById('qr-pay-confirm').dataset.toUsername = recipientInfo.username;
+    // Pay the exact account that was just looked up: its $paytag is
+    // unambiguous, whereas a bare username could collide with someone
+    // else's paytag on older accounts.
+    document.getElementById('qr-pay-confirm').dataset.toUsername = recipientInfo.paytag ? `$${recipientInfo.paytag}` : recipientInfo.username;
   }
 
   document.getElementById('qr-confirm-cancel-btn').onclick = () => {
@@ -3848,7 +3928,7 @@
         const row = document.createElement('div');
         row.className = 'remit-list-row';
         const label = document.createElement('div');
-        label.innerHTML = `<div><strong>${r.recipientName}</strong> · GYD ${fmt(r.amount)} <span class="pill ${r.status === 'completed' ? 'completed' : r.status === 'cancelled' ? 'declined' : 'pending'}">${remitStatusLabel(r.status)}</span></div>
+        label.innerHTML = `<div><strong>${esc(r.recipientName)}</strong> · GYD ${fmt(r.amount)} <span class="pill ${r.status === 'completed' ? 'completed' : r.status === 'cancelled' ? 'declined' : 'pending'}">${r.locked ? 'Locked — too many pickup attempts; cancel for a refund and resend' : remitStatusLabel(r.status)}</span></div>
           <div class="muted" style="font-size:11.5px; margin-top:3px;">Ref ${r.referenceCode} · fee GYD ${fmt(r.fee)} · ${timeAgo(r.createdAt)}</div>`;
         row.appendChild(label);
         if (r.status === 'pending') {
@@ -3870,7 +3950,7 @@
         box.appendChild(row);
       });
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 

@@ -34,7 +34,7 @@ it:
 
 ```
 SUPABASE_URL=https://<your-project-ref>.supabase.co
-SUPABASE_KEY=<your project's anon/publishable key>
+SUPABASE_KEY=<your project's SECRET key (sb_secret_... or the legacy service_role key)>
 node server.js
 ```
 
@@ -48,7 +48,7 @@ This repo includes a `render.yaml` blueprint for [Render](https://render.com), s
 
 1. Push this repo to GitHub (or GitLab).
 2. In Render, create a new **Blueprint** and point it at the repo — it reads `render.yaml` and sets up the web service automatically, starting on the free plan.
-3. Create a free project at [supabase.com](https://supabase.com), run `supabase/schema.sql` against it (SQL Editor → paste → Run) to create the tables and the `exec_query` function the app talks to, then set `SUPABASE_URL` and `SUPABASE_KEY` (its Project URL and anon/publishable key, from Project Settings → API) as environment variables on the Render service.
+3. Create a free project at [supabase.com](https://supabase.com), run `supabase/schema.sql` against it (SQL Editor → paste → Run) to create the tables and the `exec_query` function the app talks to, then set `SUPABASE_URL` and `SUPABASE_KEY` (its Project URL and its **secret** key — `sb_secret_...`, or the legacy `service_role` key — from Project Settings → API; never the anon/publishable key, see **How the database works**) as environment variables on the Render service.
 4. Render gives you a live `https://<something>.onrender.com` URL once the first deploy finishes.
 
 **Why Supabase instead of a Render disk**: Render's free web services don't get a persistent disk, so anything written to the container's own filesystem resets on every redeploy or the free plan's auto-sleep-and-wake cycle. Rather than paying for a Render disk, the database lives in a separate free Supabase Postgres project instead — see **How the database works** below for how the app talks to it without adding any npm dependency.
@@ -65,10 +65,21 @@ function, `exec_query(query, params)`, that takes a SQL string and a JSON
 array of parameters and returns the matching rows as JSON; `db.js` calls
 that function over Supabase's REST API for every query the app makes,
 converting the `?` placeholders used throughout `server.js` into Postgres's
-`$1, $2, ...` automatically. The `SUPABASE_KEY` this depends on should
-always be treated as a server-side secret — it's never sent to the
-browser — since `exec_query` can read and write every table regardless of
-that key's own row-level permissions (see the comments in `supabase/schema.sql`).
+`$1, $2, ...` automatically.
+
+`exec_query` can read and write every table regardless of row-level
+permissions, so it is granted **only** to Supabase's `service_role` — the
+role behind the project's **secret** key. `SUPABASE_KEY` must be that
+secret key (`sb_secret_...`, or the legacy `service_role` key), kept
+server-side only. It must never be the anon/publishable key: Supabase
+designs that key to be public, and an earlier version of this schema
+granted `exec_query` to it, which meant anyone holding it could run any SQL
+against the whole database.
+
+**Upgrading an existing deployment:** set `SUPABASE_KEY` to the secret key
+on Render (and redeploy) *first*, and only then re-run
+`supabase/schema.sql` — it revokes the old anon grant, so doing it the
+other way round cuts the running app off from its database.
 
 Because every query is now a real network call instead of a synchronous
 local read, a few money-moving actions (send money, pay a request, buy an
@@ -281,7 +292,7 @@ One simplification worth knowing: the "Recent activity" list on the Wallet tab i
 
 The staff portal lives at `/staff.html` (e.g. `https://gyd-wallet.onrender.com/staff.html`) and is completely separate from the customer app — a customer account, even a business one, has no access there, and a staff login has no access to the customer app either (see auth.js's `makeStaffSessionToken` and server.js's `requireStaffAuth`). There's no self-signup: the very first staff account has to be created directly against the database (see below), after which an **owner**-level staff member can create more from the portal's **Employees** tab.
 
-Logging in takes two steps: username + password, then a 6-digit verification code (`POST /api/staff/login` then `/api/staff/login/verify-code`, backed by the `staff_login_codes` table). With no email or phone on file for the account (or real delivery not set up for either — see **Setting up real email delivery** and **Setting up real SMS delivery** below), the code comes back in the same response and is shown on screen, the same "simulated" delivery every other code in this app falls back to. The moment a staff member adds their own email and/or phone number on the portal's **Employees** tab ("My email" / "My phone") *and* the matching delivery is configured, the code goes there instead — email first if both are on file, SMS as the fallback — turning this from a genuine second *step* into a genuine second *factor*, with no other changes needed.
+Logging in takes two steps: username + password, then a 6-digit verification code (`POST /api/staff/login` then `/api/staff/login/verify-code`, backed by the `staff_login_codes` table), delivered to the staff member's email or phone on file — email first if both are on file, SMS as the fallback (see **Setting up real email delivery** and **Setting up real SMS delivery** below). With no way to deliver the code — no email/phone on file, or delivery not configured — login is refused rather than falling back to showing it on screen, unless `SHOW_CODES_ON_SCREEN=true` is set (demo/dev only; see **Setting up real email delivery**). Add your own email and/or phone from the portal's **Employees** tab ("My email" / "My phone") before that's turned off, or you'll lock yourself out.
 
 It has two working queues, each closing a real gap that existed before it:
 
@@ -317,7 +328,15 @@ After that, sign in at `/staff.html` and use the **Employees** tab to add anyone
 
 ## Setting up real email delivery
 
-Out of the box, every code this app generates — a password-reset code, a forgotten username, a staff login verification code — is just shown on screen instead of actually emailed anywhere (see **Why no npm packages**: there was never a real email integration). `email.js` adds one, using [Resend](https://resend.com)'s HTTP API reached with Node's built-in `fetch()`, the same zero-npm-dependency approach as everything else in this app — but it only turns on once it's configured, and everything keeps working exactly as before if it isn't.
+Password-reset codes, forgotten usernames and staff login verification codes are delivered by email (or, for staff, SMS). `email.js` sends them using [Resend](https://resend.com)'s HTTP API reached with Node's built-in `fetch()`, the same zero-npm-dependency approach as everything else in this app.
+
+**Without email configured, those features are switched off** — "Forgot your password/username?" answer with a "not set up yet" error, and staff can't log in — rather than showing the codes on screen. Showing them on screen means anyone who knows an account's email can reset its password, and staff 2FA stops being a second factor. For a demo or local development you can bring the old on-screen behaviour back with:
+
+```
+SHOW_CODES_ON_SCREEN=true
+```
+
+**Never set that on a real deployment.** If you're upgrading a deployment that has been relying on on-screen codes (for example, staff with no email on file), either configure email first and have every staff member add their email under **Employees → My email**, or set `SHOW_CODES_ON_SCREEN=true` temporarily while you do — otherwise staff will be locked out of the portal.
 
 To turn it on:
 
@@ -327,7 +346,9 @@ To turn it on:
    - `RESEND_FROM_EMAIL` (optional) — defaults to Resend's own test sender, which only delivers to your own verified email until you verify a domain in Resend. Once you've verified a domain there, set this to something like `GYD Wallet <no-reply@yourdomain.com>`.
 3. Redeploy (Render does this automatically after an environment variable change).
 
-That's the whole setup — nothing in the code needs to change. Once `RESEND_API_KEY` is set: password-reset codes and forgotten usernames get emailed to the address on the account instead of shown on screen, and any staff member who adds their own email under the **Employees** tab's "My email" field gets their login verification code emailed too (and, if they're an owner, fraud alerts — see **How the staff portal works**). Nobody without an email on file, or before this is configured, sees any change at all — everything just keeps showing the code on screen the way it always did.
+That's the whole setup — nothing in the code needs to change. Once `RESEND_API_KEY` is set: password-reset codes and forgotten usernames get emailed to the address on the account, and any staff member with an email under the **Employees** tab's "My email" field gets their login verification code emailed (and, if they're an owner, fraud alerts — see **How the staff portal works**). A staff member with no email or phone on file can't log in unless `SHOW_CODES_ON_SCREEN=true`.
+
+The forgot-password and forgot-username endpoints give the same answer ("if an account uses this email, we've emailed it") whether or not the email is registered, so they can't be used to find out who has an account. A send that fails is logged on the server, not turned into an on-screen code.
 
 **Why you have to do this part yourself:** entering an API key is entering a credential, and Claude won't do that on your behalf even if you paste the key into chat — it has to go into Render's environment variables through Render's own dashboard, by you.
 
@@ -379,7 +400,7 @@ Real orders don't go straight from "paid for" to "in the customer's hands" — C
 4. **A courier claims it** (Business tab → "🚚 Deliver" → "Available deliveries" → "Claim this delivery", or `POST /api/courier/deliveries/:id/claim`) → `out_for_delivery`, assigned to that courier.
 5. **The courier delivers it and enters the customer's delivery code** (`POST /api/courier/deliveries/:id/confirm`) → `delivered`, and the delivery fee is credited to the courier's own courier wallet. The delivery code is never exposed to the courier through any API response — the customer has to read it out to them in person at handoff, the same "blind code entry" pattern as every other code-based release in this app, so a delivery can't be marked complete without the customer's own confirmation.
 
-**Courier is a third, opt-in account role**, alongside personal and business (`is_courier` / `courier_gyd_balance` on `users`, mirroring `is_business`/`business_gyd_balance`) — anyone can become one from the Business tab's "🚚 Deliver" button, same login and personal balance, plus a separate delivery wallet that only ever fills up from confirmed deliveries. `POST /api/courier/wallet/move-to-personal` moves earnings from there into personal spending money, same one-way "owner's draw" pattern as the business wallet.
+**Courier is a third account role, but no longer self-serve** — becoming one now requires staff approval. From the Business tab's "🚚 Deliver" button, an account holder submits an application (`POST /api/account/apply-courier`, with an optional free-text note) into its own `courier_applications` queue table, and sees a "waiting on our team" screen until it's resolved (`GET /api/account/courier-application` is what the client polls to know which of the apply/pending/approved screens to show). A staff member reviews it from the Staff portal's new Couriers tab (`GET /api/staff/courier-applications`, filterable by pending/approved/rejected) and either approves it (`POST /api/staff/courier-applications/:id/approve` — atomically flips the application to `approved` and flips `is_courier` to `true` on the account in the same statement, so the two can never disagree) or rejects it with an optional reason the applicant will see (`POST /api/staff/courier-applications/:id/reject`, stored as `staff_note`) — a rejected applicant can submit a new application at any time. Any staff member can review these, the same `requireStaffAuth` tier as support tickets and cash-outs, not an owner-only action. Once approved, it's `is_courier` / `courier_gyd_balance` on `users` (mirroring `is_business`/`business_gyd_balance`) — same login and personal balance, plus a separate delivery wallet that only ever fills up from confirmed deliveries. `POST /api/courier/wallet/move-to-personal` moves earnings from there into personal spending money, same one-way "owner's draw" pattern as the business wallet.
 
 **Why you have to do this part yourself:** same reason as the Resend/Twilio credentials above — these are credentials, and they go into Render's environment variables through Render's own dashboard, by you.
 
@@ -487,8 +508,7 @@ Earlier drafts of this prototype leaned explicitly on Cash App as a design refer
 - **No real money in or out.** Deposits just add GYD to your balance directly; cash-out just records a request. Wiring in real payments needs a licensed money-transmission partner — this is Phase 2 in the plan, and shouldn't happen before that legal/licensing work is done. That licensing requirement covers deposits, cash-out, peer-to-peer transfers, requests, GYD Direct, and the business portal alike — it's about holding and moving other people's money at all, not about any single feature.
 - **No real-money gambling exposure.** The games are free to play (see **Why the games are free to play** above) — there is no in-game currency at all, so nothing is ever wagered or paid out. GYD, the one balance meant to represent real money, only moves via deposits, cash-out, peer-to-peer transfers, requests, GYD Direct, and the business payment portal — never through a game.
 - **No real cash pickup network for GYD Direct.** A real money-transfer service has physical agent locations where a recipient without a bank account can walk in and collect cash. This prototype's "pickup" is digital only — the recipient needs to register an account here to receive the funds into a balance, not walk away with cash. Building an actual cash-pickup network is a much bigger undertaking (agent partnerships, cash management, physical security) well beyond this prototype's scope.
-- **No KYC/AML, fraud controls, or rate limiting.** Needed before this could handle real funds, not needed to demo the product.
-- **No password reset, email verification, or account recovery.**
+- **No KYC/AML or fraud controls.** Needed before this could handle real funds, not needed to demo the product. (Basic abuse-resistance — rate limiting on login/reset/lookup endpoints — does exist; see **Deployment settings added in the security update**.)
 - **No mobile app** — this is a responsive web app; wrapping it for iOS/Android (or rebuilding natively) is a separate step.
 - **No self-hosted QR generation** — see "How QR pay actually works" above; it currently calls out to a public image API instead of generating codes locally.
 - **No ticket refunds.** A buyer can't cancel a purchased ticket for a refund from the app — a business can cancel the *event* (which stops new sales but leaves existing tickets alone), but there's no built-in way to reverse a specific ticket sale. A real build would need a refund policy and flow before this went live.
@@ -501,8 +521,35 @@ db.js             Talks to the Supabase Postgres database over fetch() — see "
 auth.js           Password hashing + signed session tokens (node:crypto)
 ludo.js           Pure Ludo game rules (movement, capture, win detection) — no HTTP or DB in here
 public/           Frontend: index.html, styles.css, app.js (vanilla JS, no build step)
-supabase/schema.sql   The Postgres tables + the exec_query function db.js calls — run this once against a new Supabase project
+supabase/schema.sql   The Postgres tables + the exec_query function db.js calls — run it against a new project, and re-run it after upgrading (it's idempotent)
+test/             Integration tests: real schema + real server.js against a throwaway local Postgres (see "Running the tests")
 ```
+
+## Running the tests
+
+```
+npm test          # same as: node --test test/*.test.js
+```
+
+No `npm install` is needed — the suite uses Node's built-in test runner. It does need **PostgreSQL 15+ server binaries** installed locally (`initdb`, `pg_ctl`, `psql`; e.g. `apt install postgresql` or `brew install postgresql`). Set `PG_BIN` to their directory if they aren't found automatically.
+
+Each test file starts its own throwaway Postgres, loads `supabase/schema.sql` into it (twice, to prove it can be re-run), and runs the real `server.js` against it. The modules `server.js` requires (`db.js`, `auth.js`, `email.js`, …) are replaced by simple stand-ins in `test/shims/`; the database stand-in still sends every query through the real `exec_query` function, as the `service_role` role, so the actual SQL, placeholder substitution and grants are what get tested. The suite covers the money flows (transfers, ticket sales and refunds, pickup orders, delivery fees, courier payouts), the auth code flows, account-identity rules, GYD Direct pickup limits, rate limiting, and the database grants — including concurrent-request races for the flows where double-spending or overselling would be possible.
+
+## Deployment settings added in the security update
+
+| Variable | Default | What it's for |
+| --- | --- | --- |
+| `SUPABASE_KEY` | — | Must now be the project's **secret** key (see **How the database works**). |
+| `SHOW_CODES_ON_SCREEN` | off | Demo/dev only: show reset/username/staff codes on screen when email isn't configured (see **Setting up real email delivery**). |
+| `CLIENT_IP_HEADER` | `true-client-ip` on Render, otherwise unset | A header your edge proxy sets to the real client IP, overwriting whatever the client sent (Render/Cloudflare: `true-client-ip`). Used for per-IP rate limiting. No change is needed on Render. |
+| `TRUSTED_PROXY_HOPS` | `1` | Only used when there's no `CLIENT_IP_HEADER`: how many reverse proxies append to `X-Forwarded-For` in front of the app. The real client IP is read that many entries from the right, so a client-supplied `X-Forwarded-For` can't be used to dodge rate limits. Set `0` if nothing sits in front of the app. |
+
+**Upgrade order for an existing deployment** (the order matters):
+
+1. Switch `SUPABASE_KEY` on Render to the project's secret key and let it redeploy (still the old code).
+2. Re-run `supabase/schema.sql` in the Supabase SQL Editor. It adds the new columns, tables and functions, converts money columns to exact decimals, and revokes the old public access to `exec_query`. The old code keeps working against the new schema. Doing this before step 1 cuts the running app off from its database.
+3. Configure email (and have staff add their email under **Employees → My email**), or set `SHOW_CODES_ON_SCREEN=true` temporarily, so staff can still log in once the new code is live.
+4. Deploy the new code. Deploying it before step 2 breaks logins, because the new code expects the new tables.
 
 ## Why no npm packages
 

@@ -37,6 +37,26 @@
     return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // Escape any value before it goes into an innerHTML template. Everything
+  // rendered on this dashboard is attacker-influenced (a support ticket's
+  // subject/message, a courier applicant's note, a customer username, a
+  // product name synced from a third party, ...) and this is the STAFF
+  // portal — a session that can create owner accounts and read the audit
+  // log — so a single unescaped interpolation is a stored-XSS foothold in
+  // the most privileged place in the app. The page's CSP (script-src
+  // 'self') blocks inline/injected <script> and event-handler execution,
+  // but we escape at every sink anyway: defense-in-depth that also stops
+  // plain HTML injection (defacement, fake controls) and doesn't rely on
+  // the CSP never being loosened. Covers the five HTML-significant chars.
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ---------- login / logout ----------
 
   const loginScreen = document.getElementById('staff-login-screen');
@@ -62,8 +82,8 @@
       // which channel it went out on.
       pendingUsername = username;
       document.getElementById('staff-code-display').innerHTML = data.sent
-        ? `We've ${data.sentVia === 'sms' ? 'texted' : 'emailed'} your verification code. It expires in ${data.expiresInMinutes} minutes.`
-        : `Since this doesn't send real emails/SMS yet, here's your simulated verification code:<strong>${data.code}</strong>It expires in ${data.expiresInMinutes} minutes.`;
+        ? `We've ${data.sentVia === 'sms' ? 'texted' : 'emailed'} your verification code. It expires in ${esc(data.expiresInMinutes)} minutes.`
+        : `Demo mode — this server shows verification codes on screen instead of sending them:<strong>${esc(data.code)}</strong>It expires in ${esc(data.expiresInMinutes)} minutes.`;
       document.getElementById('staff-code-input').value = '';
       document.getElementById('staff-code-error').textContent = '';
       loginForm.classList.add('hidden');
@@ -199,6 +219,7 @@
     if (tab === 'tickets') loadTickets();
     if (tab === 'cashouts') loadCashouts();
     if (tab === 'dropshipping') loadDropshippingOrders();
+    if (tab === 'couriers') loadCourierApplications();
     if (tab === 'employees') loadEmployees();
     if (tab === 'audit') loadAuditLog();
   }
@@ -208,6 +229,7 @@
       const data = await api('/api/staff/summary');
       document.getElementById('summary-open-tickets').textContent = data.openTickets;
       document.getElementById('summary-pending-cashouts').textContent = data.pendingCashouts;
+      document.getElementById('summary-pending-courier-applications').textContent = data.pendingCourierApplications;
     } catch {
       // Summary is a nice-to-have; a failure here shouldn't block the rest
       // of the dashboard from working.
@@ -235,7 +257,7 @@
       const data = await api(`/api/staff/support-tickets?status=${ticketsStatus}`);
       renderTickets(data.tickets);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -259,11 +281,11 @@
       card.className = 'staff-item';
       card.innerHTML = `
         <div class="staff-item-top">
-          <strong>${t.subject}</strong>
-          <span class="pill ${t.status}">${t.status}</span>
+          <strong>${esc(t.subject)}</strong>
+          <span class="pill ${esc(t.status)}">${esc(t.status)}</span>
         </div>
-        <div class="staff-item-meta">${t.name || 'Unknown'} · ${t.email || 'no email'} · ${timeAgo(t.createdAt)}</div>
-        <div class="staff-item-body">${t.message}</div>
+        <div class="staff-item-meta">${esc(t.name || 'Unknown')} · ${esc(t.email || 'no email')} · ${timeAgo(t.createdAt)}</div>
+        <div class="staff-item-body">${esc(t.message)}</div>
         ${
           reviewId
             ? `<div class="staff-actions"><button class="btn small secondary remove-review-btn">Remove this review</button></div>`
@@ -271,7 +293,7 @@
         }
         ${
           t.staffReply
-            ? `<div class="staff-reply-box"><div class="muted" style="font-size:11px; font-weight:700; margin-bottom:4px;">REPLIED BY ${(t.repliedBy || '').toUpperCase()}</div>${t.staffReply}</div>`
+            ? `<div class="staff-reply-box"><div class="muted" style="font-size:11px; font-weight:700; margin-bottom:4px;">REPLIED BY ${esc((t.repliedBy || '').toUpperCase())}</div>${esc(t.staffReply)}</div>`
             : ''
         }
         ${
@@ -359,7 +381,7 @@
       const data = await api(`/api/staff/cashouts?status=${cashoutsStatus}`);
       renderCashouts(data.cashouts);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -375,10 +397,10 @@
       card.className = 'staff-item';
       card.innerHTML = `
         <div class="staff-item-top">
-          <strong>$${c.paytag || c.username} · GYD ${fmt(c.amountGyd)}</strong>
-          <span class="pill ${c.status}">${c.status}</span>
+          <strong>$${esc(c.paytag || c.username)} · GYD ${fmt(c.amountGyd)}</strong>
+          <span class="pill ${esc(c.status)}">${esc(c.status)}</span>
         </div>
-        <div class="staff-item-meta">@${c.username} · requested ${timeAgo(c.createdAt)}${
+        <div class="staff-item-meta">@${esc(c.username)} · requested ${timeAgo(c.createdAt)}${
         c.resolvedAt ? ` · resolved ${timeAgo(c.resolvedAt)}` : ''
       }</div>
         ${
@@ -441,7 +463,7 @@
       const data = await api('/api/staff/dropshipping-orders');
       renderDropshippingOrders(data.orders);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -458,11 +480,11 @@
       card.className = 'staff-item';
       card.innerHTML = `
         <div class="staff-item-top">
-          <strong>@${o.customerUsername} · GYD ${fmt(o.amountChargedGyd)}</strong>
-          <span class="pill ${o.status === 'cancelled' ? 'rejected' : 'pending'}">${o.status}</span>
+          <strong>@${esc(o.customerUsername)} · GYD ${fmt(o.amountChargedGyd)}</strong>
+          <span class="pill ${o.status === 'cancelled' ? 'rejected' : 'pending'}">${esc(o.status)}</span>
         </div>
-        <div class="staff-item-meta">${label} · placed ${timeAgo(o.createdAt)}${o.trackingNumber ? ` · tracking ${o.trackingNumber}` : ''}</div>
-        <div class="staff-item-body">${o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}</div>
+        <div class="staff-item-meta">${esc(label)} · placed ${timeAgo(o.createdAt)}${o.trackingNumber ? ` · tracking ${esc(o.trackingNumber)}` : ''}</div>
+        <div class="staff-item-body">${o.items.map((i) => `${esc(i.quantity)}x ${esc(i.name)}`).join(', ')}</div>
         ${
           o.status === 'placed_with_cj'
             ? `<div class="staff-actions"><button class="btn small dropshipping-mark-arrived-btn">Mark arrived at warehouse</button></div>`
@@ -505,6 +527,106 @@
     }
   };
 
+  // ---------- courier applications ----------
+
+  let couriersStatus = 'pending';
+
+  document.querySelectorAll('[data-couriers-status]').forEach((btn) => {
+    btn.onclick = () => {
+      couriersStatus = btn.dataset.couriersStatus;
+      document
+        .querySelectorAll('[data-couriers-status]')
+        .forEach((b) => b.classList.toggle('active', b === btn));
+      loadCourierApplications();
+    };
+  });
+
+  async function loadCourierApplications() {
+    const box = document.getElementById('couriers-list');
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const data = await api(`/api/staff/courier-applications?status=${couriersStatus}`);
+      renderCourierApplications(data.applications);
+    } catch (err) {
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
+    }
+  }
+
+  function renderCourierApplications(applications) {
+    const box = document.getElementById('couriers-list');
+    box.innerHTML = '';
+    if (!applications || applications.length === 0) {
+      box.innerHTML = `<p class="muted">No ${couriersStatus} courier applications.</p>`;
+      return;
+    }
+    applications.forEach((a) => {
+      const card = document.createElement('div');
+      card.className = 'staff-item';
+      card.innerHTML = `
+        <div class="staff-item-top">
+          <strong>@${esc(a.username)}</strong>
+          <span class="pill ${esc(a.status)}">${esc(a.status)}</span>
+        </div>
+        <div class="staff-item-meta">${esc(a.email || 'no email')} · applied ${timeAgo(a.createdAt)}${
+        a.resolvedAt ? ` · resolved ${timeAgo(a.resolvedAt)}` : ''
+      }</div>
+        ${a.note ? `<div class="staff-item-body">${esc(a.note)}</div>` : ''}
+        ${a.staffNote ? `<div class="staff-item-meta">Staff note: ${esc(a.staffNote)}</div>` : ''}
+        ${
+          a.status === 'pending'
+            ? `<div class="staff-actions">
+                 <button class="btn small courier-approve-btn">Approve</button>
+                 <button class="btn small secondary courier-reject-btn">Reject</button>
+               </div>`
+            : a.status === 'approved'
+            ? `<div class="staff-actions"><button class="btn small secondary courier-revoke-btn">Revoke courier access</button></div>`
+            : ''
+        }
+      `;
+      if (a.status === 'pending') {
+        card.querySelector('.courier-approve-btn').onclick = () => approveCourierApplication(a.id);
+        card.querySelector('.courier-reject-btn').onclick = () => rejectCourierApplication(a.id);
+      }
+      if (a.status === 'approved') {
+        card.querySelector('.courier-revoke-btn').onclick = () => revokeCourier(a.userId, a.username);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  async function approveCourierApplication(id) {
+    if (!confirm('Approve this applicant? They will immediately get access to the courier dashboard.')) return;
+    try {
+      await api(`/api/staff/courier-applications/${id}/approve`, 'POST');
+      loadCourierApplications();
+      loadSummary();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function revokeCourier(userId, username) {
+    if (!confirm(`End @${username}'s courier access? Any delivery they've claimed goes back to the open board, and their courier wallet is moved into their personal wallet.`)) return;
+    const reason = prompt('Optional: give a reason they will see (leave blank to skip).') || '';
+    try {
+      await api(`/api/staff/couriers/${encodeURIComponent(userId)}/revoke`, 'POST', { reason });
+      loadCourierApplications();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function rejectCourierApplication(id) {
+    const reason = prompt('Optional: give a reason the applicant will see (leave blank to skip).') || '';
+    try {
+      await api(`/api/staff/courier-applications/${id}/reject`, 'POST', { reason });
+      loadCourierApplications();
+      loadSummary();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   // ---------- employees ----------
 
   document.getElementById('add-employee-form').onsubmit = async (e) => {
@@ -531,7 +653,7 @@
       const data = await api('/api/staff/accounts');
       renderEmployees(data.accounts);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -547,7 +669,7 @@
       const row = document.createElement('div');
       row.className = 'staff-employee-row';
       row.innerHTML = `
-        <span>${a.username} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}${a.email ? ` <span class="muted" style="font-size:11px;">${a.email}</span>` : ''}</span>
+        <span>${esc(a.username)} ${a.role === 'owner' ? '<span class="pill approved">owner</span>' : '<span class="pill pending">employee</span>'}${a.email ? ` <span class="muted" style="font-size:11px;">${esc(a.email)}</span>` : ''}</span>
         <span class="muted">added ${timeAgo(a.createdAt)}</span>
         ${isOwner ? '<button class="btn small secondary revoke-sessions-btn" title="Signs this account out of every device it\'s logged into">Sign out everywhere</button>' : ''}
       `;
@@ -580,7 +702,7 @@
       const data = await api('/api/staff/audit-log');
       renderAuditLog(data.entries);
     } catch (err) {
-      box.innerHTML = `<p class="muted">${err.message}</p>`;
+      box.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
     }
   }
 
@@ -596,11 +718,11 @@
       row.className = 'staff-item';
       row.innerHTML = `
         <div class="staff-item-top">
-          <strong>${e.action.replace(/_/g, ' ')}</strong>
+          <strong>${esc(e.action.replace(/_/g, ' '))}</strong>
           <span class="muted" style="font-size:12px;">${timeAgo(e.createdAt)}</span>
         </div>
-        <div class="staff-item-meta">by ${e.staffUsername}</div>
-        ${e.details ? `<div class="staff-item-body">${e.details}</div>` : ''}
+        <div class="staff-item-meta">by ${esc(e.staffUsername)}</div>
+        ${e.details ? `<div class="staff-item-body">${esc(e.details)}</div>` : ''}
       `;
       box.appendChild(row);
     });

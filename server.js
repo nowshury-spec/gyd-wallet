@@ -83,6 +83,21 @@ function now() {
   return new Date().toISOString();
 }
 
+// Was this token issued before the account's sessions were revoked? Accepts
+// `iat` in either milliseconds or seconds (the JWT convention), so the check
+// can't be silently wrong about which unit auth.js uses: millisecond tokens
+// are compared exactly; second-resolution tokens can only be compared to the
+// second (a token minted in the same second as the revocation is treated as
+// newer — the best that resolution allows). A token with no iat counts as
+// issued before any revocation.
+function issuedBefore(data, invalidatedIso) {
+  const invalidatedMs = new Date(invalidatedIso).getTime();
+  const iat = Number(data && data.iat);
+  if (!Number.isFinite(iat) || iat <= 0) return true;
+  if (iat < 1e12) return iat < Math.floor(invalidatedMs / 1000);
+  return iat < invalidatedMs;
+}
+
 async function getAuthedUser(req) {
   const header = req.headers['authorization'] || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -94,7 +109,7 @@ async function getAuthedUser(req) {
   // sets sessions_invalidated_at to the moment it's clicked — any token
   // issued before that, including one an attacker stole earlier, stops
   // working immediately even though it hasn't hit its 7-day expiry yet.
-  if (user.sessions_invalidated_at && (!data.iat || data.iat < new Date(user.sessions_invalidated_at).getTime())) {
+  if (user.sessions_invalidated_at && issuedBefore(data, user.sessions_invalidated_at)) {
     return null;
   }
   return user;
@@ -116,7 +131,7 @@ async function getAuthedStaff(req) {
   // member log themselves out everywhere, or an owner cut off a specific
   // employee's access outright (see /api/staff/logout-all-sessions and
   // /api/staff/accounts/:id/revoke-sessions).
-  if (staff.sessions_invalidated_at && (!data.iat || data.iat < new Date(staff.sessions_invalidated_at).getTime())) {
+  if (staff.sessions_invalidated_at && issuedBefore(data, staff.sessions_invalidated_at)) {
     return null;
   }
   return staff;
@@ -165,21 +180,21 @@ const FRAUD_ALERT_COOLDOWN_MS = 60 * 60 * 1000; // don't re-alert on the same st
 async function maybeSendFraudAlert(staff) {
   if (!emailEnabled()) return; // nowhere to send it — same graceful no-op as everywhere else in email.js
   const alertKey = `fraud-alert:${staff.id}`;
-  if (rateLimitPeek(alertKey).count > 0) return; // already alerted on this staff member recently
+  if ((await rateLimitPeek(alertKey)).count > 0) return; // already alerted on this staff member recently
   const cutoff = new Date(Date.now() - FRAUD_ALERT_WINDOW_MS).toISOString();
   const recent = await db
     .prepare(`SELECT COUNT(*) AS n FROM staff_audit_log WHERE staff_id = ? AND action LIKE 'cashout_%' AND created_at >= ?`)
     .get(staff.id, cutoff);
   if (Number(recent.n) < FRAUD_ALERT_THRESHOLD) return;
 
-  rateLimitRecord(alertKey, FRAUD_ALERT_COOLDOWN_MS);
+  await rateLimitRecord(alertKey, FRAUD_ALERT_COOLDOWN_MS);
   const owners = await db.prepare(`SELECT email FROM staff_accounts WHERE role = 'owner' AND email IS NOT NULL`).all();
   for (const owner of owners) {
     await sendEmail(
       owner.email,
       'GYD Wallet: unusual staff activity',
       `<div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto;">
-        <p><strong>${staff.username}</strong> has processed ${recent.n} cash-out payouts/rejections in the last ${FRAUD_ALERT_WINDOW_MINUTES} minutes.</p>
+        <p><strong>${escHtml(staff.username)}</strong> has processed ${recent.n} cash-out payouts/rejections in the last ${FRAUD_ALERT_WINDOW_MINUTES} minutes.</p>
         <p>This may be completely normal — a busy shift, a backlog getting cleared — but it's worth a look at the audit log if it isn't what you'd expect.</p>
       </div>`
     );
@@ -221,11 +236,11 @@ function slugifyPaytag(base) {
   return slug.slice(0, 16);
 }
 
-async function generateUniquePaytag(base) {
+async function generateUniquePaytag(base, ownerId) {
   const slug = slugifyPaytag(base);
   let candidate = slug;
   let n = 0;
-  while (await db.prepare('SELECT id FROM users WHERE LOWER(paytag) = LOWER(?)').get(candidate)) {
+  while (await handleTakenByOther(candidate, ownerId)) {
     n += 1;
     candidate = `${slug}${n}`;
   }
@@ -242,7 +257,7 @@ async function generateUniqueUsername(base) {
   slug = slug.slice(0, 16);
   let candidate = slug;
   let n = 0;
-  while (await db.prepare('SELECT id FROM users WHERE username = ?').get(candidate)) {
+  while (await handleTakenByOther(candidate)) {
     n += 1;
     candidate = `${slug}${n}`;
   }
@@ -268,23 +283,42 @@ async function findOrCreateOAuthUser(provider, profile) {
     return db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id);
   }
 
+  // Only trust an email the provider says is verified. (oauth.js should
+  // only ever return verified addresses — e.g. Google's email_verified — but
+  // if it passes the flag through, respect it here too.)
+  const email = profile.email && profile.emailVerified !== false ? String(profile.email).trim().toLowerCase() : null;
+
   let user = null;
-  if (profile.email) {
-    user = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(profile.email);
+  if (email) {
+    const existing = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
+    if (existing) {
+      // Link into an existing account ONLY if that account has proven it
+      // owns this email. A password signup never verifies its email, so
+      // without this check anyone could register first using someone
+      // else's address, wait for them to "Continue with Google", and end
+      // up sharing their account — with a password the attacker knows.
+      if (!existing.email_verified) {
+        throw new Error(
+          'An account with this email already exists. Log in with its password first — or use "Forgot your password?" ' +
+            'to confirm you own this email — then Continue with Google will work.'
+        );
+      }
+      user = existing;
+    }
   }
 
   if (!user) {
-    const usernameBase = profile.name || (profile.email ? profile.email.split('@')[0] : provider);
+    const usernameBase = profile.name || (email ? email.split('@')[0] : provider);
     const username = await generateUniqueUsername(usernameBase);
     const paytag = await generateUniquePaytag(username);
     const { salt, hash } = hashPassword(crypto.randomBytes(32).toString('hex'));
     const id = crypto.randomUUID();
     await db
       .prepare(
-        `INSERT INTO users (id, username, paytag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 0, ?)`
+        `INSERT INTO users (id, username, paytag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at, email_verified)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 0, ?, ?::boolean)`
       )
-      .run(id, username, paytag, profile.email || null, hash, salt, now());
+      .run(id, username, paytag, email, hash, salt, now(), !!email);
     user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   }
 
@@ -292,15 +326,48 @@ async function findOrCreateOAuthUser(provider, profile) {
     .prepare(
       `INSERT INTO oauth_identities (id, user_id, provider, provider_user_id, email, created_at) VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(crypto.randomUUID(), user.id, provider, profile.providerUserId, profile.email || null, now());
+    .run(crypto.randomUUID(), user.id, provider, profile.providerUserId, email, now());
 
   return user;
 }
 
+// Resolve a "handle" someone typed or scanned to exactly one account.
+//   * "$name" is always a $paytag.
+//   * A bare "name" may be either a username or a paytag (QR codes printed
+//     before they carried the "$" hold a bare paytag), and resolves only if
+//     it matches exactly ONE account.
+// The old version matched `username = x OR paytag = x` and took whichever row
+// the database happened to return first — so if one person's username was
+// someone else's paytag, money could go to the wrong person. New collisions
+// can no longer be created (see /api/register and /api/me/paytag), but older
+// accounts may already collide; for those a bare name is reported as
+// ambiguous instead of guessed, and the sender is asked for the $paytag.
+async function resolveHandle(raw) {
+  const text = String(raw || '').trim();
+  const isPaytag = text.startsWith('$');
+  const handle = text.replace(/^\$/, '');
+  if (!handle) return { user: null, ambiguous: false };
+  const rows = isPaytag
+    ? await db.prepare('SELECT * FROM users WHERE LOWER(paytag) = LOWER(?) LIMIT 2').all(handle)
+    : await db.prepare('SELECT * FROM users WHERE username = ? OR LOWER(paytag) = LOWER(?) LIMIT 2').all(handle, handle);
+  if (rows.length === 1) return { user: rows[0], ambiguous: false };
+  return { user: null, ambiguous: rows.length > 1 };
+}
+
 async function findUserByHandle(raw) {
-  const handle = (raw || '').trim().replace(/^\$/, '');
-  if (!handle) return null;
-  return db.prepare('SELECT * FROM users WHERE username = ? OR LOWER(paytag) = LOWER(?)').get(handle, handle);
+  return (await resolveHandle(raw)).user;
+}
+
+const AMBIGUOUS_HANDLE_MSG = 'That name matches more than one account — enter their $paytag (with the $) instead.';
+
+// Case-insensitive: is `name` already someone else's username or $paytag?
+// Usernames and paytags share one namespace so a bare handle can never
+// point at two different people.
+async function handleTakenByOther(name, excludeUserId) {
+  const row = await db
+    .prepare('SELECT id FROM users WHERE (LOWER(username) = LOWER(?) OR LOWER(paytag) = LOWER(?)) AND id <> ? LIMIT 1')
+    .get(name, name, excludeUserId || '');
+  return !!row;
 }
 
 async function isBusinessAccount(userId) {
@@ -313,7 +380,7 @@ async function isBusinessAccount(userId) {
 // text message.
 async function generateReferenceCode() {
   for (let attempt = 0; attempt < 20; attempt++) {
-    const code = String(Math.floor(10000000 + Math.random() * 90000000));
+    const code = String(crypto.randomInt(10000000, 100000000)); // 8 digits, from the CSPRNG
     const existing = await db.prepare('SELECT id FROM remittances WHERE reference_code = ?').get(code);
     if (!existing) return code;
   }
@@ -404,8 +471,16 @@ function badRequest(res, message) {
   sendJson(res, 400, { error: message });
 }
 
+// Money is stored to the cent (NUMERIC(14,2) — see supabase/schema.sql), so
+// an amount must be a whole number of cents and within a sane range.
+// Previously any positive float was accepted (e.g. 0.001, or 1e300), and
+// sub-cent amounts silently drifted balances.
+const MAX_AMOUNT = 1_000_000_000;
+function isWholeCents(v) {
+  return Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
+}
 function positiveAmount(v) {
-  return typeof v === 'number' && isFinite(v) && v > 0;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_AMOUNT && isWholeCents(v);
 }
 
 function fmtNum(v) {
@@ -417,8 +492,11 @@ function fmtNum(v) {
 on('POST', '/api/register', async (req, res, params, query, body) => {
   const { username, password, isBusiness, businessName } = body;
   const email = (body.email || '').trim().toLowerCase();
-  if (!username || typeof username !== 'string' || username.length < 3) {
-    return badRequest(res, 'Username must be at least 3 characters.');
+  // Same character rules as a $paytag: usernames are shown all over the app
+  // and double as payment handles, so no spaces, look-alike punctuation, or
+  // markup. (Older accounts may predate this rule.)
+  if (typeof username !== 'string' || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    return badRequest(res, 'Username must be 3-20 letters, numbers, or underscores.');
   }
   // Required so a sender always has a way to reach whoever an account
   // belongs to, and so a future "forgot password" flow has somewhere to
@@ -430,8 +508,9 @@ on('POST', '/api/register', async (req, res, params, query, body) => {
   if (!password || typeof password !== 'string' || password.length < 6) {
     return badRequest(res, 'Password must be at least 6 characters.');
   }
-  const existing = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  if (existing) return badRequest(res, 'That username is already taken.');
+  // Case-insensitive, and across usernames AND $paytags — see
+  // handleTakenByOther for why they share one namespace.
+  if (await handleTakenByOther(username)) return badRequest(res, 'That username is already taken.');
   const existingEmail = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
   if (existingEmail) return badRequest(res, 'An account with that email already exists.');
 
@@ -458,8 +537,8 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
   const perAccountKey = `login:${(username || '').toLowerCase()}:${ip}`;
   const perIpKey = `login-ip:${ip}`;
 
-  const perAccountBucket = rateLimitPeek(perAccountKey);
-  const perIpBucket = rateLimitPeek(perIpKey);
+  const perAccountBucket = await rateLimitPeek(perAccountKey);
+  const perIpBucket = await rateLimitPeek(perIpKey);
   if (perAccountBucket.count >= LOGIN_MAX_ATTEMPTS || perIpBucket.count >= LOGIN_MAX_ATTEMPTS_PER_IP) {
     const bucket = perAccountBucket.count >= LOGIN_MAX_ATTEMPTS ? perAccountBucket : perIpBucket;
     return sendJson(res, 429, {
@@ -469,11 +548,11 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
 
   const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
   if (!user || !verifyPassword(password || '', user.password_salt, user.password_hash)) {
-    rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS);
-    rateLimitRecord(perIpKey, LOGIN_WINDOW_MS);
+    await rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS);
+    await rateLimitRecord(perIpKey, LOGIN_WINDOW_MS);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
-  rateLimitReset(perAccountKey);
+  await rateLimitReset(perAccountKey);
   const token = makeSessionToken(user.id);
   sendJson(res, 200, { token, user: publicUser(user) });
 });
@@ -543,44 +622,99 @@ on('GET', '/api/auth/facebook/callback', async (req, res, params, query) => {
 });
 
 const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_RESET_CODE_ATTEMPTS = 5; // wrong guesses allowed before a fresh code is required
+const MAX_RESET_CODE_ATTEMPTS = 5; // guesses allowed before a fresh code is required
 const FORGOT_MAX_PER_IP = 8; // requests per IP per window, for both forgot-* endpoints
 const FORGOT_WINDOW_MS = 15 * 60 * 1000;
 const RESET_PASSWORD_MAX_PER_IP = 30; // backstop against guessing codes across many emails
 const RESET_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
 
+// Demo/development ONLY. With no email/SMS provider configured, the
+// password-reset code, the forgotten username, and the staff 2FA code have
+// nowhere to go, so this prototype used to hand them straight back in the
+// HTTP response — and it ALSO did that whenever a configured provider
+// failed to send. In production that means anyone who knows an account's
+// email can reset its password, and staff 2FA collapses to password-only.
+// Now they're only ever shown on screen when this is explicitly turned on;
+// otherwise, with no way to deliver them, those endpoints refuse (503), and
+// a delivery failure is reported as a failure rather than falling back.
+const SHOW_CODES_ON_SCREEN = process.env.SHOW_CODES_ON_SCREEN === 'true';
+
+// A uniformly random, zero-padded numeric code from the CSPRNG (these used
+// to come from Math.random, which is not meant to be unpredictable).
+function randomDigits(n) {
+  return String(crypto.randomInt(0, 10 ** n)).padStart(n, '0');
+}
+
+// Constant-time string comparison for secrets such as one-time codes.
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+// Escape a value for an HTML email body (usernames and the like end up in
+// these, and older accounts' usernames aren't restricted to safe characters).
+function escHtml(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Spend one attempt on a one-time code (password reset or staff login) and
+// report whether the guess was right. The attempt is reserved with a single
+// conditional UPDATE — `attempts < max` is checked and incremented in the
+// same statement — so parallel guesses can't all slip in under the limit
+// the way a read-then-increment would allow. A correct guess is then marked
+// used with another conditional UPDATE, so the same code can't be redeemed
+// twice concurrently either. Returns { ok, row } or { ok: false, reason }.
+async function spendOneTimeCode(table, rowId, guess, maxAttempts) {
+  const claimed = await db.raw(
+    `UPDATE ${table} SET attempts = attempts + 1
+     WHERE id = $1 AND used_at IS NULL AND attempts < $2 AND expires_at > $3
+     RETURNING *`,
+    [rowId, maxAttempts, now()]
+  );
+  if (claimed.length === 0) return { ok: false, reason: 'exhausted' };
+  if (!safeEqual(claimed[0].code, guess)) return { ok: false, reason: 'wrong' };
+  const used = await db.raw(`UPDATE ${table} SET used_at = $1 WHERE id = $2 AND used_at IS NULL RETURNING id`, [now(), rowId]);
+  if (used.length === 0) return { ok: false, reason: 'exhausted' };
+  return { ok: true, row: claimed[0] };
+}
+
 // Forgotten password, step 1: look the account up by email and issue a
-// reset code. There's no real email sending wired up in this Phase 1
-// prototype (see "Why no npm packages" in README.md), so — in the same
-// "simulated" spirit as deposits — the code is handed straight back in
-// this response and shown on screen instead of actually being emailed.
-// Wiring in a real mail provider later just means deleting the `code`
-// line from this response and emailing it instead; nothing else changes.
+// reset code, delivered by email (or, only with SHOW_CODES_ON_SCREEN, shown
+// on screen).
 //
-// IMPORTANT: this always responds with a freshly generated code, whether
-// or not the email actually has an account — the code just never gets
-// stored anywhere for an email that doesn't match one. If this instead
-// returned an error for unknown emails, anyone could use this endpoint to
-// check which emails have accounts here; responding identically either way
-// closes that off without changing anything a real user experiences.
+// The response is IDENTICAL whether or not the email has an account — so
+// this endpoint can't be used to find out which emails are registered. (It
+// used to leak exactly that: with email configured, a registered address got
+// {sent: true} and an unregistered one got {code}.) A failed send is logged
+// server-side but still answered with {sent: true}: saying otherwise would
+// reveal that the address has an account.
 on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) => {
   const email = (body.email || '').trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) {
     return badRequest(res, 'Enter a valid email address.');
   }
+  if (!emailEnabled() && !SHOW_CODES_ON_SCREEN) {
+    return sendJson(res, 503, { error: "Password reset by email isn't set up on this server yet — please contact support." });
+  }
 
   const ipKey = `forgot-password-ip:${getClientIp(req)}`;
-  const ipBucket = rateLimitPeek(ipKey);
+  const ipBucket = await rateLimitPeek(ipKey);
   if (ipBucket.count >= FORGOT_MAX_PER_IP) {
     return sendJson(res, 429, {
       error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
     });
   }
-  rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
+  await rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
 
   const user = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
-  const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
-  let sent = false;
+  const code = randomDigits(6);
+  const viaEmail = emailEnabled();
 
   if (user) {
     // Only one active code per user at a time — clear out any earlier
@@ -588,36 +722,31 @@ on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) =>
     await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
     const createdAt = now();
     const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+    // sent_via_email records that redeeming this code proves the person
+    // controls the inbox — see email_verified on users.
     await db.prepare(
-      `INSERT INTO password_resets (id, user_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
-    ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt);
+      `INSERT INTO password_resets (id, user_id, code, created_at, expires_at, sent_via_email) VALUES (?, ?, ?, ?, ?, ?::boolean)`
+    ).run(crypto.randomUUID(), user.id, code, createdAt, expiresAt, viaEmail);
 
-    // With real email delivery configured (see email.js), send the code
-    // there instead of handing it back in this response — see
-    // "Setting up real email delivery" in README.md for how to turn this
-    // on. Falls back to the old on-screen behavior if sending fails for
-    // any reason (bad key, provider outage), so this can never lock
-    // someone out of resetting their own password.
-    if (emailEnabled()) {
+    if (viaEmail) {
       const result = await sendEmail(
         email,
         'Your GYD Wallet reset code',
         codeEmailHtml('Here is your GYD Wallet password reset code:', code, 15)
       );
-      sent = result.sent;
+      if (!result.sent) console.error('Password reset email failed to send for user', user.id);
     }
   }
-  // NOTE: when email is configured, this response takes measurably longer
-  // for an email that has an account (it waits on the real send) than one
-  // that doesn't — a minor timing side-channel on top of the response-shape
-  // protection above. Not worth the complexity of an artificial delay for
-  // what's still a Phase 1 prototype, but worth knowing about.
+  // NOTE: with email configured, this response takes measurably longer for
+  // an email that has an account (it waits on the real send) than one that
+  // doesn't — a minor timing side-channel on top of the response-shape
+  // protection above.
 
-  if (sent) {
-    sendJson(res, 200, { sent: true, expiresInMinutes: 15 });
-  } else {
-    sendJson(res, 200, { code, expiresInMinutes: 15 });
-  }
+  if (viaEmail) return sendJson(res, 200, { sent: true, expiresInMinutes: 15 });
+  // SHOW_CODES_ON_SCREEN demo mode: a code is returned for every request,
+  // registered or not (it's only stored for a real account), so even here
+  // the response shape doesn't reveal which emails exist.
+  sendJson(res, 200, { code, expiresInMinutes: 15 });
 });
 
 // Forgotten password, step 2: spend the code from step 1 to set a new
@@ -625,7 +754,7 @@ on('POST', '/api/auth/forgot-password', async (req, res, params, query, body) =>
 // /api/login) so they don't have to re-enter the new password immediately.
 on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => {
   const email = (body.email || '').trim().toLowerCase();
-  const code = (body.code || '').trim();
+  const code = String(body.code || '').trim();
   const { newPassword } = body;
   if (!email || !EMAIL_RE.test(email)) return badRequest(res, 'Enter a valid email address.');
   if (!code) return badRequest(res, 'Enter the reset code.');
@@ -634,18 +763,17 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
   }
 
   const ipKey = `reset-password-ip:${getClientIp(req)}`;
-  const ipBucket = rateLimitPeek(ipKey);
+  const ipBucket = await rateLimitPeek(ipKey);
   if (ipBucket.count >= RESET_PASSWORD_MAX_PER_IP) {
     return sendJson(res, 429, {
       error: `Too many attempts from this connection. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
     });
   }
-  rateLimitRecord(ipKey, RESET_PASSWORD_WINDOW_MS);
+  await rateLimitRecord(ipKey, RESET_PASSWORD_WINDOW_MS);
 
   // Same "invalid or expired" message for every failure case below — unknown
-  // email, no active code, expired code, wrong code, too many guesses — so
-  // this endpoint can't be used to check whether an email has an account
-  // (see the enumeration note on /api/auth/forgot-password above).
+  // email, no active code, expired code, wrong code — so this endpoint can't
+  // be used to check whether an email has an account.
   const invalidMsg = 'That reset code is invalid or has expired.';
 
   const user = await db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email);
@@ -654,74 +782,80 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
   const reset = await db
     .prepare('SELECT * FROM password_resets WHERE user_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1')
     .get(user.id);
-  if (!reset || new Date(reset.expires_at).getTime() < Date.now()) {
-    return badRequest(res, invalidMsg);
-  }
-  // A 6-digit code only has 1,000,000 possibilities, so without this an
-  // automated script could simply try all of them inside the 15-minute
-  // window. Capping wrong guesses per code makes that infeasible — after
-  // this many misses, the code is dead even if it hasn't expired yet, and
-  // the only way forward is requesting a brand new one.
-  if (reset.attempts >= MAX_RESET_CODE_ATTEMPTS) {
-    return badRequest(res, 'Too many incorrect attempts. Request a new reset code.');
-  }
-  if (reset.code !== code) {
-    await db.prepare('UPDATE password_resets SET attempts = attempts + 1 WHERE id = ?').run(reset.id);
+  if (!reset) return badRequest(res, invalidMsg);
+
+  // A 6-digit code only has 1,000,000 possibilities, so each code allows only
+  // MAX_RESET_CODE_ATTEMPTS guesses in total — enforced atomically (see
+  // spendOneTimeCode) so parallel requests can't exceed it.
+  const spent = await spendOneTimeCode('password_resets', reset.id, code, MAX_RESET_CODE_ATTEMPTS);
+  if (!spent.ok) {
+    if (spent.reason === 'exhausted' && reset.attempts + 1 >= MAX_RESET_CODE_ATTEMPTS) {
+      return badRequest(res, 'Too many incorrect attempts. Request a new reset code.');
+    }
     return badRequest(res, invalidMsg);
   }
 
+  // A password reset signs the account out everywhere: whoever it was reset
+  // to lock out (someone holding a stolen session) loses access too. The
+  // fresh token issued just below is minted after this instant, so it stays
+  // valid (see issuedBefore).
+  const invalidatedAt = now();
   const { salt, hash } = hashPassword(newPassword);
-  await db.prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, user.id);
-  await db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(now(), reset.id);
+  await db.prepare(
+    `UPDATE users SET password_hash = ?, password_salt = ?, sessions_invalidated_at = ?,
+       email_verified = (email_verified OR ?::boolean)
+     WHERE id = ?`
+  ).run(hash, salt, invalidatedAt, !!spent.row.sent_via_email, user.id);
 
   const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   const token = makeSessionToken(user.id);
   sendJson(res, 200, { token, user: publicUser(updated) });
 });
 
-// Forgotten username: same "simulated" idea as forgot-password above, but
-// simpler — there's no secret to reset, just a lookup, so the username is
-// handed straight back and shown on screen instead of being emailed.
+// Forgotten username: emails the username to the address, if it has an
+// account. Like forgot-password, the response is the same either way, so it
+// can't be used to probe which emails are registered.
 //
-// NOTE (unlike forgot-password above): this one CAN'T fully hide whether an
-// email has an account, because the whole point is showing the real
-// username on screen — there's no fake value to hand back instead without
-// actively misleading someone who typos their own email. The IP rate limit
-// below is the mitigation: it caps how many emails any one visitor can
-// probe per window, without needing real email delivery to close this off
-// completely (which would require sending the username out-of-band instead
-// of displaying it, the same way a production build should for the reset
-// code above).
+// SHOW_CODES_ON_SCREEN demo mode only: with no email provider, the username
+// is shown on screen instead — which unavoidably reveals whether the email
+// has an account (there's no fake username to show instead), with the IP
+// rate limit below as the only mitigation. Never enable that in production.
 on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) => {
   const email = (body.email || '').trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) {
     return badRequest(res, 'Enter a valid email address.');
   }
+  if (!emailEnabled() && !SHOW_CODES_ON_SCREEN) {
+    return sendJson(res, 503, { error: "Username reminders by email aren't set up on this server yet — please contact support." });
+  }
 
   const ipKey = `forgot-username-ip:${getClientIp(req)}`;
-  const ipBucket = rateLimitPeek(ipKey);
+  const ipBucket = await rateLimitPeek(ipKey);
   if (ipBucket.count >= FORGOT_MAX_PER_IP) {
     return sendJson(res, 429, {
       error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
     });
   }
-  rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
+  await rateLimitRecord(ipKey, FORGOT_WINDOW_MS);
 
   const user = await db.prepare('SELECT username FROM users WHERE LOWER(email) = ?').get(email);
-  if (!user) return badRequest(res, 'No account found with that email.');
 
   if (emailEnabled()) {
-    const result = await sendEmail(
-      email,
-      'Your GYD Wallet username',
-      `<div style="font-family: -apple-system, sans-serif; max-width: 420px; margin: 0 auto;">
-        <p>Your GYD Wallet username is:</p>
-        <p style="font-size: 22px; font-weight: 800; text-align: center; margin: 24px 0;">${user.username}</p>
-      </div>`
-    );
-    if (result.sent) return sendJson(res, 200, { sent: true });
+    if (user) {
+      const result = await sendEmail(
+        email,
+        'Your GYD Wallet username',
+        `<div style="font-family: -apple-system, sans-serif; max-width: 420px; margin: 0 auto;">
+          <p>Your GYD Wallet username is:</p>
+          <p style="font-size: 22px; font-weight: 800; text-align: center; margin: 24px 0;">${escHtml(user.username)}</p>
+        </div>`
+      );
+      if (!result.sent) console.error('Username reminder email failed to send');
+    }
+    return sendJson(res, 200, { sent: true });
   }
 
+  if (!user) return badRequest(res, 'No account found with that email.');
   sendJson(res, 200, { username: user.username });
 });
 
@@ -759,19 +893,70 @@ on(
   })
 );
 
-// Same idea as upgrading to a business account right above, but for
-// delivering dropshipping orders instead of running a storefront — see the
-// "dropshipping" and "courier" sections further down. Nothing to name or
-// configure: courier_gyd_balance already defaults to 0, so there's just
-// the one flag to flip.
+// Shared by the applicant's own view (GET /api/account/courier-application)
+// and the staff queue (GET /api/staff/courier-applications) — the applicant
+// never needs to see staff_note or resolved_by, but including them here
+// anyway is harmless (nothing sensitive) and keeps this one function usable
+// by both.
+function courierApplicationPublic(row) {
+  return {
+    id: row.id,
+    status: row.status,
+    note: row.note || null,
+    staffNote: row.staff_note || null,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at || null,
+  };
+}
+
+// Unlike upgrading to a business account right above, becoming a courier
+// isn't self-serve — see the comment on courier_applications in
+// supabase/schema.sql. This only ever creates a 'pending' application; a
+// staff member has to approve it (see POST
+// /api/staff/courier-applications/:id/approve further down) before
+// is_courier actually flips to true. Idempotent against a second tap: if
+// there's already a pending application, this just hands that back rather
+// than creating a duplicate.
 on(
   'POST',
-  '/api/account/upgrade-to-courier',
+  '/api/account/apply-courier',
   requireAuth(async (req, res, params, query, body, user) => {
     if (user.is_courier) return badRequest(res, 'This account is already a courier account.');
-    await db.prepare('UPDATE users SET is_courier = true WHERE id = ?').run(user.id);
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    const existingPending = await db.prepare(
+      `SELECT * FROM courier_applications WHERE user_id = ? AND status = 'pending'`
+    ).get(user.id);
+    if (existingPending) return sendJson(res, 200, { application: courierApplicationPublic(existingPending) });
+
+    const note = String(body.note || '').trim().slice(0, 500);
+    // The unique partial index on (user_id) WHERE status = 'pending' makes a
+    // second pending row impossible even if two requests race past the
+    // check above; the loser just gets the winner's application back.
+    const inserted = await db.raw(
+      `INSERT INTO courier_applications (id, user_id, status, note, created_at) VALUES ($1, $2, 'pending', $3, $4)
+       ON CONFLICT (user_id) WHERE status = 'pending' DO NOTHING
+       RETURNING *`,
+      [crypto.randomUUID(), user.id, note || null, now()]
+    );
+    if (inserted.length === 0) {
+      const pending = await db.prepare(`SELECT * FROM courier_applications WHERE user_id = ? AND status = 'pending'`).get(user.id);
+      return sendJson(res, 200, { application: courierApplicationPublic(pending) });
+    }
+    sendJson(res, 201, { application: courierApplicationPublic(inserted[0]) });
+  })
+);
+
+// Lets the customer's own "Deliver" tab show the right one of three states
+// (apply / pending / approved) without guessing from is_courier alone —
+// see enterCourierTab in app.js. Always the applicant's own MOST RECENT
+// application, so a re-apply after a rejection is what's shown.
+on(
+  'GET',
+  '/api/account/courier-application',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const app = await db.prepare(
+      `SELECT * FROM courier_applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(user.id);
+    sendJson(res, 200, { application: app ? courierApplicationPublic(app) : null });
   })
 );
 
@@ -791,8 +976,9 @@ on(
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(raw)) {
       return badRequest(res, '$Paytag must be 3-20 letters, numbers, or underscores.');
     }
-    const existing = await db.prepare('SELECT id FROM users WHERE LOWER(paytag) = LOWER(?) AND id != ?').get(raw, user.id);
-    if (existing) return badRequest(res, 'That $paytag is already taken.');
+    // Also rejects another account's USERNAME: otherwise a bare handle could
+    // point at two people and a payment might reach the wrong one.
+    if (await handleTakenByOther(raw, user.id)) return badRequest(res, 'That $paytag is already taken.');
     await db.prepare('UPDATE users SET paytag = ? WHERE id = ?').run(raw, user.id);
     const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     sendJson(res, 200, { user: publicUser(updated) });
@@ -826,7 +1012,8 @@ on(
   requireAuth(async (req, res, params) => {
     // Despite the route's :username param name (kept stable for callers),
     // this accepts either a username or a $paytag — see findUserByHandle.
-    const other = await findUserByHandle(params.username);
+    const { user: other, ambiguous } = await resolveHandle(params.username);
+    if (ambiguous) return sendJson(res, 409, { error: AMBIGUOUS_HANDLE_MSG });
     if (!other) return sendJson(res, 404, { error: 'No user with that username or $paytag.' });
     sendJson(res, 200, { id: other.id, username: other.username, paytag: other.paytag, isBusiness: !!other.is_business, businessName: other.business_name });
   })
@@ -916,7 +1103,8 @@ on(
     const amount = Number(body.amount);
     if (!toHandle) return badRequest(res, 'Choose who to send to.');
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount.');
-    const recipient = await findUserByHandle(toHandle);
+    const { user: recipient, ambiguous } = await resolveHandle(toHandle);
+    if (ambiguous) return badRequest(res, AMBIGUOUS_HANDLE_MSG);
     if (!recipient) return badRequest(res, 'No user with that username or $paytag.');
     if (recipient.id === user.id) return badRequest(res, "You can't send money to yourself.");
     if (user.gyd_balance < amount) return badRequest(res, 'Not enough GYD.');
@@ -955,6 +1143,35 @@ on(
 // pickup counter asks for. See README.md for the fee formula and the
 // licensing note that comes with it.
 
+// GYD Direct pickups are protected by an 8-digit reference code plus the
+// recipient's name — neither is a strong secret on its own (the name is
+// often guessable), so both the lookup and the claim endpoints are rate
+// limited per account and per IP, and each transfer allows only a fixed
+// number of pickup attempts in total (see remittances.claim_attempts).
+const MAX_REMIT_CLAIM_ATTEMPTS = 5;
+const REMIT_WINDOW_MS = 15 * 60 * 1000;
+const REMIT_LOOKUPS_PER_USER = 20;
+const REMIT_LOOKUPS_PER_IP = 60;
+const REMIT_FAILED_CLAIMS_PER_USER = 10;
+const REMIT_FAILED_CLAIMS_PER_IP = 30;
+
+// Case-, space- and spacing-insensitive name comparison.
+function normalizeName(n) {
+  return String(n || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+// Returns a 429 response if any of the given [key, max] buckets is full.
+async function rateLimited(res, buckets) {
+  for (const [key, max] of buckets) {
+    const b = await rateLimitPeek(key);
+    if (b.count >= max) {
+      sendJson(res, 429, { error: `Too many attempts. Try again in ${retryAfterMinutes(b)} minute(s).` });
+      return true;
+    }
+  }
+  return false;
+}
+
 function remittancePublic(r) {
   return {
     id: r.id,
@@ -965,6 +1182,9 @@ function remittancePublic(r) {
     fee: r.fee,
     total: Math.round((r.amount + r.fee) * 100) / 100,
     status: r.status,
+    // Too many pickup attempts: can't be collected any more — the sender
+    // should cancel it (full refund) and resend.
+    locked: r.status === 'pending' && (r.claim_attempts || 0) >= MAX_REMIT_CLAIM_ATTEMPTS,
     createdAt: r.created_at,
     completedAt: r.completed_at,
     cancelledAt: r.cancelled_at,
@@ -1062,17 +1282,24 @@ on(
 on(
   'GET',
   '/api/remit/lookup',
-  requireAuth(async (req, res, params, query) => {
+  requireAuth(async (req, res, params, query, body, user) => {
     const code = (query.code || '').trim();
     if (!code) return badRequest(res, 'Enter a reference code.');
+    const userKey = `remit-lookup-user:${user.id}`;
+    const ipKey = `remit-lookup-ip:${getClientIp(req)}`;
+    if (await rateLimited(res, [[userKey, REMIT_LOOKUPS_PER_USER], [ipKey, REMIT_LOOKUPS_PER_IP]])) return;
+    await rateLimitRecord(userKey, REMIT_WINDOW_MS);
+    await rateLimitRecord(ipKey, REMIT_WINDOW_MS);
     const row = await db.prepare('SELECT * FROM remittances WHERE reference_code = ?').get(code);
     if (!row) return sendJson(res, 404, { error: 'No transfer found with that reference code.' });
     // Deliberately does not reveal who sent it, or the recipient's phone
     // number — just enough to confirm you have the right code before you
     // type in the recipient name, the way a real pickup screen would.
+    const locked = row.status === 'pending' && row.claim_attempts >= MAX_REMIT_CLAIM_ATTEMPTS;
     sendJson(res, 200, {
       status: row.status,
-      amount: row.status === 'pending' ? row.amount : null,
+      locked,
+      amount: row.status === 'pending' && !locked ? row.amount : null,
     });
   })
 );
@@ -1081,16 +1308,39 @@ on(
   'POST',
   '/api/remit/claim',
   requireAuth(async (req, res, params, query, body, user) => {
-    const code = (body.referenceCode || '').trim();
-    const name = (body.recipientName || '').trim();
+    const code = String(body.referenceCode || '').trim();
+    const name = String(body.recipientName || '').trim();
     if (!code) return badRequest(res, 'Enter the reference code.');
     if (!name) return badRequest(res, 'Enter the recipient name exactly as the sender typed it.');
 
+    const userKey = `remit-claim-fail-user:${user.id}`;
+    const ipKey = `remit-claim-fail-ip:${getClientIp(req)}`;
+    if (await rateLimited(res, [[userKey, REMIT_FAILED_CLAIMS_PER_USER], [ipKey, REMIT_FAILED_CLAIMS_PER_IP]])) return;
+    const fail = async (message) => {
+      await rateLimitRecord(userKey, REMIT_WINDOW_MS);
+      await rateLimitRecord(ipKey, REMIT_WINDOW_MS);
+      return badRequest(res, message);
+    };
+
     const row = await db.prepare('SELECT * FROM remittances WHERE reference_code = ?').get(code);
-    if (!row) return badRequest(res, 'No transfer found with that reference code.');
+    if (!row) return fail('No transfer found with that reference code.');
     if (row.status !== 'pending') return badRequest(res, 'This transfer has already been picked up or was cancelled.');
-    if (row.recipient_name.trim().toLowerCase() !== name.toLowerCase()) {
-      return badRequest(res, "That name doesn't match the recipient name on this transfer.");
+
+    // Spend one of this transfer's pickup attempts BEFORE comparing the name,
+    // in a single conditional UPDATE, so parallel guesses can't exceed the
+    // limit (a read-then-increment check could be raced).
+    const reserved = await db.raw(
+      `UPDATE remittances SET claim_attempts = claim_attempts + 1
+       WHERE id = $1 AND status = 'pending' AND claim_attempts < $2 RETURNING recipient_name`,
+      [row.id, MAX_REMIT_CLAIM_ATTEMPTS]
+    );
+    if (reserved.length === 0) {
+      return fail(
+        'This transfer is locked after too many pickup attempts. Ask the sender to cancel it (they get a full refund) and send it again.'
+      );
+    }
+    if (normalizeName(reserved[0].recipient_name) !== normalizeName(name)) {
+      return fail("That name doesn't match the recipient name on this transfer.");
     }
 
     const rows = await db.raw(
@@ -1153,7 +1403,8 @@ on(
     const note = (body.note || '').trim().slice(0, 300);
     if (!toHandle) return badRequest(res, "Enter a username or $paytag to request from.");
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount to request.');
-    const payer = await findUserByHandle(toHandle);
+    const { user: payer, ambiguous } = await resolveHandle(toHandle);
+    if (ambiguous) return badRequest(res, AMBIGUOUS_HANDLE_MSG);
     if (!payer) return badRequest(res, 'No user with that username or $paytag.');
     if (payer.id === user.id) return badRequest(res, "You can't request money from yourself.");
 
@@ -1777,10 +2028,11 @@ on(
     const hours = (body.hours || '').trim().slice(0, 200);
     const offersDelivery = body.offersDelivery ? 1 : 0;
     const deliveryFeeRaw = Number(body.deliveryFee);
-    const deliveryFee = offersDelivery && isFinite(deliveryFeeRaw) && deliveryFeeRaw >= 0 ? deliveryFeeRaw : 0;
+    const validFee = Number.isFinite(deliveryFeeRaw) && deliveryFeeRaw >= 0 && deliveryFeeRaw <= MAX_AMOUNT && isWholeCents(deliveryFeeRaw);
+    const deliveryFee = offersDelivery && validFee ? deliveryFeeRaw : 0;
     if (!category) return badRequest(res, 'Choose a category for your business.');
     if (!tagline) return badRequest(res, 'Add a short tagline for your page.');
-    if (body.offersDelivery && !(isFinite(deliveryFeeRaw) && deliveryFeeRaw >= 0)) {
+    if (body.offersDelivery && !validFee) {
       return badRequest(res, 'Enter a delivery fee of 0 or more (0 means free delivery).');
     }
 
@@ -2101,11 +2353,11 @@ on(
     if (!review) return sendJson(res, 404, { error: 'That review no longer exists.' });
 
     const ipKey = `report-review-ip:${getClientIp(req)}`;
-    const ipBucket = rateLimitPeek(ipKey);
+    const ipBucket = await rateLimitPeek(ipKey);
     if (ipBucket.count >= 10) {
       return sendJson(res, 429, { error: `Too many reports. Try again in ${retryAfterMinutes(ipBucket)} minute(s).` });
     }
-    rateLimitRecord(ipKey, 15 * 60 * 1000);
+    await rateLimitRecord(ipKey, 15 * 60 * 1000);
 
     const reason = (body.reason || '').trim().slice(0, 500);
     const message =
@@ -2303,8 +2555,10 @@ function businessEventPublic(row, ticketsSold) {
   };
 }
 
+// Tickets that still count toward capacity (refunded ones — from a cancelled
+// event — don't).
 async function countTicketsSold(eventId) {
-  const row = await db.prepare('SELECT COUNT(*) as n FROM event_tickets WHERE event_id = ?').get(eventId);
+  const row = await db.prepare("SELECT COUNT(*) as n FROM event_tickets WHERE event_id = ? AND status <> 'refunded'").get(eventId);
   return row ? Number(row.n) : 0;
 }
 
@@ -2382,10 +2636,24 @@ on(
     const row = await db.prepare('SELECT * FROM business_events WHERE id = ?').get(params.id);
     if (!row) return sendJson(res, 404, { error: 'Event not found.' });
     if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This event is not yours to cancel.' });
-    await db.prepare("UPDATE business_events SET status = 'cancelled' WHERE id = ?").run(params.id);
+    // Cancelling refunds every ticket holder in full, in one transaction —
+    // see cancel_event_with_refunds in supabase/schema.sql.
+    const [{ result }] = await db.raw(`SELECT public.cancel_event_with_refunds($1, $2, $3) AS result`, [row.id, user.id, now()]);
+    if (!result || !result.ok) {
+      const reason = result && result.error;
+      if (reason === 'already_cancelled') return badRequest(res, 'This event is already cancelled.');
+      if (reason === 'insufficient_business_funds') {
+        return badRequest(
+          res,
+          `Cancelling refunds every ticket holder, which needs GYD ${fmtNum(Number(result.needed))} in your business wallet. ` +
+            'Contact support if you need to cancel without enough funds there.'
+        );
+      }
+      return badRequest(res, 'This event could not be cancelled.');
+    }
     const rows = await db.prepare('SELECT * FROM business_events WHERE business_id = ? ORDER BY created_at DESC').all(user.id);
     const events = await Promise.all(rows.map(async (r) => businessEventPublic(r, await countTicketsSold(r.id))));
-    sendJson(res, 200, { events });
+    sendJson(res, 200, { events, refundedTickets: result.refunded_tickets, refundedTotal: Number(result.refunded_total) });
   })
 );
 
@@ -2396,7 +2664,10 @@ on(
     const row = await db.prepare('SELECT * FROM business_events WHERE id = ?').get(params.id);
     if (!row) return sendJson(res, 404, { error: 'Event not found.' });
     if (row.business_id !== user.id) return sendJson(res, 403, { error: 'This event is not yours to remove.' });
-    if ((await countTicketsSold(row.id)) > 0) {
+    // Any ticket ever sold (even refunded ones) keeps the event, so the
+    // buyers' ticket and refund history isn't deleted along with it.
+    const anyTickets = await db.prepare('SELECT 1 AS x FROM event_tickets WHERE event_id = ? LIMIT 1').get(row.id);
+    if (anyTickets) {
       return badRequest(res, 'This event already has tickets sold — cancel it instead of deleting it.');
     }
     await db.prepare('DELETE FROM business_events WHERE id = ?').run(params.id);
@@ -2441,67 +2712,50 @@ on(
       return badRequest(res, 'Choose between 1 and 10 tickets.');
     }
 
+    // Fast, friendly pre-checks only — the real checks (capacity, balance)
+    // happen again inside purchase_event_tickets while holding a lock on the
+    // event, which is what actually prevents overselling.
     const alreadySold = await countTicketsSold(event.id);
     if (event.capacity !== null && alreadySold + quantity > event.capacity) {
       const remaining = Math.max(0, event.capacity - alreadySold);
       return badRequest(res, remaining === 0 ? 'This event is sold out.' : `Only ${remaining} ticket(s) left.`);
     }
-
     const totalPrice = Math.round(event.ticket_price * quantity * 100) / 100;
     if (user.gyd_balance < totalPrice) return badRequest(res, 'Not enough GYD.');
 
-    // The platform takes its cut out of the ticket price rather than adding a
-    // fee on top — the buyer pays exactly ticketPrice × quantity, and the
-    // business receives the rest. See README.md for why the fee itself
-    // isn't credited to any account (same treatment as GYD Direct's fee).
-    const perTicketFee = Math.round(event.ticket_price * EVENT_TICKET_FEE_RATE * 100) / 100;
-    const totalFee = Math.round(perTicketFee * quantity * 100) / 100;
-    const netToBusiness = Math.round((totalPrice - totalFee) * 100) / 100;
+    const codes = new Set();
+    while (codes.size < quantity) codes.add(await generateTicketCode());
+    const ticketCodes = [...codes];
 
-    // One atomic statement: debits the buyer and credits the business only
-    // if the buyer has enough GYD AND the event still has room for
-    // `quantity` more tickets, both checked against the row as it stands at
-    // the moment of the update — closes the obvious "two buyers grab the
-    // last ticket at once" race that a separate check-then-write couldn't.
-    const debitRows = await db.raw(
-      `WITH info AS (
-         SELECT capacity, (SELECT COUNT(*) FROM event_tickets WHERE event_id = $4) as sold
-         FROM business_events WHERE id = $4
-       ), debit AS (
-         UPDATE users SET gyd_balance = gyd_balance - $1
-         WHERE id = $2 AND gyd_balance >= $1
-           AND ( (SELECT capacity FROM info) IS NULL OR (SELECT sold FROM info) + $5 <= (SELECT capacity FROM info) )
-         RETURNING gyd_balance
-       ), credit AS (
-         UPDATE users SET business_gyd_balance = business_gyd_balance + $3 WHERE id = $6 AND EXISTS (SELECT 1 FROM debit) RETURNING 1
-       )
-       SELECT gyd_balance FROM debit`,
-      [totalPrice, user.id, netToBusiness, event.id, quantity, event.business_id]
-    );
-    if (debitRows.length === 0) {
-      return badRequest(res, 'This purchase could not be completed — the event may have just sold out, or your balance changed. Please try again.');
-    }
-
-    const tickets = [];
+    let result;
     try {
-      for (let i = 0; i < quantity; i++) {
-        const ticketId = crypto.randomUUID();
-        const code = await generateTicketCode();
-        await db.prepare(
-          `INSERT INTO event_tickets (id, event_id, buyer_user_id, ticket_code, price_paid, platform_fee, status, purchased_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'valid', ?)`
-        ).run(ticketId, event.id, user.id, code, event.ticket_price, perTicketFee, now());
-        tickets.push({ id: ticketId, ticketCode: code });
-      }
+      const rows = await db.raw(
+        `SELECT public.purchase_event_tickets($1, $2, $3, $4::jsonb, $5, $6) AS result`,
+        [event.id, user.id, quantity, JSON.stringify(ticketCodes), EVENT_TICKET_FEE_RATE, now()]
+      );
+      result = rows[0] && rows[0].result;
     } catch (err) {
-      // The payment already went through but issuing the ticket(s) failed
-      // (a rare mid-request hiccup) — refund both sides rather than leave
-      // the buyer charged with nothing to show for it.
-      console.error('Ticket issuance failed after payment, refunding:', err);
-      await db.raw('UPDATE users SET gyd_balance = gyd_balance + $1 WHERE id = $2', [totalPrice, user.id]);
-      await db.raw('UPDATE users SET business_gyd_balance = business_gyd_balance - $1 WHERE id = $2', [netToBusiness, event.business_id]);
+      // Any error inside the function rolls the whole purchase back, so the
+      // buyer hasn't been charged.
+      console.error('Ticket purchase failed:', err);
       return sendJson(res, 500, { error: 'Could not complete the purchase — you have not been charged. Please try again.' });
     }
+    if (!result || !result.ok) {
+      const reason = result && result.error;
+      if (reason === 'sold_out') {
+        return badRequest(res, result.remaining ? `Only ${result.remaining} ticket(s) left.` : 'This event is sold out.');
+      }
+      if (reason === 'insufficient_funds') return badRequest(res, 'Not enough GYD.');
+      if (reason === 'not_active') return badRequest(res, 'This event is no longer selling tickets.');
+      if (reason === 'own_event') return badRequest(res, "You can't buy a ticket to your own event.");
+      return badRequest(res, 'This purchase could not be completed. Please try again.');
+    }
+    const totalFee = Number(result.fee);
+    const tickets = (
+      await db
+        .prepare(`SELECT id, ticket_code FROM event_tickets WHERE ticket_code IN (SELECT jsonb_array_elements_text(?::jsonb))`)
+        .all(JSON.stringify(ticketCodes))
+    ).map((t) => ({ id: t.id, ticketCode: t.ticket_code }));
 
     await logTx({
       type: 'event_ticket',
@@ -2559,18 +2813,23 @@ on(
     const buyer = await db.prepare('SELECT username FROM users WHERE id = ?').get(ticket.buyer_user_id);
     const buyerUsername = buyer ? buyer.username : 'unknown';
 
-    if (ticket.status === 'checked_in') {
+    // Only a 'valid' ticket can be checked in, and the status flip is
+    // conditional so two simultaneous scans can't both admit the same
+    // ticket. A refunded ticket (its event was cancelled) never gets in.
+    const flipped = await db.raw(
+      `UPDATE event_tickets SET status = 'checked_in', checked_in_at = $1 WHERE id = $2 AND status = 'valid' RETURNING *`,
+      [now(), ticket.id]
+    );
+    if (flipped.length === 0) {
+      const current = await db.prepare('SELECT * FROM event_tickets WHERE id = ?').get(ticket.id);
       return sendJson(res, 200, {
         ok: false,
-        reason: 'already_checked_in',
+        reason: current.status === 'refunded' ? 'refunded' : 'already_checked_in',
         eventTitle: event.title,
-        ticket: eventTicketPublic(ticket, buyerUsername),
+        ticket: eventTicketPublic(current, buyerUsername),
       });
     }
-
-    await db.prepare("UPDATE event_tickets SET status = 'checked_in', checked_in_at = ? WHERE id = ?").run(now(), ticket.id);
-    const updated = await db.prepare('SELECT * FROM event_tickets WHERE id = ?').get(ticket.id);
-    sendJson(res, 200, { ok: true, eventTitle: event.title, ticket: eventTicketPublic(updated, buyerUsername) });
+    sendJson(res, 200, { ok: true, eventTitle: event.title, ticket: eventTicketPublic(flipped[0], buyerUsername) });
   })
 );
 
@@ -2789,7 +3048,8 @@ on(
   'POST',
   '/api/business/checkout',
   requireAuth(async (req, res, params, query, body, user) => {
-    const bizUser = await findUserByHandle(body.businessHandle || '');
+    const { user: bizUser, ambiguous } = await resolveHandle(body.businessHandle || '');
+    if (ambiguous) return badRequest(res, AMBIGUOUS_HANDLE_MSG);
     if (!bizUser || !bizUser.is_business) return badRequest(res, 'No business with that username or $paytag.');
     if (bizUser.id === user.id) return badRequest(res, "You can't check out with your own business.");
 
@@ -2979,11 +3239,17 @@ async function releasePendingOrder(orderId, reason) {
 
 // The escape hatch for either side: refunds the customer in full and marks
 // the order cancelled. Same atomic-claim guard as releasePendingOrder.
-async function refundPendingOrder(orderId, reason) {
+// byCustomer: a customer may only cancel while the business hasn't started
+// preparing the order AND the pickup window hasn't ended. Both conditions are
+// part of the same UPDATE that flips the status, so a lock or an expiry that
+// lands a moment earlier can't be raced (checking them in JS beforehand,
+// as the customer route used to, left a window between check and refund).
+async function refundPendingOrder(orderId, reason, { byCustomer = false } = {}) {
+  const customerOnly = byCustomer ? 'AND NOT COALESCE(locked_by_business, FALSE) AND expires_at > $3' : '';
   const rows = await db.raw(
     `WITH claim AS (
        UPDATE business_orders SET status = 'cancelled', release_reason = $2, resolved_at = $3
-       WHERE id = $1 AND status = 'pending'
+       WHERE id = $1 AND status = 'pending' ${customerOnly}
        RETURNING customer_id, amount, pickup_code
      ), refund AS (
        UPDATE users SET gyd_balance = gyd_balance + (SELECT amount FROM claim)
@@ -3046,11 +3312,17 @@ on(
     if (!order) return sendJson(res, 404, { error: 'Order not found.' });
     if (order.customer_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours to cancel." });
     if (order.status !== 'pending') return badRequest(res, 'This order is no longer pending.');
-    if (order.locked_by_business) {
-      return badRequest(res, 'The business has already started preparing this order — contact them directly if you need to cancel.');
+    const lockedMsg = 'The business has already started preparing this order — contact them directly if you need to cancel.';
+    const expiredMsg = "This order's pickup window has ended, so it can no longer be cancelled here — contact the business.";
+    if (order.locked_by_business) return badRequest(res, lockedMsg);
+    if (new Date(order.expires_at).getTime() <= Date.now()) return badRequest(res, expiredMsg);
+    const refunded = await refundPendingOrder(order.id, 'cancelled_by_customer', { byCustomer: true });
+    if (!refunded) {
+      const fresh = await db.prepare('SELECT * FROM business_orders WHERE id = ?').get(order.id);
+      if (fresh.status === 'pending' && fresh.locked_by_business) return badRequest(res, lockedMsg);
+      if (fresh.status === 'pending') return badRequest(res, expiredMsg);
+      return badRequest(res, 'This order was already resolved — try refreshing.');
     }
-    const refunded = await refundPendingOrder(order.id, 'cancelled_by_customer');
-    if (!refunded) return badRequest(res, 'This order was already resolved — try refreshing.');
     const updated = await db
       .prepare(
         `SELECT bo.*, u.username AS business_username, u.business_name AS business_display_name
@@ -3147,7 +3419,11 @@ on(
     if (!order) return sendJson(res, 404, { error: 'Order not found.' });
     if (order.business_id !== user.id) return sendJson(res, 403, { error: "This order isn't yours." });
     if (order.status !== 'pending') return badRequest(res, 'This order is no longer pending.');
-    await db.prepare('UPDATE business_orders SET locked_by_business = TRUE WHERE id = ?').run(order.id);
+    const locked = await db.raw(
+      `UPDATE business_orders SET locked_by_business = TRUE WHERE id = $1 AND status = 'pending' RETURNING id`,
+      [order.id]
+    );
+    if (locked.length === 0) return badRequest(res, 'This order is no longer pending.');
     const updated = await db
       .prepare(
         `SELECT bo.*, u.username AS customer_username
@@ -3556,21 +3832,37 @@ on(
     // debit didn't happen — so an order can never end up sitting in
     // 'awaiting_courier' without the fee actually paid, and can never be
     // double-charged.
+    // Charge the delivery fee and move the order to 'awaiting_courier' in ONE
+    // statement, gated so the status only ever changes when the debit
+    // actually succeeded. The previous version tried the opposite order —
+    // flip the status first, then "revert" it in a later CTE if the debit
+    // failed — but that can't work: every CTE in a single statement runs
+    // against the same snapshot, so a second UPDATE targeting the row the
+    // first CTE already changed matches nothing and the revert silently
+    // no-ops. That left an underfunded order in 'awaiting_courier' with its
+    // delivery fee and code already set but never charged — it showed up on
+    // the courier board and, on delivery confirmation, paid the courier a
+    // fee the customer never paid (money created from nothing).
+    //
+    // Here `gate` just checks the order is still claimable, `debit` only
+    // succeeds if the funds are there (its own WHERE guarantees it, and the
+    // check is re-applied on the contended user row under READ COMMITTED —
+    // the same atomic pattern used for charge-requests and ticket sales
+    // above), and the order UPDATE is guarded on `EXISTS (debit)`. If the
+    // debit fails, the order is simply left untouched — no compensating
+    // revert to get wrong.
     const rows = await db.raw(
       `WITH gate AS (
-         UPDATE dropshipping_orders
-         SET status = 'awaiting_courier', fulfillment = 'delivery', delivery_fee_gyd = $1, delivery_code = $2
-         WHERE id = $3 AND status = 'arrived_at_warehouse'
-         RETURNING id
+         SELECT id FROM dropshipping_orders WHERE id = $3 AND status = 'arrived_at_warehouse'
        ), debit AS (
          UPDATE users SET gyd_balance = gyd_balance - $1
          WHERE id = $4 AND gyd_balance >= $1 AND EXISTS (SELECT 1 FROM gate)
          RETURNING gyd_balance
-       ), revert AS (
+       ), upd AS (
          UPDATE dropshipping_orders
-         SET status = 'arrived_at_warehouse', fulfillment = NULL, delivery_fee_gyd = NULL, delivery_code = NULL
-         WHERE id = $3 AND EXISTS (SELECT 1 FROM gate) AND NOT EXISTS (SELECT 1 FROM debit)
-         RETURNING 1
+         SET status = 'awaiting_courier', fulfillment = 'delivery', delivery_fee_gyd = $1, delivery_code = $2
+         WHERE id = $3 AND status = 'arrived_at_warehouse' AND EXISTS (SELECT 1 FROM debit)
+         RETURNING id
        )
        SELECT gyd_balance FROM debit`,
       [deliveryFeeGyd, deliveryCode, order.id, user.id]
@@ -3633,9 +3925,11 @@ on(
 // ---------- courier (dropshipping delivery) ----------
 //
 // The third account role alongside personal and business (see is_courier /
-// courier_gyd_balance in supabase/schema.sql) — anyone can opt in, same as
-// upgrading to a business account (see POST /api/account/upgrade-to-courier
-// above). A courier claims a delivery once its customer has chosen
+// courier_gyd_balance in supabase/schema.sql) — anyone can apply, but
+// unlike upgrading to a business account, becoming a courier needs staff
+// approval first (see POST /api/account/apply-courier and the "staff:
+// courier applications" section further down). A courier claims a delivery
+// once its customer has chosen
 // delivery (status 'awaiting_courier' — see
 // POST /api/dropshipping/orders/:id/choose-fulfillment above), and gets
 // paid the delivery fee only once they've actually entered the delivery
@@ -3868,9 +4162,17 @@ const CSP =
   "font-src https://fonts.gstatic.com; " +
   "img-src 'self' data: https://api.qrserver.com; " +
   "connect-src 'self'; " +
+  // No plugins/embeds and no nested frames: an injected <object>, <embed>,
+  // or <iframe> can't load anything, closing those off as HTML-injection
+  // vectors in addition to frame-ancestors stopping US from being framed.
+  "object-src 'none'; " +
+  "frame-src 'none'; " +
   "frame-ancestors 'none'; " +
   "base-uri 'self'; " +
-  "form-action 'self'";
+  "form-action 'self'; " +
+  // Force any stray http:// subresource up to https:// rather than letting
+  // it be blocked as mixed content or travel in the clear.
+  "upgrade-insecure-requests";
 
 function applySecurityHeaders(res) {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -3882,57 +4184,92 @@ function applySecurityHeaders(res) {
 }
 
 // ---------- lightweight rate limiting ----------
-// A small in-memory guard against brute-forcing (guessing passwords or
-// reset codes) and against hammering the account-lookup endpoints. It's
-// intentionally simple — a Map, not a separate service — since this is a
-// single-instance Phase 1 prototype; the trade-off is that counts reset if
-// the server restarts or redeploys. That's an acceptable gap for a
-// prototype (it still stops casual/automated abuse), but a production
-// deployment behind multiple instances should move this to something
-// shared, like a Redis counter.
-const rateLimitBuckets = new Map(); // key -> { count, resetAt }
-
-function rateLimitPeek(key) {
-  const bucket = rateLimitBuckets.get(key);
-  if (!bucket || bucket.resetAt <= Date.now()) return { count: 0, resetAt: 0 };
-  return bucket;
+// A guard against brute-forcing (guessing passwords or codes) and against
+// hammering the account-lookup endpoints.
+//
+// Counts live in Postgres (the rate_limits table), not in process memory:
+// an in-memory Map reset on every deploy or restart — which on Render's free
+// plan (auto-sleep) happens often — and wasn't shared between instances, so
+// an attacker could simply wait for a restart or spread requests across
+// instances to get fresh limits. Each record is one atomic upsert.
+async function rateLimitPeek(key) {
+  const row = await db.prepare('SELECT count, reset_at FROM rate_limits WHERE key = ? AND reset_at > ?').get(key, Date.now());
+  return row ? { count: Number(row.count), resetAt: Number(row.reset_at) } : { count: 0, resetAt: 0 };
 }
 
-function rateLimitRecord(key, windowMs) {
+async function rateLimitRecord(key, windowMs) {
   const nowMs = Date.now();
-  let bucket = rateLimitBuckets.get(key);
-  if (!bucket || bucket.resetAt <= nowMs) {
-    bucket = { count: 0, resetAt: nowMs + windowMs };
-    rateLimitBuckets.set(key, bucket);
-  }
-  bucket.count += 1;
-  return bucket;
+  const [row] = await db.raw(
+    `INSERT INTO rate_limits (key, count, reset_at) VALUES ($1, 1, $2)
+     ON CONFLICT (key) DO UPDATE SET
+       count = CASE WHEN rate_limits.reset_at <= $3 THEN 1 ELSE rate_limits.count + 1 END,
+       reset_at = CASE WHEN rate_limits.reset_at <= $3 THEN $2 ELSE rate_limits.reset_at END
+     RETURNING count, reset_at`,
+    [key, nowMs + windowMs, nowMs]
+  );
+  return { count: Number(row.count), resetAt: Number(row.reset_at) };
 }
 
-function rateLimitReset(key) {
-  rateLimitBuckets.delete(key);
+async function rateLimitReset(key) {
+  await db.prepare('DELETE FROM rate_limits WHERE key = ?').run(key);
 }
 
 function retryAfterMinutes(bucket) {
   return Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 60000));
 }
 
-// Periodic cleanup so this Map doesn't grow forever on a long-running
-// process — expired buckets are also skipped on read, this just reclaims
-// their memory.
+// Periodically delete expired counters so the table doesn't grow forever
+// (expired rows are already ignored on read).
 setInterval(() => {
-  const nowMs = Date.now();
-  for (const [key, bucket] of rateLimitBuckets) {
-    if (bucket.resetAt <= nowMs) rateLimitBuckets.delete(key);
-  }
+  db.prepare('DELETE FROM rate_limits WHERE reset_at <= ?')
+    .run(Date.now())
+    .catch((err) => console.error('rate_limits cleanup failed:', err.message));
 }, 10 * 60 * 1000).unref();
 
+// Where the real client IP comes from, for every per-IP rate limit.
+//
+// CLIENT_IP_HEADER names a header that a trusted edge proxy sets to the
+// client's IP, OVERWRITING anything the client sent. On Render (detected via
+// the RENDER=true variable Render sets) the default is True-Client-IP, which
+// Render's Cloudflare edge fills in. Render's X-Forwarded-For has several
+// proxy hops in it (client, Cloudflare edge, Render-internal), so reading a
+// fixed position from it is fragile — the last entry is an internal address
+// shared by every user, which would put everyone in one rate-limit bucket.
+const CLIENT_IP_HEADER = (process.env.CLIENT_IP_HEADER || (process.env.RENDER === 'true' ? 'true-client-ip' : ''))
+  .trim()
+  .toLowerCase();
+
+// Fallback when there's no such header: how many trusted reverse proxies
+// append to X-Forwarded-For in front of this app. Default 1; override with
+// TRUSTED_PROXY_HOPS (set 0 for a direct/no-proxy deployment).
+const TRUSTED_PROXY_HOPS = (() => {
+  const n = parseInt(process.env.TRUSTED_PROXY_HOPS ?? '1', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+})();
+
 function getClientIp(req) {
-  // Render (like most PaaS providers) sits in front of the app as a proxy
-  // and forwards the real client IP as the first entry of this header.
+  // The client IP used for every per-IP rate limit (login, password reset,
+  // username lookup, support tickets, review reports). This MUST NOT trust
+  // the LEFT of X-Forwarded-For: any client can send an arbitrary XFF
+  // header, so the leftmost entry is attacker-controlled — a brute-forcer
+  // could put a fresh random value there on every request to mint unlimited
+  // "distinct IP" buckets and defeat the limit entirely (the previous
+  // version took exactly that leftmost token). Each proxy in the chain
+  // APPENDS the address it actually saw, so the trustworthy client address
+  // is TRUSTED_PROXY_HOPS entries from the RIGHT; everything further left was
+  // supplied by the client and is ignored. With no proxy, use the socket peer.
+  const socketIp = req.socket.remoteAddress || 'unknown';
+  if (CLIENT_IP_HEADER) {
+    const v = req.headers[CLIENT_IP_HEADER];
+    if (typeof v === 'string' && v.trim()) return v.split(',')[0].trim();
+  }
+  if (TRUSTED_PROXY_HOPS === 0) return socketIp;
   const xff = req.headers['x-forwarded-for'];
-  if (xff) return xff.split(',')[0].trim();
-  return req.socket.remoteAddress || 'unknown';
+  if (!xff) return socketIp;
+  const parts = String(xff).split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length === 0) return socketIp;
+  const idx = parts.length - TRUSTED_PROXY_HOPS;
+  return parts[idx >= 0 ? idx : 0] || socketIp;
 }
 
 // ---------- support tickets (customer-facing) ----------
@@ -3963,13 +4300,13 @@ on('POST', '/api/support/tickets', async (req, res, params, query, body) => {
   if (!message) return badRequest(res, 'Describe the issue you\'re having.');
 
   const ipKey = `support-ticket-ip:${getClientIp(req)}`;
-  const ipBucket = rateLimitPeek(ipKey);
+  const ipBucket = await rateLimitPeek(ipKey);
   if (ipBucket.count >= 10) {
     return sendJson(res, 429, {
       error: `Too many requests. Try again in ${retryAfterMinutes(ipBucket)} minute(s).`,
     });
   }
-  rateLimitRecord(ipKey, 15 * 60 * 1000);
+  await rateLimitRecord(ipKey, 15 * 60 * 1000);
 
   // If the request carries a valid session, attach it to the ticket and
   // pull name/email from the account instead of trusting client-supplied
@@ -4028,17 +4365,17 @@ const STAFF_CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_STAFF_CODE_ATTEMPTS = 5;
 
 // Step 1 of staff login: username + password only gets a one-time code, not
-// a session — see /api/staff/login/verify-code below for step 2. The code
-// comes back in this same response and staff.js shows it on screen, the
-// same "simulated" pattern as /api/auth/forgot-password (see
-// staff_login_codes in supabase/schema.sql for the important caveat: this
-// is a real second STEP today, but not yet a real second FACTOR until an
-// actual email/SMS integration replaces "shown on screen").
+// a session — see /api/staff/login/verify-code below for step 2. The code is
+// delivered to the staff member's email (or phone) on file, which is what
+// makes it a real second factor. Only with SHOW_CODES_ON_SCREEN (demo mode)
+// is it handed back in this response instead; without that, if there's no
+// way to deliver it, login is refused rather than silently degrading to
+// password-only.
 on('POST', '/api/staff/login', async (req, res, params, query, body) => {
   const { username, password } = body;
   const ip = getClientIp(req);
   const key = `staff-login:${(username || '').toLowerCase()}:${ip}`;
-  const bucket = rateLimitPeek(key);
+  const bucket = await rateLimitPeek(key);
   if (bucket.count >= STAFF_LOGIN_MAX_ATTEMPTS) {
     return sendJson(res, 429, {
       error: `Too many login attempts. Try again in ${retryAfterMinutes(bucket)} minute(s).`,
@@ -4047,25 +4384,19 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
 
   const staff = await db.prepare('SELECT * FROM staff_accounts WHERE username = ?').get(username || '');
   if (!staff || !verifyPassword(password || '', staff.password_salt, staff.password_hash)) {
-    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    await rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
-  rateLimitReset(key);
+  await rateLimitReset(key);
 
-  const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  const code = randomDigits(6);
+  const codeId = crypto.randomUUID();
   await db.prepare('DELETE FROM staff_login_codes WHERE staff_id = ?').run(staff.id);
   await db.prepare(
     `INSERT INTO staff_login_codes (id, staff_id, code, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
-  ).run(crypto.randomUUID(), staff.id, code, now(), new Date(Date.now() + STAFF_CODE_TTL_MS).toISOString());
+  ).run(codeId, staff.id, code, now(), new Date(Date.now() + STAFF_CODE_TTL_MS).toISOString());
 
-  // With an email or phone on file AND real delivery configured (see
-  // email.js, sms.js, PATCH /api/staff/me/email, and PATCH
-  // /api/staff/me/phone), this is a genuine second factor — the code goes
-  // somewhere the password alone doesn't get you. Email is tried first
-  // when both are on file (it was the first channel this app supported);
-  // SMS is the fallback. Without either configured, or without delivery
-  // set up at all, this falls back to the original "shown on screen"
-  // behavior, same as every other simulated code in this app.
+  // Email first when both are on file, SMS as the fallback channel.
   let sent = false;
   let sentVia = null;
   if (staff.email && emailEnabled()) {
@@ -4083,6 +4414,15 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
     if (sent) sentVia = 'sms';
   }
 
+  if (!sent && !SHOW_CODES_ON_SCREEN) {
+    await db.prepare('DELETE FROM staff_login_codes WHERE id = ?').run(codeId);
+    return sendJson(res, 503, {
+      error:
+        "We couldn't deliver your verification code. Make sure an email or phone number is on file for this staff account " +
+        'and that email/SMS delivery is configured on the server, then try again.',
+    });
+  }
+
   sendJson(res, 200, {
     requiresCode: true,
     username: staff.username,
@@ -4093,11 +4433,11 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
 
 // Step 2: spend the code from step 1 to actually get a session token.
 on('POST', '/api/staff/login/verify-code', async (req, res, params, query, body) => {
-  const username = (body.username || '').trim();
-  const code = (body.code || '').trim();
+  const username = String(body.username || '').trim();
+  const code = String(body.code || '').trim();
   const ip = getClientIp(req);
   const key = `staff-login-code:${username.toLowerCase()}:${ip}`;
-  const bucket = rateLimitPeek(key);
+  const bucket = await rateLimitPeek(key);
   if (bucket.count >= STAFF_LOGIN_MAX_ATTEMPTS) {
     return sendJson(res, 429, {
       error: `Too many attempts. Try again in ${retryAfterMinutes(bucket)} minute(s).`,
@@ -4107,28 +4447,29 @@ on('POST', '/api/staff/login/verify-code', async (req, res, params, query, body)
   const invalidMsg = 'That code is invalid or has expired — log in again to get a new one.';
   const staff = await db.prepare('SELECT * FROM staff_accounts WHERE username = ?').get(username || '');
   if (!staff) {
-    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    await rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
     return badRequest(res, invalidMsg);
   }
 
   const pending = await db
     .prepare('SELECT * FROM staff_login_codes WHERE staff_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1')
     .get(staff.id);
-  if (!pending || new Date(pending.expires_at).getTime() < Date.now()) {
-    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
-    return badRequest(res, invalidMsg);
-  }
-  if (pending.attempts >= MAX_STAFF_CODE_ATTEMPTS) {
-    return badRequest(res, 'Too many incorrect attempts. Log in again to get a new code.');
-  }
-  if (pending.code !== code) {
-    rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
-    await db.prepare('UPDATE staff_login_codes SET attempts = attempts + 1 WHERE id = ?').run(pending.id);
+  if (!pending) {
+    await rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
     return badRequest(res, invalidMsg);
   }
 
-  rateLimitReset(key);
-  await db.prepare('UPDATE staff_login_codes SET used_at = ? WHERE id = ?').run(now(), pending.id);
+  // Atomic per-code attempt limit — see spendOneTimeCode.
+  const spent = await spendOneTimeCode('staff_login_codes', pending.id, code, MAX_STAFF_CODE_ATTEMPTS);
+  if (!spent.ok) {
+    await rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
+    if (spent.reason === 'exhausted' && pending.attempts + 1 >= MAX_STAFF_CODE_ATTEMPTS) {
+      return badRequest(res, 'Too many incorrect attempts. Log in again to get a new code.');
+    }
+    return badRequest(res, invalidMsg);
+  }
+
+  await rateLimitReset(key);
   const token = makeStaffSessionToken(staff.id);
   sendJson(res, 200, { token, staff: publicStaff(staff) });
 });
@@ -4279,13 +4620,15 @@ on(
   'GET',
   '/api/staff/summary',
   requireStaffAuth(async (req, res, params, query, body, staff) => {
-    const [openTickets, pendingCashouts] = await Promise.all([
+    const [openTickets, pendingCashouts, pendingCourierApplications] = await Promise.all([
       db.prepare("SELECT COUNT(*) AS n FROM support_tickets WHERE status = 'open'").get(),
       db.prepare("SELECT COUNT(*) AS n FROM cashout_requests WHERE status = 'pending'").get(),
+      db.prepare("SELECT COUNT(*) AS n FROM courier_applications WHERE status = 'pending'").get(),
     ]);
     sendJson(res, 200, {
       openTickets: Number(openTickets.n),
       pendingCashouts: Number(pendingCashouts.n),
+      pendingCourierApplications: Number(pendingCourierApplications.n),
     });
   })
 );
@@ -4328,6 +4671,13 @@ on(
        WHERE id = ?`
     ).run(reply, staff.username, resolve ? 'resolved' : 'open', resolve ? now() : null, params.id);
 
+    await logStaffAction(
+      staff,
+      resolve ? 'support_ticket_replied_resolved' : 'support_ticket_replied',
+      params.id,
+      `Replied to support ticket "${ticket.subject}"${resolve ? ' and marked it resolved' : ''}`
+    );
+
     const updated = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
     sendJson(res, 200, {
       ticket: { ...supportTicketPublic(updated), name: updated.name, email: updated.email, repliedBy: updated.replied_by },
@@ -4342,6 +4692,7 @@ on(
     const ticket = await db.prepare('SELECT * FROM support_tickets WHERE id = ?').get(params.id);
     if (!ticket) return sendJson(res, 404, { error: 'Ticket not found.' });
     await db.prepare("UPDATE support_tickets SET status = 'resolved', resolved_at = ? WHERE id = ?").run(now(), params.id);
+    await logStaffAction(staff, 'support_ticket_resolved', params.id, `Marked support ticket "${ticket.subject}" resolved`);
     sendJson(res, 200, { ok: true });
   })
 );
@@ -4514,7 +4865,7 @@ on(
           customer.email,
           'Your order has arrived — GYD Wallet',
           `<div style="font-family: -apple-system, sans-serif; max-width: 420px; margin: 0 auto;">
-             <p>Hi ${customer.username},</p>
+             <p>Hi ${escHtml(customer.username)},</p>
              <p>Your order has arrived at our Guyana warehouse. Open the app and go to My Orders to choose whether you'd like to pick it up in person or have it delivered.</p>
            </div>`
         );
@@ -4550,9 +4901,99 @@ on(
   })
 );
 
+// ---- staff: courier applications ----
+//
+// Becoming a courier isn't self-serve (see the comment on
+// courier_applications in supabase/schema.sql and POST
+// /api/account/apply-courier above) — every application lands here first,
+// and is_courier only ever flips to true through the approve endpoint
+// below. Any staff member can review these (requireStaffAuth), same as
+// support tickets and cash-outs — this isn't an owner-only, account-access
+// kind of action.
+
+on(
+  'GET',
+  '/api/staff/courier-applications',
+  requireStaffAuth(async (req, res, params, query) => {
+    const status = ['pending', 'approved', 'rejected', 'revoked'].includes(query.status) ? query.status : 'pending';
+    const rows = await db
+      .prepare(
+        `SELECT a.*, u.username, u.email FROM courier_applications a JOIN users u ON u.id = a.user_id
+         WHERE a.status = ? ORDER BY a.created_at ASC LIMIT 200`
+      )
+      .all(status);
+    sendJson(res, 200, {
+      applications: rows.map((r) => ({ ...courierApplicationPublic(r), userId: r.user_id, username: r.username, email: r.email })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/courier-applications/:id/approve',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    // Atomic: the application only actually resolves, and the account only
+    // actually gains courier access, together — same "gate, then the thing
+    // that depends on it" idiom used for the delivery-fee charge above,
+    // just without any money involved here.
+    const rows = await db.raw(
+      `WITH app AS (
+         UPDATE courier_applications SET status = 'approved', resolved_at = $1, resolved_by = $2
+         WHERE id = $3 AND status = 'pending'
+         RETURNING user_id
+       ), u AS (
+         UPDATE users SET is_courier = true WHERE id = (SELECT user_id FROM app) RETURNING id
+       )
+       SELECT user_id FROM app`,
+      [now(), staff.id, params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This application is no longer pending.');
+
+    await logStaffAction(staff, 'courier_application_approved', params.id, `Approved courier application for user ${rows[0].user_id}`);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
+on(
+  'POST',
+  '/api/staff/courier-applications/:id/reject',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const reason = (body.reason || '').trim().slice(0, 500);
+    const rows = await db.raw(
+      `UPDATE courier_applications SET status = 'rejected', resolved_at = $1, resolved_by = $2, staff_note = $3
+       WHERE id = $4 AND status = 'pending' RETURNING user_id`,
+      [now(), staff.id, reason || null, params.id]
+    );
+    if (rows.length === 0) return badRequest(res, 'This application is no longer pending.');
+
+    await logStaffAction(staff, 'courier_application_rejected', params.id, `Rejected courier application for user ${rows[0].user_id}${reason ? ` — ${reason}` : ''}`);
+    sendJson(res, 200, { ok: true });
+  })
+);
+
 // The audit trail itself — owner-only (see requireStaffOwner). Read-only:
 // there is deliberately no endpoint anywhere that edits or deletes an
 // entry once written.
+// Ends someone's courier access (see revoke_courier in supabase/schema.sql
+// for everything that happens with it). Same staff tier as approving.
+on(
+  'POST',
+  '/api/staff/couriers/:userId/revoke',
+  requireStaffAuth(async (req, res, params, query, body, staff) => {
+    const reason = String(body.reason || '').trim().slice(0, 500);
+    const [{ result }] = await db.raw(`SELECT public.revoke_courier($1, $2, $3, $4) AS result`, [params.userId, staff.id, reason, now()]);
+    if (!result || !result.ok) return badRequest(res, 'That account is not currently a courier.');
+    await logStaffAction(
+      staff,
+      'courier_access_revoked',
+      params.userId,
+      `Revoked courier access for user ${params.userId}; moved GYD ${fmtNum(Number(result.swept))} to their personal wallet; ` +
+        `returned ${result.released} in-progress deliveries to the open board${reason ? ` — ${reason}` : ''}`
+    );
+    sendJson(res, 200, { ok: true, swept: Number(result.swept), released: result.released });
+  })
+);
+
 on(
   'GET',
   '/api/staff/audit-log',
@@ -4576,7 +5017,18 @@ on(
 const server = http.createServer(async (req, res) => {
   applySecurityHeaders(res);
   const parsedUrl = url.parse(req.url, true);
-  const pathname = decodeURIComponent(parsedUrl.pathname);
+  // decodeURIComponent throws URIError on a malformed percent-escape (e.g.
+  // a lone "%" or "%E0%A4%A"). This runs on every single request, outside
+  // any per-route try/catch, so letting it throw here would take an
+  // unhandled exception straight to the top and crash the whole process —
+  // any unauthenticated visitor could kill the server with one bad URL.
+  // Treat an undecodable path as a plain bad request instead.
+  let pathname;
+  try {
+    pathname = decodeURIComponent(parsedUrl.pathname);
+  } catch {
+    return badRequest(res, 'Malformed URL.');
+  }
 
   if (!pathname.startsWith('/api/')) {
     return serveStatic(req, res, parsedUrl);
