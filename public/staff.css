@@ -23,6 +23,19 @@ body { background: var(--bg); color: var(--text); }
 .staff-login-header { text-align: center; margin-bottom: 26px; }
 .staff-login-title { font-size: 22px; font-weight: 800; margin: 8px 0 4px; }
 
+/* ---------- password reveal toggle (login + add-employee forms) ---------- */
+
+.password-field { position: relative; }
+.password-field input { padding-right: 42px !important; }
+.password-reveal-btn {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; font-size: 16px; line-height: 1;
+  color: var(--muted); border-radius: var(--radius-sm); padding: 0;
+}
+.password-reveal-btn:hover { color: var(--text); background: var(--surface-2); }
+.password-reveal-btn.revealed { color: var(--accent); }
+
 /* ---------- dashboard shell ---------- */
 
 .staff-shell {

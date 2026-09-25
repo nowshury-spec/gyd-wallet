@@ -57,6 +57,22 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ---------- password reveal toggle ----------
+  // Lets a staff member check what they actually typed before submitting —
+  // e.g. after a password reset — without permanently switching the field to
+  // plain text. Delegated at the document level so it also covers the
+  // add-employee form's temporary-password field with the same handler.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.password-reveal-btn');
+    if (!btn) return;
+    const input = document.getElementById(btn.dataset.revealFor);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.classList.toggle('revealed', !showing);
+    btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+  });
+
   // ---------- login / logout ----------
 
   const loginScreen = document.getElementById('staff-login-screen');
