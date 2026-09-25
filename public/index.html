@@ -1233,10 +1233,21 @@
 
         <div id="courier-optin-section">
           <div class="panel">
-            <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t398">Become a courier — same login, same personal balance, plus a separate delivery wallet. Claim orders customers have chosen to have delivered, hand them over, and get paid once you enter the code they give you.</p>
-            <button class="btn secondary full" id="upgrade-courier-btn" data-i18n="t399">Become a courier</button>
-            <div class="error-msg" id="upgrade-courier-error"></div>
-            <p class="muted" id="upgrade-courier-success" style="font-size:12.5px; margin-top:8px;"></p>
+            <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t398">Apply to become a courier — same login, same personal balance, plus a separate delivery wallet. Claim orders customers have chosen to have delivered, hand them over, and get paid once you enter the code they give you. Approved applicants only — every application is reviewed by our team first.</p>
+            <p class="muted hidden" id="courier-rejected-note" style="font-size:12.5px; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.05); margin-bottom:10px;"></p>
+            <div class="field">
+              <label data-i18n="t411">Tell us a bit about yourself (optional)</label>
+              <textarea id="courier-apply-note" rows="3" maxlength="500" placeholder="Vehicle, area you'd cover, availability, etc." data-i18n-ph="t412"></textarea>
+            </div>
+            <button class="btn secondary full" id="apply-courier-btn" data-i18n="t413">Submit application</button>
+            <div class="error-msg" id="apply-courier-error"></div>
+            <p class="muted" id="apply-courier-success" style="font-size:12.5px; margin-top:8px;"></p>
+          </div>
+        </div>
+
+        <div id="courier-pending-section" class="hidden">
+          <div class="panel">
+            <p class="forgot-intro" style="margin-bottom:0;" data-i18n="t414">Your courier application has been submitted and is waiting on our team for further consideration. We'll let you know once it's been reviewed — check back here anytime.</p>
           </div>
         </div>
 
