@@ -509,9 +509,14 @@ on('POST', '/api/register', async (req, res, params, query, body) => {
     return badRequest(res, 'Password must be at least 6 characters.');
   }
   // Case-insensitive, and across usernames AND $paytags — see
-  // handleTakenByOther for why they share one namespace.
-  if (await handleTakenByOther(username)) return badRequest(res, 'That username is already taken.');
-  const existingEmail = await db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
+  // handleTakenByOther for why they share one namespace. These two checks
+  // don't depend on each other, so run them together instead of waiting for
+  // one full database round trip before starting the next.
+  const [usernameTaken, existingEmail] = await Promise.all([
+    handleTakenByOther(username),
+    db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email),
+  ]);
+  if (usernameTaken) return badRequest(res, 'That username is already taken.');
   if (existingEmail) return badRequest(res, 'An account with that email already exists.');
 
   const { salt, hash } = hashPassword(password);
@@ -537,8 +542,7 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
   const perAccountKey = `login:${(username || '').toLowerCase()}:${ip}`;
   const perIpKey = `login-ip:${ip}`;
 
-  const perAccountBucket = await rateLimitPeek(perAccountKey);
-  const perIpBucket = await rateLimitPeek(perIpKey);
+  const [perAccountBucket, perIpBucket] = await Promise.all([rateLimitPeek(perAccountKey), rateLimitPeek(perIpKey)]);
   if (perAccountBucket.count >= LOGIN_MAX_ATTEMPTS || perIpBucket.count >= LOGIN_MAX_ATTEMPTS_PER_IP) {
     const bucket = perAccountBucket.count >= LOGIN_MAX_ATTEMPTS ? perAccountBucket : perIpBucket;
     return sendJson(res, 429, {
@@ -548,8 +552,7 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
 
   const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
   if (!user || !verifyPassword(password || '', user.password_salt, user.password_hash)) {
-    await rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS);
-    await rateLimitRecord(perIpKey, LOGIN_WINDOW_MS);
+    await Promise.all([rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS), rateLimitRecord(perIpKey, LOGIN_WINDOW_MS)]);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
   await rateLimitReset(perAccountKey);
@@ -1061,10 +1064,18 @@ on(
     // SIMULATED: in Phase 1 there is no real payment processor connected.
     // A real build wires this endpoint to a licensed payments partner
     // (see the business plan) instead of crediting GYD directly.
-    await db.prepare('UPDATE users SET gyd_balance = gyd_balance + ? WHERE id = ?').run(amount, user.id);
+    // RETURNING hands back the fresh balance in the same round trip as the
+    // update itself, so there's no need to re-read the row afterwards. The
+    // transaction-log entry is written only AFTER the balance update has
+    // succeeded — never alongside it — so a failed update can't leave a
+    // "deposit" in someone's history for money that never arrived.
+    const [newBalanceRow] = await db.raw(
+      'UPDATE users SET gyd_balance = gyd_balance + $1 WHERE id = $2 RETURNING gyd_balance',
+      [amount, user.id]
+    );
+    if (!newBalanceRow) return sendJson(res, 404, { error: 'Account not found.' });
     await logTx({ type: 'deposit', toUser: user.id, amount, currency: 'GYD', note: 'Simulated deposit (no real payment processor connected)' });
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: newBalanceRow.gyd_balance }) });
   })
 );
 
@@ -1104,9 +1115,10 @@ on(
     );
     if (rows.length === 0) return badRequest(res, 'Not enough GYD.');
 
+    // The CTE above already returned the post-debit balance — no need to
+    // spend another round trip re-reading the row we just wrote.
     await logTx({ type: 'cashout_request', fromUser: user.id, amount, currency: 'GYD', status: 'pending', note: id });
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated), cashoutRequestId: id });
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance }), cashoutRequestId: id });
   })
 );
 
@@ -1157,8 +1169,10 @@ on(
       note: memo || null,
     });
 
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    // atomicTransfer already told us the sender's new balance — nothing else
+    // about this account changed, so there's no need for another database
+    // round trip just to re-read the row we already have.
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: newBalance }) });
   })
 );
 
@@ -1198,8 +1212,15 @@ function normalizeName(n) {
 
 // Returns a 429 response if any of the given [key, max] buckets is full.
 async function rateLimited(res, buckets) {
-  for (const [key, max] of buckets) {
-    const b = await rateLimitPeek(key);
+  // Each bucket is its own network round trip to the database — when a
+  // route checks more than one (e.g. a per-user AND a per-IP limit), there's
+  // no reason to make the second one wait for the first to come back, since
+  // neither depends on the other's result. Running them together instead of
+  // one after another cuts the wait roughly in half for those routes.
+  const results = await Promise.all(buckets.map(([key]) => rateLimitPeek(key)));
+  for (let i = 0; i < buckets.length; i++) {
+    const [, max] = buckets[i];
+    const b = results[i];
     if (b.count >= max) {
       sendJson(res, 429, { error: `Too many attempts. Try again in ${retryAfterMinutes(b)} minute(s).` });
       return true;
@@ -1247,6 +1268,7 @@ on(
 
     const id = crypto.randomUUID();
     const referenceCode = await generateReferenceCode();
+    const createdAt = now();
     const rows = await db.raw(
       `WITH debit AS (
          UPDATE users SET gyd_balance = gyd_balance - $1 WHERE id = $2 AND gyd_balance >= $1 RETURNING gyd_balance
@@ -1255,12 +1277,16 @@ on(
          SELECT $3, $4, $2, $5, $6, $7, $8, 'pending', $9 WHERE EXISTS (SELECT 1 FROM debit)
        )
        SELECT gyd_balance FROM debit`,
-      [total, user.id, id, referenceCode, recipientName, recipientPhone, amount, fee, now()]
+      [total, user.id, id, referenceCode, recipientName, recipientPhone, amount, fee, createdAt]
     );
     if (rows.length === 0) return badRequest(res, 'Not enough GYD.');
 
-    await rateLimitRecord(sendKey, 60 * 60 * 1000);
-    await logTx({ type: 'remit_send', fromUser: user.id, amount: total, currency: 'GYD', note: `To ${recipientName}, ref ${referenceCode}` });
+    // rateLimitRecord and logTx write to two unrelated tables, so there's no
+    // reason for one to wait on the other before starting.
+    await Promise.all([
+      rateLimitRecord(sendKey, 60 * 60 * 1000),
+      logTx({ type: 'remit_send', fromUser: user.id, amount: total, currency: 'GYD', note: `To ${recipientName}, ref ${referenceCode}` }),
+    ]);
 
     // With real SMS delivery configured (see sms.js), text the reference
     // code straight to the recipient instead of leaving the sender to
@@ -1278,9 +1304,27 @@ on(
       smsSent = result.sent;
     }
 
-    const row = await db.prepare('SELECT * FROM remittances WHERE id = ?').get(id);
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 201, { remittance: { ...remittancePublic(row), smsSent }, user: publicUser(updated) });
+    // Every field of the new remittance row, and the sender's new balance,
+    // is already known from the write above — re-reading both back from the
+    // database would just be two more round trips to fetch data we already
+    // have in hand.
+    const remittance = {
+      id,
+      reference_code: referenceCode,
+      recipient_name: recipientName,
+      recipient_phone: recipientPhone,
+      amount,
+      fee,
+      status: 'pending',
+      claim_attempts: 0,
+      created_at: createdAt,
+      completed_at: null,
+      cancelled_at: null,
+    };
+    sendJson(res, 201, {
+      remittance: { ...remittancePublic(remittance), smsSent },
+      user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance }),
+    });
   })
 );
 
@@ -1328,8 +1372,7 @@ on(
     const userKey = `remit-lookup-user:${user.id}`;
     const ipKey = `remit-lookup-ip:${getClientIp(req)}`;
     if (await rateLimited(res, [[userKey, REMIT_LOOKUPS_PER_USER], [ipKey, REMIT_LOOKUPS_PER_IP]])) return;
-    await rateLimitRecord(userKey, REMIT_WINDOW_MS);
-    await rateLimitRecord(ipKey, REMIT_WINDOW_MS);
+    await Promise.all([rateLimitRecord(userKey, REMIT_WINDOW_MS), rateLimitRecord(ipKey, REMIT_WINDOW_MS)]);
     const row = await db.prepare('SELECT * FROM remittances WHERE reference_code = ?').get(code);
     if (!row) return sendJson(res, 404, { error: 'No transfer found with that reference code.' });
     // Deliberately does not reveal who sent it, or the recipient's phone
@@ -1357,8 +1400,7 @@ on(
     const ipKey = `remit-claim-fail-ip:${getClientIp(req)}`;
     if (await rateLimited(res, [[userKey, REMIT_FAILED_CLAIMS_PER_USER], [ipKey, REMIT_FAILED_CLAIMS_PER_IP]])) return;
     const fail = async (message) => {
-      await rateLimitRecord(userKey, REMIT_WINDOW_MS);
-      await rateLimitRecord(ipKey, REMIT_WINDOW_MS);
+      await Promise.all([rateLimitRecord(userKey, REMIT_WINDOW_MS), rateLimitRecord(ipKey, REMIT_WINDOW_MS)]);
       return badRequest(res, message);
     };
 
@@ -1532,8 +1574,8 @@ on(
       note: request.note,
     });
 
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    // The CTE's debit already returned the post-payment balance.
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance }) });
   })
 );
 
@@ -1917,6 +1959,7 @@ function resolveChargeRequest(action) {
     if (request.customer_id !== user.id) return sendJson(res, 403, { error: 'This request is not addressed to you.' });
     if (request.status !== 'pending') return badRequest(res, 'This request has already been resolved.');
 
+    let newBalance = user.gyd_balance;
     if (action === 'approve') {
       if (user.gyd_balance < request.amount) return badRequest(res, 'Not enough GYD to approve this payment.');
       // Charge requests can only be created by a business account (see
@@ -1948,6 +1991,7 @@ function resolveChargeRequest(action) {
       if (rows.length === 0) {
         return badRequest(res, 'This payment could not be approved — it may have just been resolved, or you may not have enough GYD.');
       }
+      newBalance = rows[0].gyd_balance;
       await logTx({
         type: 'business_payment',
         fromUser: user.id,
@@ -1964,8 +2008,10 @@ function resolveChargeRequest(action) {
       if (rows.length === 0) return badRequest(res, 'This request has already been resolved.');
     }
 
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    // A decline never touches the balance, and an approve already has it
+    // from the debit above — either way there's no reason to re-read the
+    // user row from the database just to hand back a number we already have.
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: newBalance }) });
   });
 }
 
@@ -3971,8 +4017,8 @@ on(
 
     await logTx({ type: 'business_wallet_transfer', toUser: user.id, amount, currency: 'GYD', note: 'Moved from business wallet to personal wallet' });
 
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    // RETURNING above already gave us both fresh balances.
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance, business_gyd_balance: rows[0].business_gyd_balance }) });
   })
 );
 
@@ -4046,6 +4092,7 @@ on(
     // Atomic: only pays out once, and only for the delivery this courier
     // actually holds — same "credit only fires off a successful gate"
     // idiom as everywhere else money moves in this file.
+    const resolvedAt = now();
     const rows = await db.raw(
       `WITH gate AS (
          UPDATE dropshipping_orders SET status = 'delivered', resolved_at = $1
@@ -4057,7 +4104,7 @@ on(
          RETURNING courier_gyd_balance
        )
        SELECT courier_gyd_balance FROM credit`,
-      [now(), order.id, user.id]
+      [resolvedAt, order.id, user.id]
     );
     if (rows.length === 0) return badRequest(res, 'This delivery is not out for confirmation.');
 
@@ -4066,9 +4113,13 @@ on(
       note: `Delivery payout for dropshipping order ${order.id}`,
     });
 
-    const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    const updatedOrder = await db.prepare('SELECT * FROM dropshipping_orders WHERE id = ?').get(order.id);
-    sendJson(res, 200, { user: publicUser(updatedUser), order: dropshippingDeliveryPublic(updatedOrder) });
+    // The only two things that changed are the order's status/resolved_at
+    // (which we just set) and the courier's balance (which credit already
+    // returned) — no need to re-fetch either row from scratch.
+    sendJson(res, 200, {
+      user: publicUser({ ...user, courier_gyd_balance: rows[0].courier_gyd_balance }),
+      order: dropshippingDeliveryPublic({ ...order, status: 'delivered', resolved_at: resolvedAt }),
+    });
   })
 );
 
@@ -4090,8 +4141,8 @@ on(
 
     await logTx({ type: 'courier_wallet_transfer', toUser: user.id, amount, currency: 'GYD', note: 'Moved from courier wallet to personal wallet' });
 
-    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-    sendJson(res, 200, { user: publicUser(updated) });
+    // RETURNING above already gave us both fresh balances.
+    sendJson(res, 200, { user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance, courier_gyd_balance: rows[0].courier_gyd_balance }) });
   })
 );
 
