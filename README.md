@@ -479,6 +479,21 @@ A deleted account can't sign in, every existing session stops working, and it ca
 
 **Upgrade order:** re-run `supabase/schema.sql` in the Supabase SQL editor **before** deploying this code — the code expects the new `users.deleted_at` column, and fails until it exists.
 
+## Sign in with Face ID (passkeys)
+
+Help & Support → **Face ID sign-in** lets someone turn on "Sign in with Face ID" for the device they're using; the login screen then shows a **Sign in with Face ID** button. It's built on passkeys (WebAuthn), the web standard behind Face ID / Touch ID on Apple devices, fingerprint or face unlock on Android, and Windows Hello — so the same button works on all of them. The browser needs to support passkeys (Safari 16+, Chrome, Edge, Firefox 119+); where it doesn't, the button and the settings section simply don't appear.
+
+How it works: turning it on makes the device create a new key pair and keep the private half locked behind Face ID. The server stores only the public half (`passkeys` table in `supabase/schema.sql`). To sign in, the server sends a random one-time challenge, the device asks for Face ID and signs it, and `webauthn.js` checks the signature. **No face or fingerprint data ever reaches the server.**
+
+- Turning it on asks for the account password first, so someone holding a stolen session can't add their own Face ID and keep getting back in after "Log out of all devices". (Accounts made with Google/Facebook set a password first with "Forgot your password?".)
+- Every challenge works once and expires after 5 minutes; a key that keeps a use counter must count upwards, so a copied key is refused.
+- Each device can be removed from the list; a **password reset removes all of them**, and deleting the account erases them.
+- Passkeys belong to the website's address. On Render that's the service URL (Render's own `RENDER_EXTERNAL_URL`). If the app ever moves to its own domain, set `PASSKEY_ORIGIN` to the new address (e.g. `https://gydwallet.com`) — and everyone will need to turn Face ID on again there, because passkeys made for the old address don't carry over. Their passwords keep working throughout.
+
+`test/passkeys.test.js` runs every check against a simulated device holding real keys.
+
+**Upgrade order:** re-run `supabase/schema.sql` (it adds the `passkeys` table) **before** deploying this code.
+
 ## How product photos are stored
 
 *(Business page gallery photos are different: those are uploaded to the public `business-photos` Supabase Storage bucket through `db.js`'s `storageUpload`/`storageDelete` — which were missing from `db.js` until the security update, so gallery uploads always failed before it. This section is about product photos.)*

@@ -21,6 +21,7 @@ const { hashPassword, verifyPassword, makeSessionToken, makeStaffSessionToken, s
 const { LUDO_COLOR_SETS, ludoLegalMoves, ludoApplyMove, ludoHasWon } = require('./ludo');
 const { emailEnabled, sendEmail, codeEmailHtml } = require('./email');
 const { smsEnabled, sendSms } = require('./sms');
+const webauthn = require('./webauthn');
 const { dropshippingEnabled, fetchProductsFromCJ, placeOrderWithCJ } = require('./dropshipping');
 const {
   googleEnabled,
@@ -850,6 +851,10 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
        email_verified = (email_verified OR ?::boolean)
      WHERE id = ?`
   ).run(hash, salt, invalidatedAt, !!spent.row.sent_via_email, user.id);
+  // ...and turns off Face ID sign-in on every device: if someone else had
+  // set it up on their own phone while in the account, that stops working
+  // too. The owner just turns it on again for their own devices.
+  await db.prepare('DELETE FROM passkeys WHERE user_id = ?').run(user.id);
 
   const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   const token = makeSessionToken(user.id);
@@ -959,6 +964,187 @@ on(
     sendJson(res, 200, { deleted: true });
   })
 );
+
+// ---------- Face ID sign-in (passkeys) ----------
+//
+// See webauthn.js for how the check itself works. Turning it on happens from
+// Help & Support → Account security while logged in, and asks for the
+// password first: otherwise someone holding a stolen session could add their
+// own Face ID and keep getting back in after "Log out of all devices". A
+// password reset removes every passkey for the same reason.
+//
+// Each sign-in or set-up gets a random challenge, carried in a short-lived
+// signed token so the server keeps no state between the two requests; the
+// rate_limits table records each challenge once used, so a captured response
+// can't be replayed.
+const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const MAX_PASSKEYS_PER_USER = 10;
+const PASSKEY_FAILED_MSG = "Face ID sign-in didn't work. Try again, or log in with your password.";
+
+// The site a passkey belongs to. On Render this is the service's own URL
+// (RENDER_EXTERNAL_URL, set by Render automatically); PASSKEY_ORIGIN
+// overrides it (e.g. for a custom domain). Elsewhere (local development and
+// the tests) it's whatever host the request came in on.
+function passkeySite(req) {
+  const configured = process.env.PASSKEY_ORIGIN || process.env.RENDER_EXTERNAL_URL;
+  const origin = configured
+    ? new URL(configured).origin
+    : `${process.env.RENDER === 'true' ? 'https' : 'http'}://${req.headers.host || 'localhost'}`;
+  return { origin, rpId: new URL(origin).hostname };
+}
+
+function newPasskeyChallenge(purpose, userId) {
+  const challenge = crypto.randomBytes(32).toString('base64url');
+  // No `uid` field, so this can never pass for a session token.
+  const token = sign({ pkc: purpose, ch: challenge, sub: userId || null, exp: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
+  return { challenge, token };
+}
+
+// Returns the challenge if the token is genuine, unexpired, for this purpose
+// and user, and not used before — and marks it used.
+async function spendPasskeyChallenge(token, purpose, userId) {
+  const data = verify(typeof token === 'string' ? token : '');
+  if (!data || data.pkc !== purpose || typeof data.ch !== 'string') return null;
+  if ((data.sub || null) !== (userId || null)) return null;
+  const { count } = await rateLimitRecord(`passkey-challenge:${data.ch}`, PASSKEY_CHALLENGE_TTL_MS);
+  return count === 1 ? data.ch : null;
+}
+
+function passkeyPublic(row) {
+  return { id: row.id, name: row.name, createdAt: row.created_at, lastUsedAt: row.last_used_at };
+}
+
+on(
+  'GET',
+  '/api/passkeys',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const rows = await db.prepare('SELECT * FROM passkeys WHERE user_id = ? ORDER BY created_at').all(user.id);
+    sendJson(res, 200, { passkeys: rows.map(passkeyPublic) });
+  })
+);
+
+on(
+  'POST',
+  '/api/passkeys/register/options',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const key = `passkey-add:${user.id}`;
+    if (await rateLimited(res, [[key, LOGIN_MAX_ATTEMPTS]])) return;
+    if (!(await verifyPassword(String(body.password || ''), user.password_salt, user.password_hash))) {
+      await rateLimitRecord(key, LOGIN_WINDOW_MS);
+      return badRequest(res, 'That password is not correct. (Signed up with Google or Facebook? Set a password first with "Forgot your password?" on the login screen.)');
+    }
+    const existing = await db.prepare('SELECT id FROM passkeys WHERE user_id = ?').all(user.id);
+    if (existing.length >= MAX_PASSKEYS_PER_USER) {
+      return badRequest(res, `You can set up Face ID on at most ${MAX_PASSKEYS_PER_USER} devices. Remove one first.`);
+    }
+    const { rpId } = passkeySite(req);
+    const { challenge, token } = newPasskeyChallenge('register', user.id);
+    sendJson(res, 200, {
+      token,
+      publicKey: {
+        challenge,
+        rp: { id: rpId, name: 'GYD Wallet' },
+        user: { id: Buffer.from(user.id).toString('base64url'), name: user.username, displayName: user.username },
+        pubKeyCredParams: webauthn.SUPPORTED_ALGORITHMS.map((alg) => ({ type: 'public-key', alg })),
+        timeout: 120000,
+        attestation: 'none',
+        authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
+        excludeCredentials: existing.map((r) => ({ type: 'public-key', id: r.id })),
+      },
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/passkeys/register',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const challenge = await spendPasskeyChallenge(body.token, 'register', user.id);
+    if (!challenge) return badRequest(res, 'That took too long. Please try setting up Face ID again.');
+    const { origin, rpId } = passkeySite(req);
+    let result;
+    try {
+      result = webauthn.verifyRegistration({ credential: body.credential, challenge, origin, rpId });
+    } catch (err) {
+      if (!(err instanceof webauthn.PasskeyError)) throw err;
+      return badRequest(res, "Face ID couldn't be set up on this device. Please try again.");
+    }
+    const name = String(body.name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40) || 'This device';
+    const [row] = await db.raw(
+      `INSERT INTO passkeys (id, user_id, public_key, algorithm, sign_count, name, created_at)
+       SELECT $1, $2, $3, $4, $5, $6, $7
+       WHERE (SELECT count(*) FROM passkeys WHERE user_id = $2) < $8
+       ON CONFLICT (id) DO NOTHING
+       RETURNING *`,
+      [result.credentialId, user.id, result.publicKey, result.algorithm, result.signCount, name, now(), MAX_PASSKEYS_PER_USER]
+    );
+    if (!row) return badRequest(res, 'Face ID is already set up on this device, or you have reached the device limit.');
+    sendJson(res, 201, { passkey: passkeyPublic(row) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/passkeys/:id',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const rows = await db.raw('DELETE FROM passkeys WHERE id = $1 AND user_id = $2 RETURNING id', [params.id, user.id]);
+    if (rows.length === 0) return sendJson(res, 404, { error: 'Device not found.' });
+    sendJson(res, 200, { removed: true });
+  })
+);
+
+on('POST', '/api/auth/passkey/options', async (req, res) => {
+  const { rpId } = passkeySite(req);
+  const { challenge, token } = newPasskeyChallenge('login', null);
+  sendJson(res, 200, {
+    token,
+    publicKey: { challenge, rpId, timeout: 120000, userVerification: 'required', allowCredentials: [] },
+  });
+});
+
+on('POST', '/api/auth/passkey/login', async (req, res, params, query, body) => {
+  const ipKey = `passkey-login-ip:${getClientIp(req)}`;
+  if (await rateLimited(res, [[ipKey, LOGIN_MAX_ATTEMPTS_PER_IP]])) return;
+  const fail = async () => {
+    await rateLimitRecord(ipKey, LOGIN_WINDOW_MS);
+    return sendJson(res, 401, { error: PASSKEY_FAILED_MSG });
+  };
+
+  const challenge = await spendPasskeyChallenge(body.token, 'login', null);
+  const credential = body.credential || {};
+  if (!challenge || typeof credential.rawId !== 'string') return fail();
+
+  const passkey = await db
+    .prepare('SELECT p.* FROM passkeys p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND u.deleted_at IS NULL')
+    .get(credential.rawId);
+  if (!passkey) return fail();
+  const userHandle = credential.response && credential.response.userHandle;
+  if (userHandle && userHandle !== Buffer.from(passkey.user_id).toString('base64url')) return fail();
+
+  const { origin, rpId } = passkeySite(req);
+  let result;
+  try {
+    result = webauthn.verifyAuthentication({
+      credential, challenge, origin, rpId,
+      publicKey: passkey.public_key, algorithm: passkey.algorithm, storedSignCount: passkey.sign_count,
+    });
+  } catch (err) {
+    if (!(err instanceof webauthn.PasskeyError)) throw err;
+    return fail();
+  }
+  // Conditional on the counter still being what we checked against, so two
+  // simultaneous uses of a copied key can't both get through.
+  const updated = await db.raw(
+    `UPDATE passkeys SET sign_count = $1, last_used_at = $2
+     WHERE id = $3 AND (sign_count < $1 OR ($1 = 0 AND sign_count = 0)) RETURNING id`,
+    [result.signCount, now(), passkey.id]
+  );
+  if (updated.length === 0) return fail();
+
+  const user = await db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(passkey.user_id);
+  if (!user) return fail();
+  sendJson(res, 200, { token: makeSessionToken(user.id), user: publicUser(user) });
+});
 
 // Turning an existing personal account into a business account, in place
 // — same account, same login, same personal GYD balance untouched. Until

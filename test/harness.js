@@ -1,5 +1,5 @@
 // Integration-test harness: a throwaway local Postgres loaded with the real
-// supabase/schema.sql, plus the real server.js, db.js, auth.js and ludo.js
+// supabase/schema.sql, plus the real server.js, db.js, auth.js, ludo.js and webauthn.js
 // running against it. db.js talks to a small fake of Supabase's HTTP APIs
 // (test/fake-supabase.js) that forwards every query to the real exec_query
 // in that Postgres. Only the modules that call third-party services —
@@ -242,7 +242,7 @@ async function startEnv() {
   fs.mkdirSync(appDir);
   fs.copyFileSync(path.join(ROOT, 'server.js'), path.join(appDir, 'server.js'));
   fs.cpSync(path.join(ROOT, 'public'), path.join(appDir, 'public'), { recursive: true });
-  for (const m of ['db', 'auth', 'ludo']) fs.copyFileSync(path.join(ROOT, `${m}.js`), path.join(appDir, `${m}.js`));
+  for (const m of ['db', 'auth', 'ludo', 'webauthn']) fs.copyFileSync(path.join(ROOT, `${m}.js`), path.join(appDir, `${m}.js`));
   fs.copyFileSync(path.join(__dirname, 'shims', 'email.js'), path.join(appDir, 'email.js'));
   for (const m of ['sms', 'dropshipping', 'oauth']) fs.writeFileSync(path.join(appDir, `${m}.js`), others[m]);
   env.appDir = appDir;

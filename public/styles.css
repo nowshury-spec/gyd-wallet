@@ -229,6 +229,19 @@ select:hover { border-color: var(--muted-2); }
 
 .auth-card { background: var(--surface); padding: 40px 38px; display: flex; flex-direction: column; justify-content: center; }
 
+/* Phones: the two-column welcome + login layout squeezed the login form to
+   about 100px wide on a 390px screen. Stack them instead, with a shorter
+   welcome panel (no feature list) so the form sits near the top. */
+@media (max-width: 720px) {
+  #auth-screen { padding: 64px 16px 24px; align-items: flex-start; }
+  .lang-switcher-auth { top: 14px; right: 16px; }
+  .auth-wrapper { grid-template-columns: 1fr; }
+  .auth-hero { padding: 24px 22px; }
+  .auth-hero-inner { max-width: none; }
+  .hero-features { display: none; }
+  .auth-card { padding: 26px 22px; }
+}
+
 .auth-tabs { display: flex; gap: 4px; margin-bottom: 26px; background: var(--surface-2); padding: 4px; border-radius: 12px; }
 
 .auth-tabs button {
@@ -316,6 +329,15 @@ select:hover { border-color: var(--muted-2); }
   background: #1877f2; color: #fff; font-weight: 800; font-size: 12px;
   font-family: Georgia, serif; font-style: italic;
 }
+
+.passkey-login-btn { margin-top: 10px; }
+.passkey-list { margin-bottom: 12px; }
+.passkey-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.passkey-row:last-child { border-bottom: none; }
+.passkey-meta { font-size: 12px; margin-top: 2px; }
 
 .social-divider {
   display: flex; align-items: center; gap: 10px;

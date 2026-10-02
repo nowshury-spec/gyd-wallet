@@ -312,7 +312,7 @@
     const preview = document.getElementById('privacy-preview-content');
     if (source && preview) preview.innerHTML = source.innerHTML;
     // Bump whenever the policy text changes.
-    const PRIVACY_LAST_UPDATED = 'October 1, 2026';
+    const PRIVACY_LAST_UPDATED = 'October 2, 2026';
     document.querySelectorAll('.privacy-last-updated').forEach((el) => { el.textContent = PRIVACY_LAST_UPDATED; });
   })();
 
@@ -476,6 +476,204 @@
   // then the password (the server re-checks it). Anything that still has to
   // be settled first (a balance, a pending cash-out, an open order...) comes
   // back as an error message saying exactly what.
+  // ---------- Face ID sign-in (passkeys) ----------
+  // See webauthn.js and the /api/passkeys routes in server.js. Works with
+  // Face ID / Touch ID on Apple devices, fingerprint or face unlock on
+  // Android, and Windows Hello. Needs getPublicKey() on the browser's
+  // response (Safari 16+, Chrome, Edge, Firefox 119+); where that's missing
+  // the whole feature stays hidden and password login is unaffected.
+  const passkeysSupported = !!(
+    window.PublicKeyCredential &&
+    navigator.credentials &&
+    typeof navigator.credentials.create === 'function' &&
+    typeof AuthenticatorAttestationResponse !== 'undefined' &&
+    typeof AuthenticatorAttestationResponse.prototype.getPublicKey === 'function'
+  );
+
+  function b64urlToBytes(s) {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64url(buf) {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // Just a label for the device list ("iPhone", "Windows PC"...).
+  function thisDeviceName() {
+    const ua = navigator.userAgent || '';
+    if (/iPhone/.test(ua)) return 'iPhone';
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+    if (/Android/.test(ua)) return 'Android phone';
+    if (/Macintosh/.test(ua)) return 'Mac';
+    if (/Windows/.test(ua)) return 'Windows PC';
+    return 'This device';
+  }
+
+  function passkeyErrorMessage(err) {
+    // NotAllowedError: cancelled, timed out, or no Face ID key chosen.
+    if (err && err.name === 'NotAllowedError') return i18nText('t448', 'Face ID was cancelled.');
+    // InvalidStateError on set-up: this device already has one.
+    if (err && err.name === 'InvalidStateError') return i18nText('t449', 'Face ID is already set up on this device.');
+    return (err && err.message) || i18nText('t447', "This browser can't use Face ID sign-in. Try Safari on iPhone or Chrome on Android.");
+  }
+
+  const passkeyLoginBtn = document.getElementById('passkey-login-btn');
+  if (passkeysSupported) passkeyLoginBtn.classList.remove('hidden');
+  passkeyLoginBtn.onclick = async () => {
+    const errBox = document.getElementById('login-error');
+    errBox.textContent = '';
+    passkeyLoginBtn.disabled = true;
+    try {
+      const options = await api('/api/auth/passkey/options', 'POST', {});
+      const pk = options.publicKey;
+      const cred = await navigator.credentials.get({
+        publicKey: {
+          challenge: b64urlToBytes(pk.challenge),
+          rpId: pk.rpId,
+          timeout: pk.timeout,
+          userVerification: pk.userVerification,
+          allowCredentials: [],
+        },
+      });
+      const r = cred.response;
+      const data = await api('/api/auth/passkey/login', 'POST', {
+        token: options.token,
+        credential: {
+          id: cred.id,
+          rawId: bytesToB64url(cred.rawId),
+          type: cred.type,
+          response: {
+            clientDataJSON: bytesToB64url(r.clientDataJSON),
+            authenticatorData: bytesToB64url(r.authenticatorData),
+            signature: bytesToB64url(r.signature),
+            userHandle: r.userHandle ? bytesToB64url(r.userHandle) : null,
+          },
+        },
+      });
+      setToken(data.token);
+      state.user = data.user;
+      enterApp();
+    } catch (err) {
+      errBox.textContent = passkeyErrorMessage(err);
+    } finally {
+      passkeyLoginBtn.disabled = false;
+    }
+  };
+
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleDateString();
+  }
+
+  async function loadPasskeys() {
+    const section = document.getElementById('passkey-section');
+    if (!passkeysSupported || !state.user) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+    const list = document.getElementById('passkey-list');
+    let data;
+    try {
+      data = await api('/api/passkeys');
+    } catch (err) {
+      list.textContent = err.message;
+      return;
+    }
+    list.innerHTML = '';
+    if (!data.passkeys.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = i18nText('t440', 'No devices set up yet.');
+      list.appendChild(empty);
+      return;
+    }
+    // Built with textContent, never innerHTML, so a device name can't inject markup.
+    for (const pk of data.passkeys) {
+      const row = document.createElement('div');
+      row.className = 'passkey-row';
+      const info = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = pk.name || thisDeviceName();
+      const meta = document.createElement('div');
+      meta.className = 'muted passkey-meta';
+      meta.textContent =
+        `${i18nText('t445', 'Added')} ${fmtDate(pk.createdAt)}` +
+        (pk.lastUsedAt ? ` · ${i18nText('t446', 'Last used')} ${fmtDate(pk.lastUsedAt)}` : '');
+      info.append(name, meta);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn secondary small';
+      remove.textContent = i18nText('t441', 'Remove');
+      remove.onclick = async () => {
+        const ok = await confirmDialog(
+          i18nText('t444', 'Turn off Face ID sign-in for this device? You can still log in with your password.'),
+          { danger: true }
+        );
+        if (!ok) return;
+        try {
+          await api(`/api/passkeys/${encodeURIComponent(pk.id)}`, 'DELETE');
+          toast(i18nText('t451', 'Face ID turned off for that device.'), 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+        loadPasskeys();
+      };
+      row.append(info, remove);
+      list.appendChild(row);
+    }
+  }
+
+  document.getElementById('passkey-add-btn').onclick = async () => {
+    const password = await openDialog({
+      message: i18nText('t442', 'Enter your password to set up Face ID.'),
+      input: { type: 'password' },
+      confirmText: i18nText('t450', 'Continue'),
+      cancelText: i18nText('t418', 'Cancel'),
+    });
+    if (password === null || password === '') return;
+    try {
+      const options = await api('/api/passkeys/register/options', 'POST', { password });
+      const pk = options.publicKey;
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          ...pk,
+          challenge: b64urlToBytes(pk.challenge),
+          user: { ...pk.user, id: b64urlToBytes(pk.user.id) },
+          excludeCredentials: pk.excludeCredentials.map((c) => ({ ...c, id: b64urlToBytes(c.id) })),
+        },
+      });
+      const r = cred.response;
+      const publicKey = r.getPublicKey();
+      if (!publicKey) throw new Error(i18nText('t447', "This browser can't use Face ID sign-in. Try Safari on iPhone or Chrome on Android."));
+      await api('/api/passkeys/register', 'POST', {
+        token: options.token,
+        name: thisDeviceName(),
+        credential: {
+          id: cred.id,
+          rawId: bytesToB64url(cred.rawId),
+          type: cred.type,
+          response: {
+            clientDataJSON: bytesToB64url(r.clientDataJSON),
+            authenticatorData: bytesToB64url(r.getAuthenticatorData()),
+            publicKey: bytesToB64url(publicKey),
+            publicKeyAlgorithm: r.getPublicKeyAlgorithm(),
+          },
+        },
+      });
+      toast(i18nText('t443', 'Face ID is set up. Next time, tap "Sign in with Face ID" on the login screen.'), 'success');
+    } catch (err) {
+      toast(passkeyErrorMessage(err), 'error');
+    }
+    loadPasskeys();
+  };
+
   document.getElementById('delete-account-btn').onclick = async () => {
     if (!(await confirmDialog(i18nText('t432', "Delete your account for good? This can't be undone."), { danger: true }))) return;
     const password = await openDialog({
@@ -592,7 +790,10 @@
     if (tab === 'shop') loadShopProducts();
     if (tab === 'courier') enterCourierTab();
     if (tab === 'jobs') loadJobsBoard();
-    if (tab === 'support') loadSupportTickets();
+    if (tab === 'support') {
+      loadSupportTickets();
+      loadPasskeys();
+    }
   }
 
   document.getElementById('my-tickets-btn').onclick = () => switchTab('mytickets');

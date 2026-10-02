@@ -62,6 +62,11 @@
         <input type="password" id="login-password" autocomplete="current-password" required />
       </div>
       <button type="submit" class="btn full" data-i18n="t149">Log in</button>
+      <!-- Shown only on browsers that support passkeys — see "Face ID sign-in" in app.js. -->
+      <button type="button" class="btn social-btn passkey-login-btn hidden" id="passkey-login-btn">
+        <span class="social-icon" aria-hidden="true">🔐</span>
+        <span data-i18n="t436">Sign in with Face ID</span>
+      </button>
       <button type="button" class="link-btn" id="forgot-password-link" data-i18n="t150">Forgot your password?</button>
       <button type="button" class="link-btn" id="forgot-username-link" data-i18n="t151">Forgot your username?</button>
       <div class="error-msg" id="login-error"></div>
@@ -1390,6 +1395,18 @@
           <button class="btn secondary full" id="logout-all-btn" data-i18n="t212">Log out of all devices</button>
         </div>
 
+        <!-- Face ID sign-in (passkeys) — hidden on browsers that can't do it. -->
+        <div id="passkey-section" class="hidden">
+          <h3 class="section-title" style="margin-top:22px;" data-i18n="t437">Face ID sign-in</h3>
+          <div class="panel">
+            <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t438">Log in with Face ID instead of typing your password (or your
+            fingerprint, or Windows Hello on a computer). Your face never leaves your device — it only unlocks a secure key stored
+            there. Your password keeps working too.</p>
+            <div id="passkey-list" class="passkey-list"></div>
+            <button class="btn secondary full" id="passkey-add-btn" data-i18n="t439">Set up Face ID on this device</button>
+          </div>
+        </div>
+
         <div id="upgrade-business-section" class="hidden">
           <h3 class="section-title" style="margin-top:22px;" data-i18n="t355">Business account</h3>
           <div class="panel">
@@ -1645,6 +1662,9 @@
           <p><strong>Games:</strong> your game history (no money is involved).</p>
           <p><strong>Security data:</strong> your IP address, used briefly to limit repeated login and code-guessing
           attempts; those counters expire within hours.</p>
+          <p><strong>Face ID sign-in:</strong> if you turn it on, your device creates a security key and we store only its
+          public part, the device name and when it was last used. Your face or fingerprint is checked by your device and never
+          sent to us.</p>
           <p><strong>On your device:</strong> the app stores your sign-in token in your browser's local storage so you stay
           logged in, and a one-time value during Google/Facebook sign-in. We use no advertising or analytics trackers.</p>
 
@@ -1674,7 +1694,7 @@
 
           <h3 class="section-title">5. How long we keep it</h3>
           <p>While your account is open, we keep your information so the app works. When you delete your account (Help
-          &amp; Support → Delete my account), we erase your email, $paytag, password, sign-in links, messages, reviews, tips,
+          &amp; Support → Delete my account), we erase your email, $paytag, password, sign-in links, Face ID keys, messages, reviews, tips,
           game history, business page, products, photos, job posts, shop delivery addresses and the contact details on your
           support requests, and replace your username with an anonymous placeholder. We <strong>keep</strong> records of
           payments, tickets, orders, cash-outs and GYD Direct sends — without your name attached — because the other people

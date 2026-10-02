@@ -138,6 +138,27 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
   UNIQUE (provider, provider_user_id)
 );
 
+-- passkeys: "Sign in with Face ID" (or fingerprint / Windows Hello). One
+-- row per device a user has turned it on for. Holds only the PUBLIC half of
+-- a key pair the device created — the private half never leaves the device
+-- and is unlocked by Face ID there; no face or fingerprint data ever reaches
+-- this server. See webauthn.js and the /api/passkeys routes in server.js.
+--   id          — the credential id the device chose (base64url)
+--   public_key  — SPKI public key (base64url); algorithm is its COSE number
+--   sign_count  — the device's use counter, to spot a copied key (iPhone
+--                 passkeys always report 0, which is allowed)
+CREATE TABLE IF NOT EXISTS passkeys (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  public_key TEXT NOT NULL,
+  algorithm INTEGER NOT NULL,
+  sign_count BIGINT NOT NULL DEFAULT 0,
+  name TEXT,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS passkeys_user_id_idx ON passkeys (user_id);
+
 -- Backfill users.email_verified (see above): accounts whose email came from
 -- (and matches) a linked Google/Facebook identity were verified by it.
 UPDATE users u SET email_verified = true
@@ -1009,7 +1030,7 @@ REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC
 --     requests, waiting Ludo tables, active events with no tickets;
 --   * erases personal details — email, $paytag, business page, products,
 --     photos, job posts, reviews, tips, messages, game history, sign-in
---     links, reset codes, shop delivery addresses, support-ticket contact
+--     links and Face ID keys, reset codes, shop delivery addresses, support-ticket contact
 --     details — and replaces the username with an unusable placeholder;
 --   * keeps the anonymous money records (transactions, tickets, orders,
 --     cash-outs, GYD Direct) that other users and any audit still need.
@@ -1081,6 +1102,7 @@ BEGIN
   DELETE FROM messages WHERE from_user = p_user_id OR to_user = p_user_id;
   DELETE FROM game_rounds WHERE user_id = p_user_id;
   DELETE FROM oauth_identities WHERE user_id = p_user_id;
+  DELETE FROM passkeys WHERE user_id = p_user_id;
   DELETE FROM password_resets WHERE user_id = p_user_id;
   UPDATE dropshipping_orders SET shipping_address = '{}' WHERE user_id = p_user_id;
   UPDATE support_tickets SET name = NULL, email = NULL WHERE user_id = p_user_id;
