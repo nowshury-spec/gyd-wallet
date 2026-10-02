@@ -997,6 +997,108 @@ $$;
 REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC;
 
 -- ---------------------------------------------------------------------
+-- close_user_account: "Delete my account" (POST /api/account/delete).
+-- A wallet can't simply DELETE the users row: other people's transaction
+-- history, tickets and orders point at it, and payment records have to be
+-- kept. So, as ONE transaction, this
+--   * refuses while any money is still in motion — a non-zero balance in
+--     any of the three wallets, a pending cash-out, a GYD Direct send not
+--     yet claimed, an open pickup order (either side), an unfinished shop
+--     order or claimed delivery, or an active event with tickets sold;
+--   * closes the loose ends that hold no money: pending money/charge
+--     requests, waiting Ludo tables, active events with no tickets;
+--   * erases personal details — email, $paytag, business page, products,
+--     photos, job posts, reviews, tips, messages, game history, sign-in
+--     links, reset codes, shop delivery addresses, support-ticket contact
+--     details — and replaces the username with an unusable placeholder;
+--   * keeps the anonymous money records (transactions, tickets, orders,
+--     cash-outs, GYD Direct) that other users and any audit still need.
+-- users.deleted_at then blocks sign-in, every existing session, and every
+-- lookup by name, and the CHECK constraint below refuses any credit that
+-- races in after this commits (that payment fails instead of vanishing).
+-- Returns {ok: true, photo_paths: [...]} (storage files for the server to
+-- remove) or {error: '<reason>'}.
+-- ---------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_deleted_accounts_hold_no_money
+    CHECK (deleted_at IS NULL OR (gyd_balance = 0 AND business_gyd_balance = 0 AND courier_gyd_balance = 0));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE OR REPLACE FUNCTION public.close_user_account(p_user_id text, p_now text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  u users%ROWTYPE;
+  paths jsonb;
+BEGIN
+  SELECT * INTO u FROM users WHERE id = p_user_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'not_found'); END IF;
+
+  IF u.gyd_balance <> 0 OR u.business_gyd_balance <> 0 OR u.courier_gyd_balance <> 0 THEN
+    RETURN jsonb_build_object('error', 'balance');
+  END IF;
+  IF EXISTS (SELECT 1 FROM cashout_requests WHERE user_id = p_user_id AND status = 'pending') THEN
+    RETURN jsonb_build_object('error', 'cashout_pending');
+  END IF;
+  IF EXISTS (SELECT 1 FROM remittances WHERE from_user = p_user_id AND status = 'pending') THEN
+    RETURN jsonb_build_object('error', 'remittance_pending');
+  END IF;
+  IF EXISTS (SELECT 1 FROM business_orders WHERE (customer_id = p_user_id OR business_id = p_user_id) AND status = 'pending') THEN
+    RETURN jsonb_build_object('error', 'pickup_order_open');
+  END IF;
+  IF EXISTS (SELECT 1 FROM dropshipping_orders
+             WHERE (user_id = p_user_id OR courier_id = p_user_id)
+               AND status NOT IN ('delivered', 'picked_up', 'cancelled')) THEN
+    RETURN jsonb_build_object('error', 'shop_order_open');
+  END IF;
+  IF EXISTS (SELECT 1 FROM business_events e WHERE e.business_id = p_user_id AND e.status = 'active'
+             AND EXISTS (SELECT 1 FROM event_tickets t WHERE t.event_id = e.id AND t.status = 'valid')) THEN
+    RETURN jsonb_build_object('error', 'event_tickets_sold');
+  END IF;
+
+  -- Loose ends that hold no money.
+  UPDATE business_events SET status = 'cancelled' WHERE business_id = p_user_id AND status = 'active';
+  UPDATE money_requests SET status = 'cancelled', resolved_at = p_now WHERE from_user = p_user_id AND status = 'pending';
+  UPDATE money_requests SET status = 'declined', resolved_at = p_now WHERE to_user = p_user_id AND status = 'pending';
+  UPDATE charge_requests SET status = 'declined', resolved_at = p_now
+    WHERE (business_id = p_user_id OR customer_id = p_user_id) AND status = 'pending';
+  UPDATE ludo_tables SET status = 'cancelled' WHERE host_user_id = p_user_id AND status = 'waiting';
+  UPDATE courier_applications SET status = 'rejected', resolved_at = p_now, staff_note = 'Account deleted'
+    WHERE user_id = p_user_id AND status = 'pending';
+
+  -- Personal details.
+  SELECT COALESCE(jsonb_agg(storage_path), '[]'::jsonb) INTO paths FROM business_photos WHERE business_id = p_user_id;
+  DELETE FROM business_photos WHERE business_id = p_user_id;
+  DELETE FROM business_profiles WHERE user_id = p_user_id;
+  DELETE FROM business_products WHERE business_id = p_user_id;
+  DELETE FROM job_postings WHERE business_id = p_user_id;
+  DELETE FROM saved_jobs WHERE user_id = p_user_id;
+  DELETE FROM business_reviews WHERE reviewer_id = p_user_id OR business_id = p_user_id;
+  DELETE FROM business_tips WHERE user_id = p_user_id OR business_id = p_user_id;
+  DELETE FROM messages WHERE from_user = p_user_id OR to_user = p_user_id;
+  DELETE FROM game_rounds WHERE user_id = p_user_id;
+  DELETE FROM oauth_identities WHERE user_id = p_user_id;
+  DELETE FROM password_resets WHERE user_id = p_user_id;
+  UPDATE dropshipping_orders SET shipping_address = '{}' WHERE user_id = p_user_id;
+  UPDATE support_tickets SET name = NULL, email = NULL WHERE user_id = p_user_id;
+
+  UPDATE users SET
+    username = 'deleted-' || substr(md5(random()::text || p_user_id), 1, 12),
+    paytag = NULL, cashtag = NULL, email = NULL, email_verified = false,
+    password_hash = 'deleted', password_salt = 'deleted',
+    is_business = 0, business_name = NULL, is_courier = false,
+    sessions_invalidated_at = p_now, deleted_at = p_now
+  WHERE id = p_user_id;
+
+  RETURN jsonb_build_object('ok', true, 'photo_paths', paths);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.close_user_account(text, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------
 -- exec_query: the one function db.js calls for every single query the app
 -- makes. It takes a SQL string using Postgres-style $1, $2, ... parameter
 -- placeholders (db.js converts server.js's SQLite-style `?` placeholders
@@ -1115,3 +1217,23 @@ $$;
 REVOKE ALL ON FUNCTION public.exec_query(text, jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.exec_query(text, jsonb) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exec_query(text, jsonb) TO service_role;
+
+-- The app only ever reaches the database through exec_query with the secret
+-- key, so the public (anon/authenticated) keys need no access to anything.
+-- Supabase grants those roles every new table and function by default;
+-- these lines take that back explicitly instead of relying on the
+-- project's "enable RLS automatically" setting. RLS on with no policies
+-- means the public key can read and change nothing, and the app's own
+-- functions can only be run through exec_query.
+DO $$
+DECLARE t record;
+BEGIN
+  FOR t IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relkind = 'r' LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.relname);
+  END LOOP;
+END $$;
+REVOKE ALL ON FUNCTION public.purchase_event_tickets(text, text, int, jsonb, numeric, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.cancel_event_with_refunds(text, text, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.close_user_account(text, text) FROM anon, authenticated;

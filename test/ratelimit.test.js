@@ -73,3 +73,16 @@ test('behind Render, the client IP comes from True-Client-IP and X-Forwarded-For
     await env.startServer({});
   }
 });
+
+test('one address can create at most 20 accounts an hour; others are unaffected', async () => {
+  const ip = '198.51.100.60';
+  const reg = (i, from = ip) =>
+    env.api('POST', '/api/register', { ip: from, body: { username: `sp${Date.now() % 1e6}_${i}`, email: `sp${Date.now()}_${i}@example.test`, password: 'correct horse 1' } });
+  // A failed attempt (bad input) doesn't use up the allowance.
+  assert.equal((await env.api('POST', '/api/register', { ip, body: { username: 'x', email: 'bad', password: '1' } })).status, 400);
+  for (let i = 0; i < 20; i++) assert.equal((await reg(i)).status, 201);
+  const blocked = await reg(20);
+  assert.equal(blocked.status, 429);
+  assert.match(blocked.data.error, /Too many attempts/);
+  assert.equal((await reg(21, '198.51.100.61')).status, 201);
+});

@@ -103,7 +103,7 @@ async function getAuthedUser(req) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const data = verify(token);
   if (!data) return null;
-  const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(data.uid);
+  const user = await db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(data.uid);
   if (!user) return null;
   // "Log out of all other devices" (POST /api/security/logout-all-sessions)
   // sets sessions_invalidated_at to the moment it's clicked — any token
@@ -311,7 +311,7 @@ async function findOrCreateOAuthUser(provider, profile) {
     const usernameBase = profile.name || (email ? email.split('@')[0] : provider);
     const username = await generateUniqueUsername(usernameBase);
     const paytag = await generateUniquePaytag(username);
-    const { salt, hash } = hashPassword(crypto.randomBytes(32).toString('hex'));
+    const { salt, hash } = await hashPassword(crypto.randomBytes(32).toString('hex'));
     const id = crypto.randomUUID();
     await db
       .prepare(
@@ -348,8 +348,8 @@ async function resolveHandle(raw) {
   const handle = text.replace(/^\$/, '');
   if (!handle) return { user: null, ambiguous: false };
   const rows = isPaytag
-    ? await db.prepare('SELECT * FROM users WHERE LOWER(paytag) = LOWER(?) LIMIT 2').all(handle)
-    : await db.prepare('SELECT * FROM users WHERE username = ? OR LOWER(paytag) = LOWER(?) LIMIT 2').all(handle, handle);
+    ? await db.prepare('SELECT * FROM users WHERE LOWER(paytag) = LOWER(?) AND deleted_at IS NULL LIMIT 2').all(handle)
+    : await db.prepare('SELECT * FROM users WHERE (username = ? OR LOWER(paytag) = LOWER(?)) AND deleted_at IS NULL LIMIT 2').all(handle, handle);
   if (rows.length === 1) return { user: rows[0], ambiguous: false };
   return { user: null, ambiguous: rows.length > 1 };
 }
@@ -489,7 +489,16 @@ function fmtNum(v) {
 
 // ---------- auth routes ----------
 
+// New accounts per client IP per hour — stops a script from mass-creating
+// accounts (spam, squatting usernames/$paytags). Generous on purpose: many
+// mobile customers in Guyana share one carrier IP, and a family or an event
+// signing up together must not be turned away.
+const SIGNUP_MAX_PER_IP = 20;
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+
 on('POST', '/api/register', async (req, res, params, query, body) => {
+  const signupKey = `signup:${getClientIp(req)}`;
+  if (await rateLimited(res, [[signupKey, SIGNUP_MAX_PER_IP]])) return;
   const { username, password, isBusiness, businessName } = body;
   const email = (body.email || '').trim().toLowerCase();
   // Same character rules as a $paytag: usernames are shown all over the app
@@ -519,13 +528,14 @@ on('POST', '/api/register', async (req, res, params, query, body) => {
   if (usernameTaken) return badRequest(res, 'That username is already taken.');
   if (existingEmail) return badRequest(res, 'An account with that email already exists.');
 
-  const { salt, hash } = hashPassword(password);
+  const { salt, hash } = await hashPassword(password);
   const id = crypto.randomUUID();
   const paytag = await generateUniquePaytag(username);
   await db.prepare(
     `INSERT INTO users (id, username, paytag, email, password_hash, password_salt, is_business, business_name, gyd_balance, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`
   ).run(id, username, paytag, email, hash, salt, isBusiness ? 1 : 0, isBusiness ? (businessName || username) : null, now());
+  await rateLimitRecord(signupKey, SIGNUP_WINDOW_MS);
 
   const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   const token = makeSessionToken(id);
@@ -550,8 +560,8 @@ on('POST', '/api/login', async (req, res, params, query, body) => {
     });
   }
 
-  const user = await db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
-  if (!user || !verifyPassword(password || '', user.password_salt, user.password_hash)) {
+  const user = await db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(username || '');
+  if (!user || !(await verifyPassword(password || '', user.password_salt, user.password_hash))) {
     await Promise.all([rateLimitRecord(perAccountKey, LOGIN_WINDOW_MS), rateLimitRecord(perIpKey, LOGIN_WINDOW_MS)]);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
@@ -834,7 +844,7 @@ on('POST', '/api/auth/reset-password', async (req, res, params, query, body) => 
   // fresh token issued just below is minted after this instant, so it stays
   // valid (see issuedBefore).
   const invalidatedAt = now();
-  const { salt, hash } = hashPassword(newPassword);
+  const { salt, hash } = await hashPassword(newPassword);
   await db.prepare(
     `UPDATE users SET password_hash = ?, password_salt = ?, sessions_invalidated_at = ?,
        email_verified = (email_verified OR ?::boolean)
@@ -906,6 +916,47 @@ on(
   requireAuth(async (req, res, params, query, body, user) => {
     await db.prepare('UPDATE users SET sessions_invalidated_at = ? WHERE id = ?').run(now(), user.id);
     sendJson(res, 200, { ok: true });
+  })
+);
+
+// "Delete my account" — see close_user_account in supabase/schema.sql for
+// what is erased, what is kept, and what has to be settled first. Asks for
+// the password again so a borrowed phone or a stolen session can't do it,
+// with the same per-account limit as login so it can't be used to guess.
+// An account created with Google/Facebook has a random password nobody
+// knows; it sets one with "Forgot your password?" first.
+const DELETE_ACCOUNT_BLOCKERS = {
+  balance: 'Your balance must be GYD 0 first. Cash out or spend what is left (this includes any business or courier wallet), then try again.',
+  cashout_pending: 'You have a cash-out request still being processed. Wait for it to finish, then try again.',
+  remittance_pending: 'You have a GYD Direct transfer that hasn\'t been claimed yet. Cancel it (or wait for it to be claimed) first.',
+  pickup_order_open: 'You have a pickup order that is still open. Complete or cancel it first.',
+  shop_order_open: 'You have a shop order or delivery that isn\'t finished yet. Wait until it\'s delivered or picked up first.',
+  event_tickets_sold: 'One of your events has tickets sold. Cancel the event (which refunds the buyers) first.',
+};
+on(
+  'POST',
+  '/api/account/delete',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const key = `delete-account:${user.id}`;
+    if (await rateLimited(res, [[key, LOGIN_MAX_ATTEMPTS]])) return;
+    if (!(await verifyPassword(String(body.password || ''), user.password_salt, user.password_hash))) {
+      await rateLimitRecord(key, LOGIN_WINDOW_MS);
+      return badRequest(res, 'That password is not correct. (Signed up with Google or Facebook? Set a password first with "Forgot your password?" on the login screen.)');
+    }
+    const [{ result }] = await db.raw('SELECT public.close_user_account($1, $2) AS result', [user.id, now()]);
+    if (result.error) {
+      return badRequest(res, DELETE_ACCOUNT_BLOCKERS[result.error] || 'This account could not be deleted. Contact Help & Support.');
+    }
+    // The database rows are already gone; a photo file left behind is only
+    // logged, not reported to the user as a failure.
+    for (const path of result.photo_paths || []) {
+      try {
+        await db.storageDelete('business-photos', path);
+      } catch (err) {
+        console.error('Photo cleanup after account deletion failed:', err.message);
+      }
+    }
+    sendJson(res, 200, { deleted: true });
   })
 );
 
@@ -1027,11 +1078,11 @@ on(
     let rows;
     if (q) {
       rows = await db
-        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE (username LIKE ? OR paytag LIKE ?) AND id != ? LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE (username LIKE ? OR paytag LIKE ?) AND id != ? AND deleted_at IS NULL LIMIT 20')
         .all(`%${q}%`, `%${q}%`, user.id);
     } else {
       rows = await db
-        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 20')
         .all(user.id);
     }
     sendJson(res, 200, {
@@ -1916,7 +1967,7 @@ on(
     const amount = Number(body.amount);
     if (!customerUsername) return badRequest(res, 'Enter the customer\'s username.');
     if (!positiveAmount(amount)) return badRequest(res, 'Enter a positive amount.');
-    const customer = await db.prepare('SELECT * FROM users WHERE username = ?').get(customerUsername);
+    const customer = await db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(customerUsername);
     if (!customer) return badRequest(res, 'No user with that username.');
 
     const id = crypto.randomUUID();
@@ -4156,7 +4207,7 @@ on(
     if (!toUsername) return badRequest(res, 'Choose who to message.');
     if (!text || !text.trim()) return badRequest(res, 'Message cannot be empty.');
     if (toUsername === user.username) return badRequest(res, "You can't message yourself.");
-    const recipient = await db.prepare('SELECT * FROM users WHERE username = ?').get(toUsername);
+    const recipient = await db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(toUsername);
     if (!recipient) return badRequest(res, 'No user with that username.');
 
     await db.prepare(
@@ -4203,7 +4254,7 @@ on(
   'GET',
   '/api/messages/thread/:username',
   requireAuth(async (req, res, params, query, body, user) => {
-    const other = await db.prepare('SELECT * FROM users WHERE username = ?').get(params.username);
+    const other = await db.prepare('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL').get(params.username);
     if (!other) return sendJson(res, 404, { error: 'No user with that username.' });
 
     const rows = await db
@@ -4498,7 +4549,7 @@ on('POST', '/api/staff/login', async (req, res, params, query, body) => {
   }
 
   const staff = await db.prepare('SELECT * FROM staff_accounts WHERE username = ?').get(username || '');
-  if (!staff || !verifyPassword(password || '', staff.password_salt, staff.password_hash)) {
+  if (!staff || !(await verifyPassword(password || '', staff.password_salt, staff.password_hash))) {
     await rateLimitRecord(key, STAFF_LOGIN_WINDOW_MS);
     return sendJson(res, 401, { error: 'Invalid username or password.' });
   }
@@ -4699,7 +4750,7 @@ on(
     if (existing) return badRequest(res, 'That username is already taken.');
 
     const newId = crypto.randomUUID();
-    const { salt, hash } = hashPassword(password);
+    const { salt, hash } = await hashPassword(password);
     await db.prepare(
       `INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(newId, username, hash, salt, role, now(), email || null);

@@ -4,6 +4,9 @@ services:
     runtime: node
     plan: free
     branch: main
+    # Deploy a new push only after GitHub's automatic tests pass
+    # (.github/workflows/test.yml), so a change that breaks them never goes live.
+    autoDeployTrigger: checksPass
     buildCommand: "true" # no dependencies to install — see README's "Why no npm packages"
     startCommand: node server.js
     envVars:

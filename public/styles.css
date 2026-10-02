@@ -469,7 +469,8 @@ select:hover { border-color: var(--muted-2); }
 .header-actions { display: flex; gap: 8px; }
 
 .icon-btn {
-  width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--border);
+  /* 44×44 is the minimum comfortable touch target (Apple/Google guidance). */
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border);
   background: var(--surface-2); color: var(--text); font-size: 15px;
   display: flex; align-items: center; justify-content: center; transition: background 0.15s ease, transform 0.1s ease;
 }
@@ -1146,6 +1147,7 @@ label.btn { display: inline-flex; }
 .star-picker { display: flex; gap: 6px; }
 .star-picker-btn {
   background: none; border: none; cursor: pointer; padding: 0;
+  min-width: 44px; min-height: 44px; /* comfortable touch target */
   font-size: 28px; line-height: 1; color: var(--border);
   transition: color 0.12s ease, transform 0.1s ease;
 }
@@ -1335,3 +1337,103 @@ label.btn { display: inline-flex; }
 
 .ludo-controls .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; filter: none; }
 
+
+
+/* ---------- keyboard focus ----------
+   A clearly visible outline on whatever has keyboard focus (Tab key, switch
+   access, screen-reader navigation). :focus-visible means mouse and touch
+   users don't see it on every tap — only keyboard users, who need it. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="radio"]:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- in-app notifications (toasts) ----------
+   Replace the browser's alert() pop-ups — see toast() in app.js. */
+.toast-region {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10000;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 8px 12px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(22, 36, 29, 0.18);
+  font-size: 14px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { border-left-color: var(--good); }
+.toast-error { border-left-color: var(--bad); }
+.toast-info { border-left-color: var(--gold); }
+.toast-text { flex: 1; white-space: pre-line; word-break: break-word; padding-top: 2px; }
+.toast-close {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -12px 0 -12px 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.toast-close:hover { color: var(--text); background: var(--surface-2); }
+
+/* ---------- in-app confirmation / question dialog ----------
+   Replaces confirm() and prompt() — see confirmDialog()/promptDialog(). */
+.app-dialog {
+  width: min(92vw, 400px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 20px 50px rgba(22, 36, 29, 0.28);
+}
+.app-dialog::backdrop { background: rgba(22, 36, 29, 0.45); }
+.app-dialog-message { margin: 0 0 16px; font-size: 15px; line-height: 1.45; white-space: pre-line; }
+.app-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.app-dialog-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.app-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.app-dialog-actions .btn { min-height: 44px; min-width: 96px; }
+
+/* A destructive confirmation (cancel/delete/remove) uses the warning colour. */
+.btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; box-shadow: 0 4px 16px var(--bad-soft); }
+.btn.danger:hover { filter: brightness(1.05); }

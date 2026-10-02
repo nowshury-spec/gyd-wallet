@@ -92,9 +92,13 @@
         <summary style="cursor:pointer; font-weight:700; font-size:13.5px;" data-i18n="t409">📜 View Terms &amp; Conditions</summary>
         <div id="terms-preview-content" style="max-height:220px; overflow-y:auto; font-size:12.5px; line-height:1.55; margin-top:8px; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:8px;"></div>
       </details>
+      <details id="privacy-preview-details" style="margin-top:8px;">
+        <summary style="cursor:pointer; font-weight:700; font-size:13.5px;" data-i18n="t428">🔒 View Privacy Policy</summary>
+        <div id="privacy-preview-content" style="max-height:220px; overflow-y:auto; font-size:12.5px; line-height:1.55; margin-top:8px; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:8px;"></div>
+      </details>
       <div class="checkbox-field" style="margin-top:10px;">
         <input type="checkbox" id="register-agree-terms" />
-        <label for="register-agree-terms" style="margin:0;" data-i18n="t410">I have read and agree to the Terms &amp; Conditions above</label>
+        <label for="register-agree-terms" style="margin:0;" data-i18n="t410">I have read and agree to the Terms &amp; Conditions, and I have read the Privacy Policy</label>
       </div>
       <button type="submit" class="btn full" data-i18n="t152">Create account</button>
       <div class="error-msg" id="register-error"></div>
@@ -163,9 +167,9 @@
         <span class="who-switch-caret hidden" id="who-switch-caret">⌄</span>
       </div>
       <div class="header-actions">
-        <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay" data-i18n-title="t317" data-i18n="t160">▦</button>
-        <button class="icon-btn" id="header-support-btn" title="Help &amp; Support" data-i18n-title="t318" data-i18n="t161">🛟</button>
-        <button class="icon-btn" id="logout-btn" title="Log out" data-i18n-title="t319" data-i18n="t162">⏻</button>
+        <button class="icon-btn" id="header-scan-btn" title="Scan &amp; Pay" aria-label="Scan &amp; Pay" data-i18n-title="t317" data-i18n-aria="t317" data-i18n="t160">▦</button>
+        <button class="icon-btn" id="header-support-btn" title="Help &amp; Support" aria-label="Help &amp; Support" data-i18n-title="t318" data-i18n-aria="t318" data-i18n="t161">🛟</button>
+        <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out" data-i18n-title="t319" data-i18n-aria="t319" data-i18n="t162">⏻</button>
       </div>
     </header>
 
@@ -1089,12 +1093,12 @@
 
         <div class="panel" id="bizpage-review-form-panel">
           <h2 class="section-title" style="margin-top:0;" data-i18n="t42">Rate this business</h2>
-          <div class="star-picker" id="bizpage-review-star-picker">
-            <button type="button" class="star-picker-btn" data-value="1">★</button>
-            <button type="button" class="star-picker-btn" data-value="2">★</button>
-            <button type="button" class="star-picker-btn" data-value="3">★</button>
-            <button type="button" class="star-picker-btn" data-value="4">★</button>
-            <button type="button" class="star-picker-btn" data-value="5">★</button>
+          <div class="star-picker" id="bizpage-review-star-picker" role="radiogroup" aria-label="Rating" data-i18n-aria="t420">
+            <button type="button" class="star-picker-btn" data-value="1" role="radio" aria-checked="false" aria-label="1 star" title="1 star" data-i18n-aria="t421" data-i18n-title="t421">★</button>
+            <button type="button" class="star-picker-btn" data-value="2" role="radio" aria-checked="false" aria-label="2 stars" title="2 stars" data-i18n-aria="t422" data-i18n-title="t422">★</button>
+            <button type="button" class="star-picker-btn" data-value="3" role="radio" aria-checked="false" aria-label="3 stars" title="3 stars" data-i18n-aria="t423" data-i18n-title="t423">★</button>
+            <button type="button" class="star-picker-btn" data-value="4" role="radio" aria-checked="false" aria-label="4 stars" title="4 stars" data-i18n-aria="t424" data-i18n-title="t424">★</button>
+            <button type="button" class="star-picker-btn" data-value="5" role="radio" aria-checked="false" aria-label="5 stars" title="5 stars" data-i18n-aria="t425" data-i18n-title="t425">★</button>
           </div>
           <div class="field" style="margin-top:12px;">
             <label data-i18n="t112">Comment (optional)</label>
@@ -1405,6 +1409,13 @@
         <div class="panel">
           <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t406">The rules for using this app — what it does and doesn't promise, and what's expected of you as an account holder.</p>
           <button class="btn secondary full" id="terms-btn" data-i18n="t407">📜 Terms &amp; Conditions</button>
+          <button class="btn secondary full" id="privacy-btn" style="margin-top:10px;" data-i18n="t427">🔒 Privacy Policy</button>
+        </div>
+
+        <h3 class="section-title" style="margin-top:22px;" data-i18n="t431">Delete account</h3>
+        <div class="panel">
+          <p class="forgot-intro" style="margin-bottom:12px;" data-i18n="t430">Permanently close this account. Your balance must be GYD 0 and nothing can be in progress (cash-outs, GYD Direct, orders, events with tickets sold). Your personal details are erased; payment records are kept without your name, as the Privacy Policy explains.</p>
+          <button class="btn danger full" id="delete-account-btn" data-i18n="t429">Delete my account</button>
         </div>
       </section>
 
@@ -1552,7 +1563,8 @@
           any listing, transaction, or delivery you are party to through the App.</p>
 
           <h3 class="section-title">15. Suspension and termination</h3>
-          <p>You may stop using the App at any time. We may suspend or terminate your account, with or without notice, if
+          <p>You may stop using the App at any time, and may delete your account from Help &amp; Support once your balance is
+          GYD 0 (see the Privacy Policy for what is erased and what is kept). We may suspend or terminate your account, with or without notice, if
           we reasonably believe you have violated these Terms, engaged in fraudulent or illegal activity, or if required by
           law or to protect the App or other users. Sections 2, 9–14, and 16–21 survive any termination of your account.
           Where reasonably practicable and not in dispute, we will return any balance that is genuinely, undisputedly
@@ -1595,6 +1607,96 @@
           <p>By using the App you consent to receive communications from us electronically (in-app, or by email/SMS where
           you've provided one), and agree that such communications satisfy any legal requirement that they be in writing.
           Questions about these Terms, or about your account, can be sent through the "Help &amp; Support" form above.</p>
+        </div>
+      </section>
+      <!-- PRIVACY POLICY — reached from Help & Support ("Legal") and
+           mirrored into the signup screen's collapsible preview, same
+           single-source pattern as #panel-terms above (see initLegalDocs in
+           app.js). Draft text written to match what this app actually
+           collects and who it actually shares it with — keep it in step
+           with the code when either changes. Fill in every [BRACKETED]
+           placeholder before launch, and have it reviewed by counsel in
+           Guyana (Data Protection Act 2023). -->
+      <section id="panel-privacy" class="tab-panel hidden">
+        <div class="remit-back-row">
+          <button class="btn secondary small" id="privacy-back-btn" data-i18n="t408">← Support</button>
+        </div>
+        <h2 class="section-title" style="margin-top:6px;" data-i18n="t427">🔒 Privacy Policy</h2>
+        <div class="panel">
+          <p class="muted" style="font-size:12.5px;"><strong>Draft — not yet reviewed by a lawyer.</strong> Placeholders in
+          [BRACKETS] must be filled in, and this policy should be reviewed by counsel in Guyana (including against the Data
+          Protection Act 2023) before the app handles real money or real customer data at scale.</p>
+          <p class="muted" style="font-size:12.5px;">Last updated: <span class="privacy-last-updated"></span></p>
+
+          <h3 class="section-title">1. Who we are</h3>
+          <p>GYD Wallet is operated by [LEGAL BUSINESS NAME], [BUSINESS ADDRESS], Guyana ("we," "us"). We decide how the
+          personal information described here is used. Questions or requests: use Help &amp; Support in the app, or email
+          [PRIVACY CONTACT EMAIL].</p>
+
+          <h3 class="section-title">2. What we collect</h3>
+          <p><strong>Your account:</strong> username, $paytag, email address, and your password — stored only as a salted,
+          one-way hash we cannot read. If you use "Continue with Google" or "Continue with Facebook," we receive your name,
+          email address and that provider's account ID; we never receive your Google or Facebook password.</p>
+          <p><strong>Money activity:</strong> balances, transfers, payment requests, cash-out requests, GYD Direct sends
+          (including the recipient's name and phone number that you enter), tickets, pickup orders and shop orders.</p>
+          <p><strong>What you post or send:</strong> chat messages, reviews, tips, support requests, courier application
+          notes, and — for business accounts — your business page, products, photos, events and job posts.</p>
+          <p><strong>Shop deliveries:</strong> the name, phone number and address you enter for a shop order.</p>
+          <p><strong>Games:</strong> your game history (no money is involved).</p>
+          <p><strong>Security data:</strong> your IP address, used briefly to limit repeated login and code-guessing
+          attempts; those counters expire within hours.</p>
+          <p><strong>On your device:</strong> the app stores your sign-in token in your browser's local storage so you stay
+          logged in, and a one-time value during Google/Facebook sign-in. We use no advertising or analytics trackers.</p>
+
+          <h3 class="section-title">3. Why we use it</h3>
+          <p>To run your account and move money as you instruct; to keep accounts secure and prevent fraud and abuse; to
+          answer support requests; to send the codes and notices you ask for (password reset, GYD Direct codes); and to meet
+          our legal obligations. We do <strong>not</strong> sell your personal information, use it for advertising, or feed it
+          to artificial-intelligence services.</p>
+
+          <h3 class="section-title">4. Who else sees it</h3>
+          <p><strong>Other users</strong> see what is needed to pay and find you: your username and $paytag, and — for
+          businesses — your business page, products, events, reviews and job posts. The person you pay or message sees that
+          payment or message. A courier who accepts your shop delivery sees the delivery name, phone and address.</p>
+          <p><strong>Service providers</strong> that process data for us, only to run the app:</p>
+          <ul>
+            <li>Supabase — database and photo storage (servers in the United States).</li>
+            <li>Render — web hosting (servers outside Guyana, including the United States).</li>
+            <li>Resend — sends our emails (your email address and the message).</li>
+            <li>Twilio — sends our text messages (the phone number and the message).</li>
+            <li>Google and Facebook — only if you choose to sign in with them.</li>
+            <li>CJdropshipping — receives the items and delivery details of shop orders, to fulfil them.</li>
+          </ul>
+          <p>Because these providers are outside Guyana, your information is transferred abroad. We use providers that
+          protect data with industry-standard security, and share only what each needs.</p>
+          <p><strong>Authorities:</strong> we disclose information when the law requires it, or to protect users and the app
+          from fraud or harm.</p>
+
+          <h3 class="section-title">5. How long we keep it</h3>
+          <p>While your account is open, we keep your information so the app works. When you delete your account (Help
+          &amp; Support → Delete my account), we erase your email, $paytag, password, sign-in links, messages, reviews, tips,
+          game history, business page, products, photos, job posts, shop delivery addresses and the contact details on your
+          support requests, and replace your username with an anonymous placeholder. We <strong>keep</strong> records of
+          payments, tickets, orders, cash-outs and GYD Direct sends — without your name attached — because the other people
+          involved rely on them and the law may require them; we keep these for [RETENTION PERIOD, e.g. 7 years].</p>
+
+          <h3 class="section-title">6. Your rights</h3>
+          <p>You can ask to see the personal information we hold about you, have it corrected, have it deleted (you can
+          delete your account yourself in the app), or object to how we use it. Contact us as in section 1; we answer within
+          30 days. If you're unhappy with our answer you can complain to the data-protection authority in Guyana.</p>
+
+          <h3 class="section-title">7. Security</h3>
+          <p>Connections to the app are encrypted (HTTPS), passwords are hashed, and only our server can reach the database.
+          Staff access requires a second sign-in code and every staff action is logged. No system is perfectly secure; if a
+          breach affects your information, we will tell you and the authorities as the law requires.</p>
+
+          <h3 class="section-title">8. Children</h3>
+          <p>GYD Wallet is only for people 18 and older. We don't knowingly collect information from anyone younger; if we
+          learn we have, we delete it.</p>
+
+          <h3 class="section-title">9. Changes</h3>
+          <p>If we change this policy we'll update the "Last updated" date above and, for important changes, tell you in the
+          app before they take effect.</p>
         </div>
       </section>
     </main>

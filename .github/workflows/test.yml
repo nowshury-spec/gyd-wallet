@@ -1,0 +1,37 @@
+# Runs the full test suite (see README → "Running the tests") on every push to
+# main and on every pull request. With Render's Auto-Deploy set to "After CI
+# Checks Pass" (also set in render.yaml), a push whose tests fail is never
+# deployed to the live site.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+
+      # The tests start their own throwaway PostgreSQL (15 or newer). GitHub's
+      # Ubuntu runners ship with PostgreSQL installed; install it only if not.
+      - name: Make sure PostgreSQL is available
+        run: |
+          if ! ls /usr/lib/postgresql/*/bin/initdb >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          ls -d /usr/lib/postgresql/*/bin
+
+      - name: Run tests
+        run: npm test

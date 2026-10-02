@@ -16,10 +16,10 @@ function codeFromMail(mail) {
   return m && m[1];
 }
 
-function makeStaff({ email = null } = {}) {
+async function makeStaff({ email = null } = {}) {
   const username = uniqueName('staff');
   const password = 'staff password 123';
-  const { salt, hash } = hashPassword(password);
+  const { salt, hash } = await hashPassword(password);
   env.sql(`INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at, email)
            VALUES ('${username}', '${username}', '${hash}', '${salt}', 'owner', now()::text, ${email ? `'${email}'` : 'NULL'});`);
   return { username, password };
@@ -36,7 +36,7 @@ test('with no email provider and no demo flag, codes are never handed out', asyn
   assert.equal(fu.status, 503);
   assert.equal(fu.data.username, undefined);
 
-  const staff = makeStaff();
+  const staff = await makeStaff();
   const sl = await env.api('POST', '/api/staff/login', { body: { username: staff.username, password: staff.password } });
   assert.equal(sl.status, 503);
   assert.equal(sl.data.code, undefined);
@@ -101,7 +101,7 @@ test('parallel wrong guesses cannot exceed the per-code attempt limit', async ()
 test('staff 2FA: code is emailed, works once, and parallel guesses are capped', async () => {
   await env.startServer({ TEST_EMAIL_ENABLED: '1' });
   const email = `${uniqueName('s')}@example.test`;
-  const staff = makeStaff({ email });
+  const staff = await makeStaff({ email });
   const login = await env.api('POST', '/api/staff/login', { body: { username: staff.username, password: staff.password } });
   assert.equal(login.status, 200);
   assert.equal(login.data.sent, true);
@@ -124,7 +124,7 @@ test('staff 2FA: code is emailed, works once, and parallel guesses are capped', 
 
 test('staff with no deliverable channel cannot log in outside demo mode', async () => {
   await env.startServer({ TEST_EMAIL_ENABLED: '1' });
-  const staff = makeStaff(); // no email on file
+  const staff = await makeStaff(); // no email on file
   const r = await env.api('POST', '/api/staff/login', { body: { username: staff.username, password: staff.password } });
   assert.equal(r.status, 503);
   assert.equal(r.data.code, undefined);
@@ -143,7 +143,7 @@ test('SHOW_CODES_ON_SCREEN demo mode shows codes, identically for unknown emails
   const [row] = env.query(`SELECT email_verified FROM users WHERE id = '${u.id}'`);
   assert.equal(row.email_verified, false);
 
-  const staff = makeStaff();
+  const staff = await makeStaff();
   const sl = await env.api('POST', '/api/staff/login', { body: { username: staff.username, password: staff.password } });
   assert.equal(sl.status, 200);
   assert.match(sl.data.code, /^\d{6}$/);

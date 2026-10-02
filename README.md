@@ -465,6 +465,20 @@ The Help & Support screen ("customer service" in the app) has a "Legal" section 
 
 To update the Terms later, edit the content inside `#panel-terms .panel` in `index.html` and bump the `TERMS_LAST_UPDATED` constant in `initTerms()` in `app.js` — both the in-app page and the signup preview pick up the change automatically.
 
+## Privacy Policy and deleting an account
+
+The Privacy Policy lives once, in `#panel-privacy` in `public/index.html`, and is mirrored into the signup screen the same way as the Terms. It is a **draft**: fill in every `[BRACKETED]` placeholder (legal business name, address, privacy contact email, how long payment records are kept) and have it reviewed by counsel in Guyana before launch. Keep it in step with the code — if the app starts sending data to a new service, the "Who else sees it" list must say so.
+
+Help & Support → **Delete my account** asks for the password again, then calls `POST /api/account/delete`, which runs `close_user_account` in `supabase/schema.sql` as one transaction:
+
+- **Refused** while money is still in the account or in motion: any balance (personal, business or courier) above 0, a pending cash-out, an unclaimed GYD Direct send, an open pickup order, an unfinished shop order or delivery, or an active event with tickets sold. The user is told exactly which.
+- **Erased:** email, $paytag, password, Google/Facebook links, messages, reviews, tips, game history, business page, products, photos (including the stored files), job posts, shop delivery addresses, support-ticket contact details. The username becomes `deleted-xxxxxxxxxxxx`.
+- **Kept, without a name:** transactions, tickets, orders, cash-outs and GYD Direct records — other users and audits rely on them.
+
+A deleted account can't sign in, every existing session stops working, and it can't be found by name to pay or message. A database rule also refuses any money landing on it afterwards, so a payment that races the deletion fails instead of disappearing.
+
+**Upgrade order:** re-run `supabase/schema.sql` in the Supabase SQL editor **before** deploying this code — the code expects the new `users.deleted_at` column, and fails until it exists.
+
 ## How product photos are stored
 
 *(Business page gallery photos are different: those are uploaded to the public `business-photos` Supabase Storage bucket through `db.js`'s `storageUpload`/`storageDelete` — which were missing from `db.js` until the security update, so gallery uploads always failed before it. This section is about product photos.)*
@@ -557,6 +571,15 @@ No `npm install` is needed — the suite uses Node's built-in test runner. It do
 Each test file starts its own throwaway Postgres, loads `supabase/schema.sql` into it (twice, to prove it can be re-run), and runs the real `server.js`, `db.js`, `auth.js` and `ludo.js` against it. `db.js` talks to `test/fake-supabase.js`, a small stand-in for Supabase's two HTTP APIs: RPC calls go to the real `exec_query` in that Postgres under the role the API key maps to (so the grants are really tested), and Storage keeps objects in memory. It also applies Supabase's header rules for both key formats. Only the modules that call third-party services (`email.js`, `sms.js`, `oauth.js`, `dropshipping.js`) are replaced by stand-ins in `test/shims/`.
 
 The suite covers the money flows (transfers, requests, charge requests, ticket sales and refunds, pickup orders, delivery fees, courier payouts), the auth code flows, social sign-in, account-identity rules, GYD Direct limits, rate limiting, photo storage, API-key handling and the database grants. `test/double-spend.test.js` and the oversell test cover double-submit races. Queries genuinely run concurrently in Postgres, and `slowWrites` stretches each write so the two requests are sure to overlap. Without that stretch, a missing lock can go unnoticed; these tests were checked to fail when the protection is removed.
+
+### Automatic tests on every push (GitHub Actions)
+
+`.github/workflows/test.yml` runs the full suite on GitHub after every push to `main` and on every pull request. You can see the result in the repository's **Actions** tab, and as a ✓ or ✗ next to each commit. To make sure a failing change never reaches the live site, set Render to deploy only after the tests pass: Render dashboard → gyd-wallet → **Settings** → **Build & Deploy** → **Auto-Deploy** → **After CI Checks Pass**. `render.yaml` sets the same thing (`autoDeployTrigger: checksPass`) for services managed by the blueprint.
+
+## Performance notes
+
+- **Password checks don't block the server.** Hashing a password with scrypt takes about 50 ms of CPU by design, which is what makes stolen hashes expensive to crack. `auth.js` runs it on Node's background thread pool (`crypto.scrypt`), so other users' requests keep being answered meanwhile. The earlier synchronous version froze the whole server: about 1.2 seconds during a burst of 30 logins on a full CPU core, much longer on a small hosting plan. `test/auth.test.js` checks this, and that passwords stored before the change still verify.
+- **Background refreshes pause while the app is hidden.** The app refreshes the balance every 15 seconds, an open chat every 4 seconds and an open Ludo game every 2 seconds. While the tab or app isn't visible, these are skipped, and everything refreshes the moment it's visible again. This removes most of the traffic from idle-but-open apps.
 
 ## Deployment settings added in the security update
 

@@ -31,6 +31,145 @@
     return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // ---------- in-app notifications & dialogs ----------
+  // These replace the browser's own alert() / confirm() / prompt() pop-ups,
+  // which look like a system error rather than part of the app, freeze the
+  // whole page until dismissed, and can't be styled or translated.
+  //   toast(message, kind)          — a non-blocking notification (kind:
+  //                                   'success' | 'error' | 'info').
+  //   await confirmDialog(message)  — true if the person chose Yes.
+  //   await promptDialog(message)   — their text, or null if they cancelled.
+  // Messages are always inserted as plain text (textContent), never as HTML,
+  // so a business name or event title inside one can't inject markup.
+  function i18nText(key, fallback) {
+    try {
+      const v = window.i18n && window.i18n.t(key);
+      return v && v !== key ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function toastRegion() {
+    let region = document.getElementById('toast-region');
+    if (!region) {
+      region = document.createElement('div');
+      region.id = 'toast-region';
+      region.className = 'toast-region';
+      region.setAttribute('aria-live', 'polite');
+      region.setAttribute('aria-label', i18nText('t426', 'Notifications'));
+      document.body.appendChild(region);
+    }
+    return region;
+  }
+
+  function toast(message, kind = 'info') {
+    const text = String(message === null || message === undefined ? '' : message);
+    const el = document.createElement('div');
+    el.className = `toast toast-${kind}`;
+    // Errors interrupt a screen reader immediately; other messages wait.
+    if (kind === 'error') el.setAttribute('role', 'alert');
+    const body = document.createElement('div');
+    body.className = 'toast-text';
+    body.textContent = text;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', i18nText('t419', 'Dismiss'));
+    close.textContent = '×';
+    el.append(body, close);
+    toastRegion().appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    // Long messages (e.g. a list of ticket codes) stay up longer.
+    const ms = Math.min(15000, Math.max(kind === 'error' ? 6000 : 4000, text.length * 60));
+    let timer = setTimeout(dismiss, ms);
+    function dismiss() {
+      clearTimeout(timer);
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 250);
+    }
+    close.onclick = dismiss;
+    // Don't let it vanish while someone is reading or hovering it.
+    el.addEventListener('mouseenter', () => clearTimeout(timer));
+    el.addEventListener('mouseleave', () => (timer = setTimeout(dismiss, 2500)));
+    return dismiss;
+  }
+
+  let dialogCounter = 0;
+  function openDialog({ message, confirmText, cancelText, danger = false, input = null }) {
+    // Very old browsers without <dialog>: fall back to the built-in pop-ups.
+    if (typeof HTMLDialogElement !== 'function') {
+      return Promise.resolve(input ? window.prompt(message) : window.confirm(message));
+    }
+    return new Promise((resolve) => {
+      const id = `app-dialog-msg-${++dialogCounter}`;
+      const dlg = document.createElement('dialog');
+      dlg.className = 'app-dialog';
+      dlg.setAttribute('aria-labelledby', id);
+      const form = document.createElement('form');
+      form.method = 'dialog';
+      const msg = document.createElement('p');
+      msg.id = id;
+      msg.className = 'app-dialog-message';
+      msg.textContent = String(message);
+      form.appendChild(msg);
+      let field = null;
+      if (input && input.type === 'password') {
+        field = document.createElement('input');
+        field.type = 'password';
+        field.autocomplete = 'current-password';
+        field.className = 'app-dialog-input';
+        field.setAttribute('aria-labelledby', id);
+        form.appendChild(field);
+      } else if (input) {
+        field = document.createElement('textarea');
+        field.className = 'app-dialog-input';
+        field.rows = 3;
+        field.maxLength = input.maxLength || 500;
+        field.placeholder = input.placeholder || '';
+        field.setAttribute('aria-labelledby', id);
+        form.appendChild(field);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'app-dialog-actions';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn secondary';
+      cancelBtn.textContent = cancelText;
+      const okBtn = document.createElement('button');
+      okBtn.type = 'submit';
+      okBtn.className = danger ? 'btn danger' : 'btn';
+      okBtn.textContent = confirmText;
+      actions.append(cancelBtn, okBtn);
+      form.appendChild(actions);
+      dlg.appendChild(form);
+      cancelBtn.onclick = () => dlg.close('cancel');
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        dlg.close('ok');
+      };
+      // Escape key / back gesture closes it as a cancel.
+      dlg.addEventListener('close', () => {
+        const ok = dlg.returnValue === 'ok';
+        const value = field ? (field.type === 'password' ? field.value : field.value.trim()) : null;
+        dlg.remove();
+        resolve(input ? (ok ? value : null) : ok);
+      });
+      document.body.appendChild(dlg);
+      dlg.showModal();
+      // Safer default: for a destructive question, focus starts on "No".
+      (field || (danger ? cancelBtn : okBtn)).focus();
+    });
+  }
+
+  function confirmDialog(message, { danger = false } = {}) {
+    return openDialog({ message, danger, confirmText: i18nText('t415', 'Yes'), cancelText: i18nText('t416', 'No') });
+  }
+
+  function promptDialog(message, { placeholder = '' } = {}) {
+    return openDialog({ message, input: { placeholder }, confirmText: i18nText('t417', 'OK'), cancelText: i18nText('t418', 'Cancel') });
+  }
+
   // Escape a value before interpolating it into an innerHTML template. This
   // app renders plenty of data that OTHER users control — usernames and
   // $paytags, business names/taglines/descriptions, product names, review
@@ -167,7 +306,19 @@
     lastUpdatedEls.forEach((el) => { el.textContent = TERMS_LAST_UPDATED; });
   })();
 
+  // The Privacy Policy follows the same single-source pattern as the Terms.
+  (function initPrivacy() {
+    const source = document.querySelector('#panel-privacy .panel');
+    const preview = document.getElementById('privacy-preview-content');
+    if (source && preview) preview.innerHTML = source.innerHTML;
+    // Bump whenever the policy text changes.
+    const PRIVACY_LAST_UPDATED = 'October 1, 2026';
+    document.querySelectorAll('.privacy-last-updated').forEach((el) => { el.textContent = PRIVACY_LAST_UPDATED; });
+  })();
+
   document.getElementById('terms-btn').onclick = () => switchTab('terms');
+  document.getElementById('privacy-btn').onclick = () => switchTab('privacy');
+  document.getElementById('privacy-back-btn').onclick = () => switchTab('support');
   document.getElementById('terms-back-btn').onclick = () => switchTab('support');
 
   // ---------- social sign-in (Google / Facebook) ----------
@@ -306,11 +457,11 @@
   // in server.js for why there's no "everywhere but here" option without
   // tracking individual sessions.
   document.getElementById('logout-all-btn').onclick = async () => {
-    if (!confirm('This will sign you out on every device, including this one. Continue?')) return;
+    if (!(await confirmDialog('This will sign you out on every device, including this one. Continue?'))) return;
     try {
       await api('/api/security/logout-all-sessions', 'POST');
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
       return;
     }
     setToken(null);
@@ -318,6 +469,35 @@
     if (state.pollHandle) clearInterval(state.pollHandle);
     appScreen.classList.add('hidden');
     authScreen.classList.remove('hidden');
+  };
+
+  // "Delete my account" — see POST /api/account/delete and
+  // close_user_account in supabase/schema.sql. Two steps: a plain warning,
+  // then the password (the server re-checks it). Anything that still has to
+  // be settled first (a balance, a pending cash-out, an open order...) comes
+  // back as an error message saying exactly what.
+  document.getElementById('delete-account-btn').onclick = async () => {
+    if (!(await confirmDialog(i18nText('t432', "Delete your account for good? This can't be undone."), { danger: true }))) return;
+    const password = await openDialog({
+      message: i18nText('t433', 'Enter your password to confirm.'),
+      input: { type: 'password' },
+      danger: true,
+      confirmText: i18nText('t435', 'Delete'),
+      cancelText: i18nText('t418', 'Cancel'),
+    });
+    if (password === null || password === '') return;
+    try {
+      await api('/api/account/delete', 'POST', { password });
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
+    }
+    setToken(null);
+    state.user = null;
+    if (state.pollHandle) clearInterval(state.pollHandle);
+    appScreen.classList.add('hidden');
+    authScreen.classList.remove('hidden');
+    toast(i18nText('t434', 'Your account has been deleted.'), 'success');
   };
 
   // Adding a business account on top of an existing personal one — same
@@ -646,10 +826,51 @@
     renderWho();
     switchTab('wallet');
     if (state.pollHandle) clearInterval(state.pollHandle);
-    state.pollHandle = setInterval(() => {
-      refreshMe().catch(() => {});
-    }, 15000);
+    state.pollHandle = setInterval(pollMe, 15000);
   }
+
+  // ---------- background refresh ----------
+  // The app keeps itself up to date by asking the server every few seconds
+  // (balance every 15s, an open chat every 4s, an open Ludo game every 2s).
+  // While the app isn't visible — another tab, the phone locked, the app in
+  // the background — nobody is looking, so these checks are skipped; the
+  // moment it's visible again, everything refreshes at once. That removes
+  // most of the server and database traffic from idle-but-open apps, with
+  // no visible difference to the person using it.
+  function appVisible() {
+    return document.visibilityState !== 'hidden';
+  }
+
+  function pollMe() {
+    if (!state.user || !appVisible()) return;
+    refreshMe().catch(() => {});
+  }
+
+  function pollThread() {
+    if (!appVisible()) return;
+    if (state.user && state.activeThreadUsername && !document.getElementById('panel-messages').classList.contains('hidden')) {
+      refreshThreadMessages();
+    }
+  }
+
+  function pollLudo() {
+    if (!appVisible()) return;
+    if (
+      state.user &&
+      ludoCurrentTableId &&
+      !document.getElementById('panel-ludo').classList.contains('hidden') &&
+      !document.getElementById('ludo-table-view').classList.contains('hidden')
+    ) {
+      api(`/api/games/ludo/tables/${ludoCurrentTableId}`).then((data) => renderLudoTable(data.table)).catch(() => {});
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!appVisible()) return;
+    pollMe();
+    pollThread();
+    pollLudo();
+  });
 
   // ---------- wallet ----------
 
@@ -873,7 +1094,7 @@
       }
       loadMoneyRequests();
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -1187,7 +1408,7 @@
       renderWho();
       loadBusiness();
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -1610,7 +1831,7 @@
           const data = await api(`/api/business/products/${p.id}`, 'DELETE');
           renderMyProducts(data.products);
         } catch (err) {
-          alert(err.message);
+          toast(err.message, 'error');
         }
       };
       row.lastElementChild.appendChild(removeBtn);
@@ -1705,13 +1926,13 @@
         cancelBtn.className = 'btn secondary small';
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = async () => {
-          if (!confirm(`Cancel "${ev.title}"? Every ticket sold will be refunded in full, paid back out of your business wallet. This can't be undone.`)) return;
+          if (!(await confirmDialog(`Cancel "${ev.title}"? Every ticket sold will be refunded in full, paid back out of your business wallet. This can't be undone.`, { danger: true }))) return;
           try {
             const data = await api(`/api/business/events/${ev.id}/cancel`, 'POST', {});
             renderMyEvents(data.events);
-            if (data.refundedTickets) alert(`Cancelled. ${data.refundedTickets} ticket(s) refunded — GYD ${fmt(data.refundedTotal)} in total.`);
+            if (data.refundedTickets) toast(`Cancelled. ${data.refundedTickets} ticket(s) refunded — GYD ${fmt(data.refundedTotal)} in total.`, 'success');
           } catch (err) {
-            alert(err.message);
+            toast(err.message, 'error');
           }
         };
         actions.appendChild(cancelBtn);
@@ -1722,12 +1943,12 @@
         delBtn.className = 'btn secondary small';
         delBtn.textContent = 'Delete';
         delBtn.onclick = async () => {
-          if (!confirm(`Delete "${ev.title}"?`)) return;
+          if (!(await confirmDialog(`Delete "${ev.title}"?`, { danger: true }))) return;
           try {
             const data = await api(`/api/business/events/${ev.id}`, 'DELETE');
             renderMyEvents(data.events);
           } catch (err) {
-            alert(err.message);
+            toast(err.message, 'error');
           }
         };
         actions.appendChild(delBtn);
@@ -1853,12 +2074,12 @@
         closeBtn.className = 'btn secondary small';
         closeBtn.textContent = 'Close';
         closeBtn.onclick = async () => {
-          if (!confirm(`Close "${j.title}"? It'll come down from your page and the Jobs board.`)) return;
+          if (!(await confirmDialog(`Close "${j.title}"? It'll come down from your page and the Jobs board.`, { danger: true }))) return;
           try {
             const data = await api(`/api/business/jobs/${j.id}/close`, 'POST', {});
             renderMyJobs(data.jobs);
           } catch (err) {
-            alert(err.message);
+            toast(err.message, 'error');
           }
         };
         actions.appendChild(closeBtn);
@@ -1868,12 +2089,12 @@
       delBtn.className = 'btn secondary small';
       delBtn.textContent = 'Delete';
       delBtn.onclick = async () => {
-        if (!confirm(`Delete "${j.title}"?`)) return;
+        if (!(await confirmDialog(`Delete "${j.title}"?`, { danger: true }))) return;
         try {
           const data = await api(`/api/business/jobs/${j.id}`, 'DELETE');
           renderMyJobs(data.jobs);
         } catch (err) {
-          alert(err.message);
+          toast(err.message, 'error');
         }
       };
       actions.appendChild(delBtn);
@@ -1978,7 +2199,7 @@
       btn.textContent = wasSaved ? '☆' : '★';
       btn.title = wasSaved ? 'Save this job' : 'Remove from saved jobs';
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -2200,7 +2421,7 @@
             await api(`/api/business/orders/${o.id}/lock`, 'POST', {});
             loadMyPendingOrders();
           } catch (err) {
-            alert(err.message);
+            toast(err.message, 'error');
           }
         };
         actions.appendChild(lockBtn);
@@ -2209,12 +2430,12 @@
       cancelBtn.className = 'btn secondary small';
       cancelBtn.textContent = 'Cancel & refund';
       cancelBtn.onclick = async () => {
-        if (!confirm(`Cancel this order and refund GYD ${fmt(o.amount)} to ${o.customerUsername}?`)) return;
+        if (!(await confirmDialog(`Cancel this order and refund GYD ${fmt(o.amount)} to ${o.customerUsername}?`, { danger: true }))) return;
         try {
           await api(`/api/business/orders/${o.id}/cancel`, 'POST', {});
           loadMyPendingOrders();
         } catch (err) {
-          alert(err.message);
+          toast(err.message, 'error');
         }
       };
       actions.appendChild(cancelBtn);
@@ -2329,13 +2550,13 @@
         cancelBtn.style.marginTop = '10px';
         cancelBtn.textContent = 'Cancel & refund';
         cancelBtn.onclick = async () => {
-          if (!confirm(`Cancel this order and get GYD ${fmt(o.amount)} refunded?`)) return;
+          if (!(await confirmDialog(`Cancel this order and get GYD ${fmt(o.amount)} refunded?`, { danger: true }))) return;
           try {
             await api(`/api/orders/${o.id}/cancel`, 'POST', {});
             await refreshMe();
             loadMyOrders();
           } catch (err) {
-            alert(err.message);
+            toast(err.message, 'error');
           }
         };
         card.appendChild(cancelBtn);
@@ -2610,7 +2831,7 @@
       };
       document.getElementById('bizpage-view-pay-btn').onclick = () => openCheckout(b);
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
       switchTab('business');
     }
   }
@@ -2624,6 +2845,8 @@
     reviewSelectedRating = rating;
     document.querySelectorAll('#bizpage-review-star-picker .star-picker-btn').forEach((btn) => {
       btn.classList.toggle('selected', Number(btn.dataset.value) <= rating);
+      // Screen readers announce the chosen rating (the stars are a radio group).
+      btn.setAttribute('aria-checked', String(Number(btn.dataset.value) === rating));
     });
   }
 
@@ -2683,12 +2906,15 @@
   // server.js for why. A staff member can remove it from their portal if
   // it's actually spam or abuse.
   async function reportReview(username, reviewId) {
-    const reason = prompt('Why are you reporting this review? (optional)') || '';
+    // Cancel now really cancels (the old browser prompt sent the report
+    // anyway, with a blank reason); an empty reason is still allowed.
+    const reason = await promptDialog('Why are you reporting this review? (optional)');
+    if (reason === null) return;
     try {
       await api(`/api/business/directory/${encodeURIComponent(username)}/reviews/${reviewId}/report`, 'POST', { reason });
-      alert("Thanks — we've sent this to our support team to look at.");
+      toast("Thanks — we've sent this to our support team to look at.", 'success');
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -2696,12 +2922,12 @@
   // ticket, gone immediately. Only shown to the business itself (see
   // b.isOwnBusiness above).
   async function removeReviewAsBusiness(username, reviewId) {
-    if (!confirm("Remove this review from your page? This can't be undone.")) return;
+    if (!(await confirmDialog("Remove this review from your page? This can't be undone.", { danger: true }))) return;
     try {
       await api(`/api/business/directory/${encodeURIComponent(username)}/reviews/${reviewId}`, 'DELETE');
       openBusinessPage(username);
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -2785,12 +3011,12 @@
 
   // Same instant, no-staff-ticket removal as removeReviewAsBusiness above.
   async function removeTipAsBusiness(username, tipId) {
-    if (!confirm("Remove this tip from your page? This can't be undone.")) return;
+    if (!(await confirmDialog("Remove this tip from your page? This can't be undone.", { danger: true }))) return;
     try {
       await api(`/api/business/directory/${encodeURIComponent(username)}/tips/${tipId}`, 'DELETE');
       openBusinessPage(username);
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -2875,7 +3101,7 @@
 
   async function buyEventTickets(ev, quantity, btn, username) {
     if (!Number.isInteger(quantity) || quantity < 1) {
-      alert('Choose at least 1 ticket.');
+      toast('Choose at least 1 ticket.', 'error');
       return;
     }
     const originalText = btn.textContent;
@@ -2886,12 +3112,13 @@
       state.user = data.user;
       renderWho();
       const codes = data.tickets.map((t) => t.ticketCode).join(', ');
-      alert(
-        `Bought ${data.tickets.length} ticket(s) to "${ev.title}" for GYD ${fmt(data.totalPrice)}.\n\nFind them (with QR codes) under "My tickets".\n\nCode(s): ${codes}`
+      toast(
+        `Bought ${data.tickets.length} ticket(s) to "${ev.title}" for GYD ${fmt(data.totalPrice)}.\n\nFind them (with QR codes) under "My tickets".\n\nCode(s): ${codes}`,
+        'success'
       );
       openBusinessPage(username);
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     } finally {
       btn.disabled = false;
       btn.textContent = originalText;
@@ -3394,7 +3621,7 @@
       loadShopOrders();
     } catch (err) {
       if (errBox) errBox.textContent = err.message;
-      else alert(err.message);
+      else toast(err.message, 'error');
     }
   }
 
@@ -3534,7 +3761,7 @@
           loadCourierAvailable();
           loadCourierMine();
         } catch (err) {
-          alert(err.message);
+          toast(err.message, 'error');
         }
       };
       card.appendChild(claimBtn);
@@ -3678,16 +3905,13 @@
       await refreshThreadMessages();
       await loadThreads();
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
-  // Poll the open thread for new messages every few seconds.
-  setInterval(() => {
-    if (state.user && state.activeThreadUsername && !document.getElementById('panel-messages').classList.contains('hidden')) {
-      refreshThreadMessages();
-    }
-  }, 4000);
+  // Poll the open thread for new messages every few seconds (paused while
+  // the app is hidden — see "background refresh" above).
+  setInterval(pollThread, 4000);
 
   // ---------- scan & pay (QR codes) ----------
 
@@ -3765,7 +3989,7 @@
       btn.textContent = 'Copied!';
       setTimeout(() => (btn.textContent = original), 1200);
     } catch {
-      alert('Could not copy automatically — select and copy the code manually.');
+      toast('Could not copy automatically — select and copy the code manually.', 'info');
     }
   };
 
@@ -3959,7 +4183,7 @@
               renderWho();
               loadRemitSentList();
             } catch (err) {
-              alert(err.message);
+              toast(err.message, 'error');
             }
           };
           row.appendChild(cancelBtn);
@@ -4314,7 +4538,7 @@
       await api(`/api/games/ludo/tables/${id}/join`, 'POST', {});
       await openLudoTable(id);
     } catch (err) {
-      alert(err.message);
+      toast(err.message, 'error');
     }
   }
 
@@ -4366,17 +4590,9 @@
   };
 
   // Poll the open table for opponents' rolls/moves every couple of seconds
-  // — the same lightweight approach used for open message threads above.
-  setInterval(() => {
-    if (
-      state.user &&
-      ludoCurrentTableId &&
-      !document.getElementById('panel-ludo').classList.contains('hidden') &&
-      !document.getElementById('ludo-table-view').classList.contains('hidden')
-    ) {
-      api(`/api/games/ludo/tables/${ludoCurrentTableId}`).then((data) => renderLudoTable(data.table)).catch(() => {});
-    }
-  }, 2000);
+  // — the same lightweight approach used for open message threads above,
+  // and likewise paused while the app is hidden.
+  setInterval(pollLudo, 2000);
 
   // ---------- boot ----------
 

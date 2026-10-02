@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { promisify } = require('util');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const SECRET_PATH = path.join(DATA_DIR, 'session-secret.key');
@@ -43,14 +44,25 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function hashPassword(password) {
+// scrypt is deliberately slow (~50ms of CPU per call) — that's what makes a
+// stolen password hash expensive to crack. These used to call scryptSync,
+// which runs on the server's single JavaScript thread and so FROZE the whole
+// server while each password was checked: no other user's request was
+// answered until it finished (measured: over a second of total freeze during
+// a burst of 30 logins on a full CPU core — far longer on a small hosting
+// plan). crypto.scrypt does the same work on Node's background thread pool
+// instead, so everyone else keeps being served. Same algorithm, same default
+// parameters and key length, so every existing stored hash still verifies.
+const scryptAsync = promisify(crypto.scrypt);
+
+async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  const hash = (await scryptAsync(password, salt, 64)).toString('hex');
   return { salt, hash };
 }
 
-function verifyPassword(password, salt, hash) {
-  const check = crypto.scryptSync(password, salt, 64).toString('hex');
+async function verifyPassword(password, salt, hash) {
+  const check = (await scryptAsync(password, salt, 64)).toString('hex');
   return safeEqual(check, hash);
 }
 

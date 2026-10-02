@@ -11,7 +11,7 @@ let staffToken;
 test.before(async () => {
   env = await setup({ SHOW_CODES_ON_SCREEN: 'true' });
   const username = uniqueName('staff');
-  const { salt, hash } = hashPassword('staff password 123');
+  const { salt, hash } = await hashPassword('staff password 123');
   env.sql(`INSERT INTO staff_accounts (id, username, password_hash, password_salt, role, created_at)
            VALUES ('${username}', '${username}', '${hash}', '${salt}', 'employee', now()::text);`);
   const login = await env.api('POST', '/api/staff/login', { body: { username, password: 'staff password 123' } });
