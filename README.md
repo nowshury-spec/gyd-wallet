@@ -471,7 +471,7 @@ The Privacy Policy lives once, in `#panel-privacy` in `public/index.html`, and i
 
 Help & Support → **Delete my account** asks for the password again, then calls `POST /api/account/delete`, which runs `close_user_account` in `supabase/schema.sql` as one transaction:
 
-- **Refused** while money is still in the account or in motion: any balance (personal, business or courier) above 0, a pending cash-out, an unclaimed GYD Direct send, an open pickup order, an unfinished shop order or delivery, or an active event with tickets sold. The user is told exactly which.
+- **Refused** while money is still in the account or in motion: any balance (personal, business or courier) above 0, a pending cash-out, an unclaimed GYD Direct send, an open pickup order, an unfinished shop order or delivery, an active event with tickets sold, an open Chip In pot, or money in someone else's open Chip In pot. The user is told exactly which.
 - **Erased:** email, $paytag, password, Google/Facebook links, messages, reviews, tips, game history, business page, products, photos (including the stored files), job posts, shop delivery addresses, support-ticket contact details. The username becomes `deleted-xxxxxxxxxxxx`.
 - **Kept, without a name:** transactions, tickets, orders, cash-outs and GYD Direct records — other users and audits rely on them.
 
@@ -487,12 +487,29 @@ How it works: turning it on makes the device create a new key pair and keep the 
 
 - Turning it on asks for the account password first, so someone holding a stolen session can't add their own Face ID and keep getting back in after "Log out of all devices". (Accounts made with Google/Facebook set a password first with "Forgot your password?".)
 - Every challenge works once and expires after 5 minutes; a key that keeps a use counter must count upwards, so a copied key is refused.
-- Each device can be removed from the list; a **password reset removes all of them**, and deleting the account erases them.
+- Each device can be removed from the list; a **password reset and "Log out of all devices" both remove all of them** (otherwise someone who had once been in the account could sign straight back in with a Face ID they'd added), and deleting the account erases them.
 - Passkeys belong to the website's address. On Render that's the service URL (Render's own `RENDER_EXTERNAL_URL`). If the app ever moves to its own domain, set `PASSKEY_ORIGIN` to the new address (e.g. `https://gydwallet.com`) — and everyone will need to turn Face ID on again there, because passkeys made for the old address don't carry over. Their passwords keep working throughout.
 
 `test/passkeys.test.js` runs every check against a simulated device holding real keys.
 
 **Upgrade order:** re-run `supabase/schema.sql` (it adds the `passkeys` table) **before** deploying this code.
+
+## The home screen and Chip In
+
+The Home tab has its own layout: a green header (account pill, settings, log out, avatar with a Scan & Pay shortcut), three tiles (**Chip In**, **Scan & Pay**, **Invite**) and three views — **Wallet** (balance, Add money / Cash out sheets, recent activity, $Paytag, or the business wallet when the account switcher is on Business), **Chip In** and **Activity**. While Home is open, `body.on-home` hides the app header and the round shortcuts; every other tab looks exactly as before.
+
+**Chip In** is group money pots: someone starts a pot ("Rupununi road trip", goal GYD 50,000, last day to chip in), shares the link (`https://…/#pot=<id>`), and anyone with a GYD Wallet account chips in from their personal balance.
+
+- **The money is locked** until the goal is reached **or** the deadline passes (the end of the last day, Guyana time). Only the organizer can move it out, and only into their own wallet.
+- **Deadline passed short of the goal:** the organizer either collects what's there or refunds everyone.
+- The organizer can **cancel and refund everyone** at any time; each person gets back exactly what they put in.
+- A pot's balance is kept in `chip_in_pots.balance`, separate from every wallet, and each contribution is a row in `chip_in_contributions`. Chipping in, collecting and refunding each move money in one locked statement (refunds through `chip_in_refund()` in `supabase/schema.sql`), so a chip-in can't land in a pot that's just been collected or refunded, and a pot can't be paid out twice.
+- Limits: deadline from tomorrow to one year ahead; 20 open pots per organizer.
+- Deleting an account is refused while it runs an open pot or has money in someone else's open pot.
+
+`test/chip-in.test.js` covers the rules and the races (chip-in vs collect, chip-in vs refund, collect vs refund).
+
+**Upgrade order:** re-run `supabase/schema.sql` (it adds the two Chip In tables, `chip_in_refund()` and the new account-deletion checks) **before** deploying this code.
 
 ## How product photos are stored
 
@@ -623,3 +640,14 @@ driver package. If you continue this build, reaching for Express, a real
 ORM, and a proper frontend framework (React/Vue) once the team and
 requirements grow is entirely reasonable — this version optimizes for
 "runs anywhere with zero setup" over production architecture.
+
+## Profile picture and app wallpaper
+
+Tapping the big picture on Home opens **My profile** (`#panel-profile`), where a person can set:
+
+- **A profile picture** — shown next to their name for everyone they deal with: the Pay list, activity ("To kezia"), chat (thread list and header), money requests, Chip In (organizer and contributors), business pages and the directory (when the business has no gallery photo), and the app header. People without one get their initials on a colour picked from their name. It is stored in the **public** `profile-pictures` bucket under `<user id>/<random>.jpg`; the URL is in `users.avatar_url`. Replacing or removing it deletes the old file.
+- **A wallpaper** — behind the *whole* app, **visible only to its owner**. Either one of four built-in presets (`users.wallpaper_preset`: sunset, guyana, ocean, gold) or their own photo, which goes in the **private** `wallpapers` bucket (`users.wallpaper_path`). The bucket has no public read policy at all; the app fetches the photo with the person's login (`GET /api/profile/wallpaper/image`, `Cache-Control: private, no-store`) and shows it from a local `blob:` URL. **Dim** (0–70 %) and **Blur** (0–14 px) sliders keep text readable; both are checked in the database as well as the server. While a wallpaper is on, `body.has-wall` turns every surface into frosted glass (the colour variables become translucent); pop-up sheets and dialogs stay solid.
+
+Photos are shrunk in the browser first (profile picture: 480 px square JPEG; wallpaper: up to 1600 px JPEG), and the server still checks type (JPEG/PNG/WEBP only, no SVG), size (about 1.6 MB) and the file's own first bytes. Routes: `POST/DELETE /api/profile/avatar`, `POST /api/profile/wallpaper/photo`, `POST /api/profile/wallpaper/settings` (`preset`, `dim`, `blur`), `DELETE /api/profile/wallpaper`. Deleting an account removes both files. Log out clears the wallpaper from the screen. Tests: `test/profile.test.js`.
+
+**Upgrade order:** re-run `supabase/schema.sql` (it adds the profile columns, the two storage buckets with their policies, and updates `close_user_account()`) **before** deploying this code.

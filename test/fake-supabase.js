@@ -23,7 +23,7 @@ function startFakeSupabase({ psql, host, port, secretKey, anonKey, legacyService
   // How many exec_query calls were running at the same moment, at most — lets
   // race tests prove their requests really overlapped inside Postgres.
   const stats = { inFlight: 0, maxInFlight: 0 };
-  const publicBuckets = new Set(['business-photos']);
+  const publicBuckets = new Set(['business-photos', 'profile-pictures']);
 
   function roleFor(req) {
     const bearer = (req.headers.authorization || '').replace(/^Bearer /, '');
@@ -96,6 +96,14 @@ function startFakeSupabase({ psql, host, port, secretKey, anonKey, legacyService
     }
 
     const m = /^\/storage\/v1\/object\/([^/]+)\/(.+)$/.exec(url.pathname);
+    // Authenticated read (works for private buckets too, but only with the secret key).
+    if (m && req.method === 'GET' && m[1] !== 'public') {
+      if (roleFor(req) !== 'service_role') return json(res, 400, { message: 'Bucket not found' });
+      const obj = objects.get(`${m[1]}/${decodeURIComponent(m[2])}`);
+      if (!obj) return json(res, 404, { message: 'Object not found' });
+      res.writeHead(200, { 'Content-Type': obj.contentType });
+      return res.end(obj.body);
+    }
     if (m && (req.method === 'POST' || req.method === 'DELETE')) {
       // Only the secret key may write/delete (the bucket's storage policies
       // are granted to service_role only — see supabase/schema.sql).

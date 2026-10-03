@@ -10,6 +10,8 @@
 <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <!-- The person's own wallpaper (set in My profile). Empty/hidden unless one is on. -->
+  <div id="app-wall" aria-hidden="true"></div><div id="app-wall-scrim" aria-hidden="true"></div>
 
 <div id="auth-screen">
   <div class="lang-switcher lang-switcher-auth">
@@ -220,10 +222,10 @@
         <div class="hero-balance-value"><span id="balance-gyd">0.00</span><span class="hero-balance-unit">GYD</span></div>
       </div>
       <div class="hero-quick-actions">
-        <button class="quick-action" data-focus="deposit-amount">
+        <button class="quick-action" data-action="add-money">
           <span class="quick-action-icon qa-green">＋</span><span data-i18n="t326">Add</span>
         </button>
-        <button class="quick-action" data-focus="cashout-amount">
+        <button class="quick-action" data-action="cash-out">
           <span class="quick-action-icon qa-blue">⇩</span><span data-i18n="t327">Cash Out</span>
         </button>
         <button class="quick-action" data-tab-jump="games">
@@ -234,102 +236,121 @@
         </button>
       </div>
 
-      <!-- WALLET TAB -->
+      <!-- WALLET (HOME) TAB — the app's front page. While it's open, the
+           app-wide header, banner, balance card and round shortcuts above are
+           hidden (body.on-home in styles.css) and this green band takes
+           their place; every other tab keeps them. Its three views (Wallet /
+           Chip In / Activity) are switched by the .home-tab buttons. -->
       <section id="panel-wallet" class="tab-panel">
-        <!-- Which balance/panel this tab shows (personal vs. business) is
-             controlled entirely by walletContext in app.js — set by tapping
-             the profile header's account switcher (#account-switcher-menu),
-             the only way to switch between them now. -->
-        <div id="wallet-personal-view">
-        <h2 class="section-title" data-i18n="t1">Your account</h2>
-        <div class="account-card">
-          <div class="account-card-top">
-            <span class="account-card-chip"></span>
-          </div>
-          <div class="account-card-tag" id="account-card-paytag">$—</div>
-          <div class="account-card-bottom">
-            <div>
-              <span class="account-card-label" data-i18n="t282">Holder</span>
-              <span class="account-card-value" id="account-card-holder">—</span>
+        <div class="home-hero">
+          <div class="home-hero-top">
+            <!-- Same account switcher as the app header's (business accounts
+                 only); for a personal account it's just a label. -->
+            <button type="button" class="home-acct-pill" id="home-acct-pill">
+              <span class="home-acct-dot" id="home-acct-dot" aria-hidden="true">P</span>
+              <span id="home-acct-label" data-i18n="t334">Personal</span>
+              <span class="home-acct-caret hidden" id="home-acct-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="home-hero-icons">
+              <button type="button" class="home-round-btn" id="home-support-btn" aria-label="Settings &amp; help" title="Settings &amp; help" data-i18n-aria="t453" data-i18n-title="t453">⚙︎</button>
+              <button type="button" class="home-round-btn" id="home-logout-btn" aria-label="Log out" title="Log out" data-i18n-aria="t319" data-i18n-title="t319">⏻</button>
             </div>
-            <span class="account-card-mark">GYD Wallet</span>
+          </div>
+          <div class="home-who">
+            <div class="home-avatar">
+              <!-- Opens "My profile" (picture + wallpaper). -->
+              <button type="button" class="home-avatar-main" id="home-avatar-btn" aria-label="Your profile" title="Your profile" data-i18n-aria="t567" data-i18n-title="t567">
+                <span id="home-avatar-initials">?</span>
+                <img id="home-avatar-img" class="hidden" alt="">
+              </button>
+              <button type="button" class="home-qr-chip" id="home-qr-btn" aria-label="Scan &amp; Pay" title="Scan &amp; Pay" data-i18n-aria="t317" data-i18n-title="t317">▦</button>
+            </div>
+            <div class="home-who-text">
+              <div class="home-name" id="home-name">—</div>
+              <div class="home-tag" id="home-tag">$—</div>
+            </div>
           </div>
         </div>
 
-        <h2 class="section-title" style="margin-top:22px;" data-i18n="t2">Your $Paytag</h2>
-        <div class="panel">
-          <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t240">Your $Paytag is your unique payment handle. Share it so people can pay or request money from you without needing your username.</p>
-          <div class="panel-row">
-            <div class="field">
-              <label data-i18n="t62">$Paytag</label>
-              <input type="text" id="paytag-input" placeholder="yourname" data-i18n-ph="t284" maxlength="20" />
-            </div>
-            <button class="btn secondary" id="paytag-save-btn" data-i18n="t164">Save</button>
-          </div>
-          <div class="error-msg" id="paytag-error"></div>
+        <div class="home-tiles">
+          <button type="button" class="home-tile home-tile-featured" id="home-tile-chipin">
+            <span class="home-tile-ic" aria-hidden="true">🪙</span><span data-i18n="t454">Chip In</span>
+          </button>
+          <button type="button" class="home-tile" id="home-tile-scan">
+            <span class="home-tile-ic" aria-hidden="true">▦</span><span data-i18n="t317">Scan &amp; Pay</span>
+          </button>
+          <button type="button" class="home-tile" id="home-tile-invite">
+            <span class="home-tile-ic" aria-hidden="true">＋</span><span data-i18n="t456">Invite</span>
+          </button>
         </div>
 
-        <h2 class="section-title" data-i18n="t3">Deposit real money (simulated)</h2>
-        <div class="panel">
-          <div class="panel-row">
-            <div class="field">
-              <label data-i18n="t63">Amount (GYD)</label>
-              <input type="number" id="deposit-amount" min="1" step="0.01" placeholder="5000.00" />
-            </div>
-            <button class="btn" id="deposit-btn" data-i18n="t165">Deposit</button>
-          </div>
-          <div class="error-msg" id="deposit-error"></div>
+        <div class="home-tabs" role="tablist">
+          <button type="button" class="home-tab active" role="tab" data-home-view="wallet" data-i18n="t457">Wallet</button>
+          <button type="button" class="home-tab" role="tab" data-home-view="chipin" data-i18n="t454">Chip In</button>
+          <button type="button" class="home-tab" role="tab" data-home-view="activity" data-i18n="t458">Activity</button>
         </div>
 
-        <h2 class="section-title" data-i18n="t4">Cash out GYD</h2>
-        <div class="panel">
-          <div class="panel-row">
-            <div class="field">
-              <label data-i18n="t64">Amount to cash out</label>
-              <input type="number" id="cashout-amount" min="0.01" step="0.01" placeholder="2000" />
+        <!-- WALLET view -->
+        <div class="home-view" id="home-view-wallet">
+          <div class="home-card">
+            <div class="home-bal-label">
+              <span id="home-balance-label" data-i18n="t281">Available balance</span>
+              <button type="button" class="home-eye" id="home-balance-eye" aria-label="Hide balance" title="Hide balance">👁</button>
             </div>
-            <button class="btn secondary" id="cashout-btn" data-i18n="t166">Request cash-out</button>
+            <div class="home-bal"><small>GYD</small><span id="home-balance-value">0.00</span></div>
+            <div class="home-held hidden" id="home-held">
+              <span class="home-held-ic" aria-hidden="true">🪙</span>
+              <div><b id="home-held-amount">GYD 0.00</b> <span data-i18n="t461">is in pots you're running. It's kept apart from your wallet until you collect it.</span></div>
+            </div>
+            <p class="home-proto-note" data-i18n="t462">Prototype: deposits are simulated and cash-outs are only recorded — no real money moves yet.</p>
           </div>
-          <p class="muted" style="font-size:12.5px; margin:10px 0 0;" data-i18n="t241">
-            This deducts the GYD and files a pending request — it does not send real money in this prototype.
-          </p>
-          <div class="error-msg" id="cashout-error"></div>
-        </div>
+
+          <!-- Rounded "bubble" tiles. Which of these two rows shows is set by
+               walletContext in app.js (the account switcher). Each tile opens a
+               bottom sheet or switches view — see "home tab" in app.js. -->
+          <div id="wallet-personal-view">
+            <div class="tile-row two">
+              <button type="button" class="bubble-tile" id="home-add-money-btn"><span class="bubble b-lime" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="bubble-label" data-i18n="t459">Add money</span></button>
+              <button type="button" class="bubble-tile" id="home-cash-out-btn"><span class="bubble b-gold" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l9-6 9 6M5 10v7M9.5 10v7M14.5 10v7M19 10v7M3 20h18"/></svg></span><span class="bubble-label" data-i18n="t460">Cash out</span></button>
+              <button type="button" class="bubble-tile" id="home-tile-activity"><span class="bubble b-coral" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="bubble-label" data-i18n="t458">Activity</span></button>
+              <button type="button" class="bubble-tile" id="home-tile-paytag"><span class="bubble b-sky" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M16 7.5c0-1.7-1.8-3-4-3s-4 1.3-4 3 1.8 2.6 4 3 4 1.3 4 3-1.8 3-4 3-4-1.3-4-3"/></svg></span><span class="bubble-label" data-i18n="t62">$Paytag</span></button>
+            </div>
+          </div>
+
+          <div id="wallet-business-view" class="hidden">
+            <div class="tile-row three">
+              <button type="button" class="bubble-tile" id="home-biz-move-btn"><span class="bubble b-lime" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg></span><span class="bubble-label" data-i18n="t536">To wallet</span></button>
+              <button type="button" class="bubble-tile" id="home-biz-page-btn"><span class="bubble b-violet" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9M4 9v11h16V9M4 9c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3M10 20v-5h4v5"/></svg></span><span class="bubble-label" data-i18n="t537">My page</span></button>
+              <button type="button" class="bubble-tile" id="home-biz-activity-btn"><span class="bubble b-coral" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="bubble-label" data-i18n="t458">Activity</span></button>
+            </div>
+          </div>
         </div>
 
-        <!-- Mirrors the "Your business wallet" panel that still also lives on
-             the Business tab (see #business-owner-panel in index.html) — same
-             balance, same move-to-personal endpoint, just reachable from here
-             too so switching to "Business" above shows something immediately
-             instead of an empty tab. Managing the actual storefront (page,
-             products, jobs) stays on the Business tab, linked below. -->
-        <div id="wallet-business-view" class="hidden">
-          <h2 class="section-title" data-i18n="t29">Your business wallet</h2>
-          <div class="panel">
-            <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t255">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
-            <div class="biz-wallet-balance">
-              <span class="biz-wallet-label" data-i18n="t283">Business balance</span>
-              <span class="biz-wallet-value">GYD <span id="wallet-view-biz-balance">0.00</span></span>
+        <!-- CHIP IN view — see "Chip In" in app.js and the /api/chip-in routes. -->
+        <div class="home-view hidden" id="home-view-chipin">
+          <div class="chipin-head">
+            <div class="chipin-seg" role="tablist">
+              <button type="button" class="active" data-pots="active" data-i18n="t465">Active</button>
+              <button type="button" data-pots="closed" data-i18n="t466">Closed</button>
             </div>
-            <div class="panel-row" style="margin-top:16px;">
-              <div class="field">
-                <label data-i18n="t81">Move to personal wallet</label>
-                <input type="number" id="wallet-view-biz-move-amount" min="0.01" step="0.01" placeholder="1000" />
-              </div>
-              <button class="btn secondary" id="wallet-view-biz-move-btn" data-i18n="t189">Move</button>
-            </div>
-            <div class="error-msg" id="wallet-view-biz-move-error"></div>
-            <p class="muted" id="wallet-view-biz-move-success" style="font-size:12.5px; margin-top:2px;"></p>
+            <button type="button" class="chipin-new-btn" id="chipin-new-btn">＋ <span data-i18n="t467">New pot</span></button>
           </div>
-          <button type="button" class="btn secondary full" id="wallet-view-manage-business-btn" data-i18n="t336">Manage your business page →</button>
+          <div class="chipin-pots" id="chipin-pots"></div>
+
+          <h2 class="section-title" data-i18n="t468">How Chip In works</h2>
+          <div class="chipin-principles">
+            <div class="chipin-principle"><div class="chipin-num">1</div><div><h3 data-i18n="t469">Collect for anything, together</h3>
+              <p data-i18n="t470">A trip, a birthday, Mash Day costumes, a church harvest. Start a pot, set a goal and a deadline, and share the link so people can chip in from their GYD Wallet.</p></div></div>
+            <div class="chipin-principle"><div class="chipin-num">2</div><div><h3 data-i18n="t471">Every contribution in one place</h3>
+              <p data-i18n="t472">Open a pot to see who put in what, and when. No more chasing people or keeping lists in your head.</p></div></div>
+            <div class="chipin-principle"><div class="chipin-num">3</div><div><h3 data-i18n="t473">Each pot keeps its own balance</h3>
+              <p data-i18n="t474">Money in a pot never mixes with anyone's wallet. It stays locked until the goal is reached or the deadline passes. The organizer can also cancel and refund everyone at any time.</p></div></div>
+          </div>
         </div>
 
-        <h2 class="section-title" data-i18n="t5">Recent activity</h2>
-        <div class="panel">
-          <div class="table-scroll"><table>
-            <thead><tr><th data-i18n="t213">Type</th><th data-i18n="t214">Amount</th><th data-i18n="t215">Currency</th><th data-i18n="t216">Status</th><th data-i18n="t217">When</th></tr></thead>
-            <tbody id="transactions-body"></tbody>
-          </table></div>
+        <!-- ACTIVITY view -->
+        <div class="home-view hidden" id="home-view-activity">
+          <div class="home-list" id="home-activity-list"><p class="muted" data-i18n="t475">No activity yet.</p></div>
         </div>
       </section>
 
@@ -657,44 +678,32 @@
 
       <!-- BUSINESS TAB -->
       <section id="panel-business" class="tab-panel hidden">
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:-4px;">
-          <button class="btn secondary small" id="jobs-board-btn" data-i18n="t187">💼 Jobs</button>
-          <button class="btn secondary small" id="my-tickets-btn" data-i18n="t188">🎟️ My tickets</button>
-          <button class="btn secondary small" id="my-orders-btn" data-i18n="t373">📦 My orders</button>
-          <button class="btn secondary small" id="shop-btn" data-i18n="t386">🛍️ Shop</button>
-          <button class="btn secondary small" id="courier-btn" data-i18n="t395">🚚 Deliver</button>
+        <div class="tile-row scroll">
+          <button type="button" class="bubble-tile" id="jobs-board-btn"><span class="bubble b-violet" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M3 13h18"/></svg></span><span class="bubble-label" data-i18n="t531">Jobs</span></button>
+          <button type="button" class="bubble-tile" id="my-tickets-btn"><span class="bubble b-gold" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2.5"/></svg></span><span class="bubble-label" data-i18n="t532">My tickets</span></button>
+          <button type="button" class="bubble-tile" id="my-orders-btn"><span class="bubble b-coral" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/></svg></span><span class="bubble-label" data-i18n="t533">My orders</span></button>
+          <button type="button" class="bubble-tile" id="shop-btn"><span class="bubble b-lime" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/></svg></span><span class="bubble-label" data-i18n="t534">Shop</span></button>
+          <button type="button" class="bubble-tile" id="courier-btn"><span class="bubble b-sky" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span><span class="bubble-label" data-i18n="t535">Deliver</span></button>
         </div>
-        <h2 class="section-title" data-i18n="t28">Find a business</h2>
-        <div class="panel">
-          <div class="panel-row">
-            <div class="field">
-              <label data-i18n="t79">Search</label>
-              <input type="text" id="directory-search" placeholder="Try “cake”, “haircut”, “mechanic”…" data-i18n-ph="t293" />
-            </div>
-            <div class="field">
-              <label data-i18n="t80">Category</label>
-              <select id="directory-category">
-                <option value="" data-i18n="t135">All categories</option>
-              </select>
-            </div>
-            <div class="field">
-              <label data-i18n="t337">Dietary</label>
-              <select id="directory-dietary">
-                <option value="" data-i18n="t338">Any diet</option>
-                <option value="vegan" data-i18n="t339">Vegan</option>
-                <option value="vegetarian" data-i18n="t340">Vegetarian</option>
-                <option value="gluten-free" data-i18n="t341">Gluten-free</option>
-                <option value="halal" data-i18n="t342">Halal</option>
-                <option value="kosher" data-i18n="t343">Kosher</option>
-                <option value="dairy-free" data-i18n="t344">Dairy-free</option>
-                <option value="nut-free" data-i18n="t345">Nut-free</option>
-              </select>
-            </div>
-          </div>
-          <div id="directory-results"><p class="muted" data-i18n="t254">Loading businesses…</p></div>
-        </div>
-
         <div id="business-owner-panel" class="hidden">
+          <h2 class="section-title" id="biz-manage-title" data-i18n="t540">Manage your business</h2>
+          <div class="tile-row three" id="biz-tiles">
+              <button type="button" class="bubble-tile" id="biz-open-wallet" data-biz-open="wallet"><span class="bubble b-lime" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h13v4M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="14.5" r="1"/></svg></span><span class="bubble-label" data-i18n="t541">Wallet</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-page" data-biz-open="page"><span class="bubble b-violet" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9M4 9v11h16V9M4 9c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3M10 20v-5h4v5"/></svg></span><span class="bubble-label" data-i18n="t537">My page</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-photos" data-biz-open="photos"><span class="bubble b-sky" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg></span><span class="bubble-label" data-i18n="t362">Photos</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-products" data-biz-open="products"><span class="bubble b-gold" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/></svg></span><span class="bubble-label" data-i18n="t542">Products</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-events" data-biz-open="events"><span class="bubble b-coral" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span><span class="bubble-label" data-i18n="t543">Events</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-hiring" data-biz-open="hiring"><span class="bubble b-lime" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M17 5.5a3 3 0 0 1 0 5.5M21 20c0-2.6-1.6-4.8-4-5.6"/></svg></span><span class="bubble-label" data-i18n="t544">Hiring</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-checkin" data-biz-open="checkin"><span class="bubble b-sky" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="bubble-label" data-i18n="t195">Check in</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-pickups" data-biz-open="pickups"><span class="bubble b-gold" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/></svg></span><span class="bubble-label" data-i18n="t545">Pickups</span></button>
+              <button type="button" class="bubble-tile" id="biz-open-charge" data-biz-open="charge"><span class="bubble b-violet" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></span><span class="bubble-label" data-i18n="t546">Charge</span></button>
+          </div>
+          <div class="biz-section-bar hidden" id="biz-section-bar">
+            <button class="btn secondary small" id="biz-section-back" data-i18n="t199">← Business</button>
+            <h2 class="section-title" id="biz-section-title" style="margin:0;"></h2>
+          </div>
+
+          <div class="biz-section hidden" data-biz="wallet" data-single>
           <h2 class="section-title" data-i18n="t29">Your business wallet</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t255">Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.</p>
@@ -712,7 +721,9 @@
             <div class="error-msg" id="biz-wallet-move-error"></div>
             <p class="muted" id="biz-wallet-move-success" style="font-size:12.5px; margin-top:2px;"></p>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="page" data-single>
           <h2 class="section-title" data-i18n="t30">Your business page</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t256">Set this up so customers can find you — by category, or by searching what you sell, like searching "cake" and seeing every bakery that listed it.</p>
@@ -793,7 +804,9 @@
             <div class="error-msg" id="bizpage-save-error"></div>
             <p class="muted" id="bizpage-save-success" style="font-size:12.5px; margin-top:8px;"></p>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="photos" data-single>
           <h2 class="section-title" data-i18n="t362">Photos</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t363">Show off your business — customers can browse these on your page. Up to 20 photos.</p>
@@ -806,7 +819,9 @@
             <div class="error-msg" id="bizpage-photo-error" style="margin-top:8px;"></div>
             <div class="photo-grid" id="bizpage-photo-list" style="margin-top:12px;"></div>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="products" data-single>
           <h2 class="section-title" data-i18n="t31">Products &amp; prices</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t257">Shown on your page, and searchable — someone searching a product name finds you even if it's not in your keywords.</p>
@@ -837,7 +852,9 @@
             <div class="error-msg" id="product-error"></div>
             <div id="my-products-list" style="margin-top:16px;"><p class="muted" data-i18n="t258">No products added yet.</p></div>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="events" data-single>
           <h2 class="section-title" data-i18n="t32">Events &amp; tickets</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t259">Post a concert, sale, class, or anything else with a date — it shows up on your page so people can buy tickets right in the app. The platform keeps 3.5% of each ticket; you get the rest in your business wallet.</p>
@@ -873,7 +890,9 @@
             <div class="error-msg" id="event-error"></div>
             <div id="my-events-list" style="margin-top:16px;"><p class="muted" data-i18n="t260">No events posted yet.</p></div>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="hiring" data-single>
           <h2 class="section-title" data-i18n="t33">Jobs</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t261">Post an opening — it shows on your page and in the site-wide Jobs board. Someone interested applies by messaging you right in the app.</p>
@@ -927,7 +946,9 @@
             <div class="error-msg" id="job-error"></div>
             <div id="my-jobs-list" style="margin-top:16px;"><p class="muted" data-i18n="t262">No jobs posted yet.</p></div>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="checkin" data-single>
           <h2 class="section-title" data-i18n="t34">Check a ticket in</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t263">Enter or scan the code from a customer's ticket QR code at the door.</p>
@@ -946,7 +967,9 @@
             <div class="error-msg" id="checkin-error"></div>
             <div id="checkin-result" style="margin-top:10px;"></div>
           </div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="pickups">
           <h2 class="section-title" data-i18n="t377">Redeem a pickup order</h2>
           <div class="panel">
             <p class="muted" style="font-size:12.5px; margin:0 0 14px;" data-i18n="t378">Enter the code a customer shows you at pickup to release their payment to your business wallet.</p>
@@ -963,7 +986,9 @@
 
           <h2 class="section-title" data-i18n="t381">Pending pickup orders</h2>
           <div class="panel" id="my-pending-orders-list"><p class="muted" data-i18n="t382">No pending orders yet.</p></div>
+          </div>
 
+          <div class="biz-section hidden" data-biz="charge">
           <h2 class="section-title" data-i18n="t35">Request a payment from a customer</h2>
           <div class="panel">
             <div class="panel-row">
@@ -991,6 +1016,38 @@
               <tbody id="sent-charges-body"></tbody>
             </table></div>
           </div>
+          </div>
+
+        </div>
+
+        <h2 class="section-title" data-i18n="t28">Find a business</h2>
+        <div class="panel">
+          <div class="panel-row">
+            <div class="field">
+              <label data-i18n="t79">Search</label>
+              <input type="text" id="directory-search" placeholder="Try “cake”, “haircut”, “mechanic”…" data-i18n-ph="t293" />
+            </div>
+            <div class="field">
+              <label data-i18n="t80">Category</label>
+              <select id="directory-category">
+                <option value="" data-i18n="t135">All categories</option>
+              </select>
+            </div>
+            <div class="field">
+              <label data-i18n="t337">Dietary</label>
+              <select id="directory-dietary">
+                <option value="" data-i18n="t338">Any diet</option>
+                <option value="vegan" data-i18n="t339">Vegan</option>
+                <option value="vegetarian" data-i18n="t340">Vegetarian</option>
+                <option value="gluten-free" data-i18n="t341">Gluten-free</option>
+                <option value="halal" data-i18n="t342">Halal</option>
+                <option value="kosher" data-i18n="t343">Kosher</option>
+                <option value="dairy-free" data-i18n="t344">Dairy-free</option>
+                <option value="nut-free" data-i18n="t345">Nut-free</option>
+              </select>
+            </div>
+          </div>
+          <div id="directory-results"><p class="muted" data-i18n="t254">Loading businesses…</p></div>
         </div>
 
         <h2 class="section-title" data-i18n="t37">Payment requests to you</h2>
@@ -1358,6 +1415,58 @@
         </div>
       </section>
 
+      <!-- MY PROFILE: reached by tapping the picture on Home. Profile picture
+           (public — shown next to the name) and app wallpaper (private). -->
+      <section id="panel-profile" class="tab-panel hidden">
+        <div class="biz-section-bar">
+          <button class="btn secondary small" id="profile-back" data-i18n="t570">← Back</button>
+          <h2 class="section-title" style="margin:0;" data-i18n="t548">My profile</h2>
+        </div>
+
+        <div class="profile-head">
+          <button type="button" class="profile-avatar-btn" id="profile-avatar-btn" aria-label="Change profile picture" title="Change profile picture" data-i18n-aria="t571" data-i18n-title="t571">
+            <span id="profile-avatar-slot"></span>
+            <span class="profile-cam" aria-hidden="true">📷</span>
+          </button>
+          <div class="profile-name" id="profile-name">—</div>
+          <div class="profile-tag" id="profile-tag">$—</div>
+        </div>
+
+        <div class="panel">
+          <h3 class="profile-h" data-i18n="t549">Profile picture</h3>
+          <p class="muted profile-p" data-i18n="t550">People see this next to your name when you pay, chat, or chip in together.</p>
+          <div class="profile-btns">
+            <button type="button" class="btn small" id="profile-avatar-choose" data-i18n="t551">Choose picture</button>
+            <button type="button" class="btn secondary small" id="profile-avatar-remove" data-i18n="t552">Remove</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 class="profile-h" data-i18n="t553">App wallpaper</h3>
+          <p class="muted profile-p" data-i18n="t554">Put your own photo behind the whole app. Only you can see it.</p>
+          <div class="profile-btns">
+            <button type="button" class="btn small" id="wall-choose" data-i18n="t555">Choose a photo</button>
+            <button type="button" class="btn secondary small" id="wall-remove" data-i18n="t552">Remove</button>
+          </div>
+          <div class="wall-presets" id="wall-presets">
+            <button type="button" class="wall-preset wp-sunset" data-preset="sunset" data-i18n="t558">Sunset</button>
+            <button type="button" class="wall-preset wp-guyana" data-preset="guyana" data-i18n="t559">Guyana green</button>
+            <button type="button" class="wall-preset wp-ocean" data-preset="ocean" data-i18n="t560">Ocean</button>
+            <button type="button" class="wall-preset wp-gold" data-preset="gold" data-i18n="t561">Gold hour</button>
+          </div>
+          <label class="wall-slider"><span data-i18n="t556">Dim</span>
+            <input type="range" id="wall-dim" min="0" max="70" step="1" value="28">
+            <output id="wall-dim-out">28%</output>
+          </label>
+          <label class="wall-slider"><span data-i18n="t557">Blur</span>
+            <input type="range" id="wall-blur" min="0" max="14" step="1" value="0">
+            <output id="wall-blur-out">0</output>
+          </label>
+        </div>
+        <input type="file" id="profile-avatar-file" accept="image/*" hidden>
+        <input type="file" id="wall-file" accept="image/*" hidden>
+      </section>
+
       <section id="panel-support" class="tab-panel hidden">
         <h2 class="section-title" data-i18n="t330">Language</h2>
         <div class="panel">
@@ -1655,9 +1764,12 @@
           one-way hash we cannot read. If you use "Continue with Google" or "Continue with Facebook," we receive your name,
           email address and that provider's account ID; we never receive your Google or Facebook password.</p>
           <p><strong>Money activity:</strong> balances, transfers, payment requests, cash-out requests, GYD Direct sends
-          (including the recipient's name and phone number that you enter), tickets, pickup orders and shop orders.</p>
+          (including the recipient's name and phone number that you enter), Chip In pots and contributions, tickets, pickup
+          orders and shop orders.</p>
           <p><strong>What you post or send:</strong> chat messages, reviews, tips, support requests, courier application
           notes, and — for business accounts — your business page, products, photos, events and job posts.</p>
+          <p><strong>Your profile picture and wallpaper:</strong> if you add them, the picture file you choose. Your profile picture
+          is shown to the people you deal with; your wallpaper is private to you.</p>
           <p><strong>Shop deliveries:</strong> the name, phone number and address you enter for a shop order.</p>
           <p><strong>Games:</strong> your game history (no money is involved).</p>
           <p><strong>Security data:</strong> your IP address, used briefly to limit repeated login and code-guessing
@@ -1675,9 +1787,10 @@
           to artificial-intelligence services.</p>
 
           <h3 class="section-title">4. Who else sees it</h3>
-          <p><strong>Other users</strong> see what is needed to pay and find you: your username and $paytag, and — for
+          <p><strong>Other users</strong> see what is needed to pay and find you: your username, $paytag and profile picture (if you add one), and — for
           businesses — your business page, products, events, reviews and job posts. The person you pay or message sees that
-          payment or message. A courier who accepts your shop delivery sees the delivery name, phone and address.</p>
+          payment or message. A courier who accepts your shop delivery sees the delivery name, phone and address. Anyone
+          signed in who has a Chip In pot's link sees the pot, its organizer's username, and who chipped in how much.</p>
           <p><strong>Service providers</strong> that process data for us, only to run the app:</p>
           <ul>
             <li>Supabase — database and photo storage (servers in the United States).</li>

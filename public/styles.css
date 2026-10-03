@@ -1459,3 +1459,360 @@ summary:focus-visible {
 /* A destructive confirmation (cancel/delete/remove) uses the warning colour. */
 .btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; box-shadow: 0 4px 16px var(--bad-soft); }
 .btn.danger:hover { filter: brightness(1.05); }
+
+/* =====================================================================
+   Home tab: green band, three tiles, Wallet / Chip In / Activity views.
+   While the home tab is open, the app-wide header, banner, balance card and
+   round shortcuts are hidden and the band takes their place (body.on-home
+   is toggled by switchTab in app.js). Every other tab is unchanged.
+   ===================================================================== */
+body.on-home .app-header,
+body.on-home .app-main > .banner,
+body.on-home .hero-balance,
+body.on-home .hero-quick-actions { display: none; }
+
+.home-hero {
+  position: relative;
+  margin: -8px -20px 0;
+  padding: 18px 20px 76px;
+  color: #fff;
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0 2px, transparent 2px 14px),
+    linear-gradient(160deg, #2a8a57 0%, var(--accent) 45%, var(--accent-2) 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 80%, 0 100%);
+}
+.home-hero-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.home-acct-pill {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 12px 6px 8px;
+  border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.12);
+  color: #fff; font-weight: 700; font-size: 14px; cursor: default;
+}
+.home-acct-pill.switchable { cursor: pointer; }
+.home-acct-dot {
+  width: 24px; height: 24px; border-radius: 8px; background: var(--gold); color: var(--accent-2);
+  display: grid; place-items: center; font-size: 12px; font-weight: 800;
+}
+.home-hero-icons { display: flex; gap: 10px; }
+.home-round-btn {
+  width: 44px; height: 44px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 18px; cursor: pointer;
+  display: grid; place-items: center;
+}
+.home-round-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.home-who { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+.home-avatar {
+  position: relative; flex: none; width: 64px; height: 64px; border-radius: 20px; background: var(--surface);
+  color: var(--accent); display: grid; place-items: center; font-weight: 800; font-size: 24px;
+  transform: rotate(-4deg); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.home-avatar > span { transform: rotate(4deg); }
+.home-qr-chip {
+  position: absolute; right: -10px; bottom: -10px; width: 30px; height: 30px; border-radius: 10px; border: none;
+  background: var(--gold); color: var(--accent-2); font-size: 15px; cursor: pointer; transform: rotate(4deg);
+  display: grid; place-items: center;
+}
+.home-who-text { min-width: 0; }
+.home-name { font-size: 20px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-tag { font-size: 14px; opacity: 0.85; }
+
+.home-tiles { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: -46px; }
+.home-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 6px 12px; min-height: 44px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; cursor: pointer;
+  font-weight: 700; font-size: 13.5px; color: var(--text); box-shadow: 0 6px 16px rgba(22, 36, 29, 0.08);
+}
+.home-tile-ic {
+  width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 18px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.home-tile-featured { border-color: var(--gold); background: linear-gradient(180deg, #fffaf0, var(--surface)); }
+.home-tile-featured .home-tile-ic { background: var(--gold-soft); color: #8a6d0e; }
+
+.home-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 18px 0 0; padding: 4px; background: var(--surface-2); border-radius: 14px; }
+.home-tab {
+  border: none; background: none; padding: 10px 4px; min-height: 44px; border-radius: 10px; cursor: pointer;
+  font-weight: 700; font-size: 14px; color: var(--muted);
+}
+.home-tab.active { background: var(--accent); color: #fff; }
+
+.home-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px; margin-top: 16px; }
+.home-bal-label { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 14px; font-weight: 600; }
+.home-eye { border: none; background: none; font-size: 16px; color: var(--muted); min-width: 44px; min-height: 44px; margin: -12px -12px -12px 0; cursor: pointer; }
+.home-bal { font-size: 36px; font-weight: 800; letter-spacing: -0.02em; margin: 4px 0 16px; overflow-wrap: anywhere; }
+.home-bal small { font-size: 16px; color: var(--muted); font-weight: 700; margin-right: 6px; }
+.home-btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.home-btn-row .btn { min-height: 46px; }
+.home-held { display: flex; gap: 12px; align-items: center; margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--gold-soft); font-size: 13.5px; line-height: 1.4; }
+.home-held-ic { font-size: 22px; }
+.home-proto-note { margin: 12px 0 0; font-size: 12px; color: var(--muted-2); line-height: 1.4; }
+.home-see-all { margin-top: 4px; }
+
+.home-list { margin-top: 4px; }
+.home-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.home-row:last-child { border-bottom: none; }
+.home-row-ic {
+  flex: none; width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center;
+  font-size: 16px; font-weight: 800; color: #fff; background: var(--muted);
+}
+.home-row-ic.in { background: var(--accent); }
+.home-row-ic.pot { background: var(--gold); color: var(--accent-2); }
+.home-row-main { flex: 1; min-width: 0; }
+.home-row-title { font-weight: 700; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-row-sub { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-row-amt { font-weight: 800; white-space: nowrap; }
+.home-row-amt.in { color: var(--accent); }
+
+/* ---------- Chip In ---------- */
+.chipin-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; }
+.chipin-seg { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 12px; }
+.chipin-seg button { border: none; background: none; padding: 8px 14px; min-height: 40px; border-radius: 9px; cursor: pointer; font-weight: 700; font-size: 13.5px; color: var(--muted); }
+.chipin-seg button.active { background: var(--surface-3); color: var(--text); }
+.chipin-new-btn { border: none; background: var(--gold); color: var(--accent-2); font-weight: 800; border-radius: 12px; padding: 10px 14px; min-height: 44px; cursor: pointer; }
+.chipin-pots { display: flex; gap: 12px; overflow-x: auto; padding: 14px 2px 12px; scroll-snap-type: x mandatory; }
+.chipin-pot {
+  position: relative; overflow: hidden; flex: 0 0 82%; scroll-snap-align: start; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px; color: var(--text);
+  box-shadow: 0 3px 10px rgba(22, 36, 29, 0.06); font: inherit; min-width: 0;
+}
+.chipin-pot:only-child { flex-basis: 100%; }
+.home-view h2.section-title { margin-top: 22px; }
+.sheet .field input[type="date"] {
+  width: 100%; padding: 11px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 14px; min-height: 44px;
+}
+.chipin-pot::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--accent); }
+.chipin-pot.ready::before { background: #3aa36b; }
+.chipin-pot.short::before { background: var(--gold); }
+.chipin-pot.closed { opacity: 0.8; }
+.chipin-pot.closed::before { background: var(--muted-2); }
+.chipin-pot-top { display: flex; align-items: center; gap: 10px; }
+.chipin-emoji { flex: none; width: 42px; height: 42px; border-radius: 13px; background: var(--surface-2); display: grid; place-items: center; font-size: 22px; }
+.chipin-pot-name { font-weight: 800; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chipin-pot-meta { font-size: 12.5px; color: var(--muted); }
+.chipin-amt { font-size: 22px; font-weight: 800; margin-top: 14px; }
+.chipin-amt span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.chipin-bar { height: 10px; border-radius: 999px; background: var(--surface-3); margin-top: 8px; overflow: hidden; }
+.chipin-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), #3aa36b); }
+.chipin-empty { flex: 1; border: 1px dashed var(--border); border-radius: 18px; padding: 22px; text-align: center; color: var(--muted); }
+.chipin-principles { display: grid; gap: 12px; margin-top: 10px; }
+.chipin-principle { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 18px; background: var(--surface-2); border: 1px solid var(--border); }
+.chipin-principle h3 { margin: 0 0 4px; font-size: 15.5px; }
+.chipin-principle p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+.chipin-num { flex: none; width: 36px; height: 36px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 800; display: grid; place-items: center; }
+
+/* ---------- bottom sheet (a <dialog>, so Escape, focus and the backdrop come for free) ---------- */
+dialog.sheet {
+  margin: auto auto 0; width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto;
+  border: none; border-radius: 24px 24px 0 0; padding: 10px 18px calc(24px + env(safe-area-inset-bottom));
+  background: var(--surface); color: var(--text);
+}
+dialog.sheet::backdrop { background: rgba(22, 36, 29, 0.45); }
+.sheet-grab { width: 44px; height: 5px; border-radius: 999px; background: var(--surface-3); margin: 0 auto 12px; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.sheet-head h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.sheet-x { flex: none; border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 12px; font-size: 20px; cursor: pointer; color: var(--text); }
+.sheet .field { margin-top: 14px; }
+.sheet .btn.full { margin-top: 14px; min-height: 48px; }
+.sheet-sub { color: var(--muted); font-size: 13.5px; line-height: 1.45; margin: 8px 0 0; }
+.sheet-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.sheet-quick button { border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; padding: 10px 0; min-height: 44px; font-weight: 700; cursor: pointer; color: var(--text); }
+.chipin-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.chipin-split > div { background: var(--surface-2); border-radius: 14px; padding: 12px; }
+.chipin-split > .pot-side { background: var(--gold-soft); }
+.chipin-split .k { font-size: 12px; color: var(--muted); font-weight: 600; }
+.chipin-split .v { font-size: 18px; font-weight: 800; margin-top: 2px; }
+.chipin-note { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding: 12px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.45; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+.chipin-note.ready { background: var(--accent-soft); border-color: transparent; color: var(--accent-2); }
+.chipin-note.short { background: var(--gold-soft); border-color: transparent; color: #5a4708; }
+.chipin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.chipin-actions .btn { min-height: 48px; }
+.btn.gold { background: var(--gold); color: var(--accent-2); border-color: var(--gold); box-shadow: none; }
+.chipin-emoji-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+.chipin-emoji-pick button { width: 46px; height: 46px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface-2); font-size: 22px; cursor: pointer; }
+.chipin-emoji-pick button.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chipin-cancel-link { display: block; margin: 14px auto 0; }
+
+/* ---------- bubble tiles ----------
+   Rounded square tiles with a glossy round "bubble" icon: Home (Add money /
+   Cash out / Activity / $Paytag, or the business set) and the top of the
+   Business tab. .three = 3 across, .scroll = a swipeable row that peeks the
+   next tile. */
+.tile-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.tile-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tile-row.scroll {
+  display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding: 2px 2px 8px; margin: 0 -2px 16px;
+  scrollbar-width: none;
+}
+.tile-row.scroll::-webkit-scrollbar { display: none; }
+.tile-row.scroll .bubble-tile { flex: 0 0 84px; scroll-snap-align: start; }
+.bubble-tile {
+  aspect-ratio: 1 / 1; min-width: 0; padding: 9px 8px 8px; border-radius: 22px;
+  display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; text-align: left;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  box-shadow: 0 2px 8px rgba(22, 36, 29, 0.06); font: inherit; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.bubble-tile:hover { box-shadow: 0 6px 16px rgba(22, 36, 29, 0.1); }
+.bubble-tile:active { transform: scale(0.94); }
+.bubble-tile:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.bubble {
+  --bubble: #b8e45c;
+  position: relative; flex: none; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; color: #14301f;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.85) 0 9%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 50% 115%, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0) 55%),
+    var(--bubble);
+  box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.1), inset 0 2px 3px rgba(255, 255, 255, 0.55), 0 4px 9px rgba(22, 36, 29, 0.14);
+}
+.bubble.b-lime { --bubble: #b8e45c; }
+.bubble.b-gold { --bubble: #f0c94a; }
+.bubble.b-coral { --bubble: #ff9a8a; }
+.bubble.b-sky { --bubble: #86cdf7; }
+.bubble.b-violet { --bubble: #bba2f7; }
+.bubble-label { font-size: 12px; font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+
+/* Bigger tiles. Sizes follow the number across: .two = 2 big squares per row
+   (Home), .three = 3 medium ones (business set, "manage your business"). */
+.bubble svg { width: 18px; height: 18px; }
+.tile-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tile-row.two .bubble-tile { padding: 16px 16px 14px; border-radius: 26px; }
+.tile-row.two .bubble { width: 58px; height: 58px; }
+.tile-row.two .bubble svg { width: 28px; height: 28px; }
+.tile-row.two .bubble-label { font-size: 17px; line-height: 1.15; }
+.tile-row.three { gap: 10px; }
+.tile-row.three .bubble-tile { padding: 12px 11px 11px; border-radius: 24px; }
+.tile-row.three .bubble { width: 46px; height: 46px; }
+.tile-row.three .bubble svg { width: 23px; height: 23px; }
+.tile-row.three .bubble-label { font-size: 14px; }
+.tile-row.scroll .bubble svg { width: 18px; height: 18px; }
+
+/* Business tab: one section at a time (see openBizSection in app.js). */
+.biz-section > .section-title:first-child { margin-top: 0; }
+.biz-section[data-single] > .section-title:first-child { display: none; }
+.biz-section-bar { display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; }
+#panel-business.biz-in-section > :not(#business-owner-panel) { display: none !important; }
+#business-owner-panel.in-section #biz-tiles,
+#business-owner-panel.in-section #biz-manage-title { display: none; }
+
+/* =====================================================================
+   Profile pictures + app wallpaper.
+   .pfp is the small round picture shown next to a name everywhere
+   (pay list, chat, Chip In, activity, business pages). Initials on a
+   per-name colour stand in until someone adds a picture.
+   ===================================================================== */
+.pfp {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; display: inline-grid; place-items: center;
+  overflow: hidden; color: #fff; font-weight: 800; font-size: 13px; letter-spacing: 0.02em; vertical-align: middle;
+  border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 1px 4px rgba(22, 36, 29, 0.18);
+}
+.pfp img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pfp.sm { width: 28px; height: 28px; font-size: 11px; border-width: 1.5px; }
+.pfp.lg { width: 44px; height: 44px; font-size: 15px; }
+.avatar-name { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.home-row .pfp { width: 40px; height: 40px; font-size: 14px; }
+
+/* Home hero: big centred picture (opens My profile) under the account pill. */
+.home-who { flex-direction: column; text-align: center; gap: 10px; margin-top: 8px; }
+.home-avatar {
+  width: 104px; height: 104px; border-radius: 50%; transform: none; background: var(--surface); border: 4px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+.home-avatar > span { transform: none; }
+.home-avatar-main {
+  position: absolute; inset: 0; border: 0; padding: 0; margin: 0; border-radius: 50%; overflow: hidden; background: transparent;
+  display: grid; place-items: center; cursor: pointer; color: var(--accent); font-weight: 800; font-size: 34px;
+}
+.home-avatar-main img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.home-avatar-main:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.home-qr-chip { right: -4px; bottom: 2px; transform: none; width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; }
+.home-hero { padding-bottom: 82px; }
+
+/* My profile page. */
+.profile-head { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 6px 0 18px; text-align: center; }
+.profile-avatar-btn {
+  position: relative; width: 120px; height: 120px; border-radius: 50%; border: 4px solid var(--surface); padding: 0;
+  background: var(--accent-soft); color: var(--accent); font-weight: 800; font-size: 40px; cursor: pointer;
+  box-shadow: var(--shadow-md); display: grid; place-items: center;
+}
+.profile-avatar-btn .pfp { width: 112px; height: 112px; font-size: 38px; border: 0; box-shadow: none; }
+.profile-avatar-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.profile-cam {
+  position: absolute; right: -2px; bottom: 2px; width: 36px; height: 36px; border-radius: 50%; background: var(--gold);
+  display: grid; place-items: center; font-size: 17px; border: 3px solid var(--surface);
+}
+.profile-name { font-size: 22px; font-weight: 800; margin-top: 8px; }
+.profile-tag { color: var(--muted); font-size: 14px; }
+.profile-h { margin: 0 0 4px; font-size: 16px; }
+.profile-p { font-size: 13px; margin: 0 0 12px; }
+.profile-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.wall-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 6px; }
+.wall-preset {
+  background-origin: border-box; height: 86px; border-radius: 14px; border: 3px solid transparent; color: #fff; font-weight: 800; font-size: 11.5px;
+  text-align: left; padding: 0 7px 7px; display: flex; align-items: flex-end; cursor: pointer; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+.wall-preset.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--accent); }
+.wall-preset:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.wp-sunset { background: linear-gradient(180deg, #1d2b64 0%, #7a3b8f 38%, #ff7a5a 62%, #ffc46b 78%, #2a4d6e 100%); }
+.wp-guyana { background: linear-gradient(160deg, #2b8a57, #0f3a24); }
+.wp-ocean { background: linear-gradient(160deg, #4aa7e0, #143e6a); }
+.wp-gold { background: linear-gradient(160deg, #f6c85a, #c0561f); }
+.wall-slider { display: grid; grid-template-columns: 50px 1fr 44px; align-items: center; gap: 10px; margin-top: 12px; font-weight: 700; font-size: 14px; }
+.wall-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+.wall-slider output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The wallpaper layer itself: fixed behind everything, dimmed by --wall-dim and
+   softened by --wall-blur (both set from the person's saved settings). */
+#app-wall, #app-wall-scrim { display: none; position: fixed; inset: 0; pointer-events: none; }
+body.has-wall #app-wall, body.has-wall #app-wall-scrim { display: block; }
+#app-wall { z-index: -2; background-size: cover; background-position: center; background-repeat: no-repeat; filter: blur(var(--wall-blur, 0px)); transform: scale(1.08); }
+#app-wall-scrim { z-index: -1; background: rgba(8, 22, 15, var(--wall-dim, 0.28)); }
+#app-wall.wp-sunset, #app-wall.wp-guyana, #app-wall.wp-ocean, #app-wall.wp-gold { background-size: cover; }
+
+/* With a wallpaper on, every surface becomes frosted glass (the app's colours
+   all come from these variables) so the picture shows through while text stays
+   readable. Pop-up sheets and dialogs stay solid. */
+body.has-wall {
+  --bg: transparent;
+  --sidebar-bg: transparent;
+  --surface: rgba(250, 247, 239, 0.74);
+  --surface-2: rgba(241, 238, 227, 0.62);
+  --surface-3: rgba(232, 226, 208, 0.7);
+  --border: rgba(255, 255, 255, 0.55);
+  --border-soft: rgba(255, 255, 255, 0.4);
+  --muted: #3f4f45;
+  background: transparent;
+}
+body.has-wall #app-screen, body.has-wall .phone-frame { background: transparent; }
+body.has-wall .panel, body.has-wall .home-card, body.has-wall .home-tile, body.has-wall .bubble-tile,
+body.has-wall .home-tabs, body.has-wall .thread-item, body.has-wall .nav, body.has-wall .bottom-nav,
+body.has-wall .app-header, body.has-wall .profile-avatar-btn {
+  -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+}
+body.has-wall dialog, body.has-wall dialog * {
+  --surface: #faf7ef; --surface-2: #f1eee3; --surface-3: #e8e2d0; --border: #e6e0ce; --border-soft: #efe9d9; --muted: #5c6b60;
+}
+/* Headings that sit directly on the picture. */
+body.has-wall .section-title, body.has-wall .profile-name, body.has-wall .profile-tag {
+  color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+body.has-wall .home-hero {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0)); clip-path: none; padding-bottom: 70px;
+}
+body.has-wall .home-tiles { margin-top: -34px; }
+
+.thread-item.with-avatar { display: flex; align-items: center; gap: 8px; width: 168px; }
+.thread-item .thread-text { min-width: 0; flex: 1; }
+#thread-title .avatar-name { font-size: 16px; }
+
+body.on-profile .app-main > .banner,
+body.on-profile .hero-balance,
+body.on-profile .hero-quick-actions { display: none; }
+body.has-wall { --muted-2: #55655b; }
+
+#who-avatar { overflow: hidden; }
+#who-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+body.has-wall .app-header .who .name { color: #fff; text-shadow: 0 1px 5px rgba(0, 0, 0, 0.55); }
+body.has-wall .app-header .who .tag { color: var(--gold-light); text-shadow: 0 1px 5px rgba(0, 0, 0, 0.55); }
+.wall-preset.wp-sunset, .wall-preset.wp-guyana, .wall-preset.wp-ocean, .wall-preset.wp-gold { background-origin: border-box; }

@@ -58,9 +58,25 @@
       region.className = 'toast-region';
       region.setAttribute('aria-live', 'polite');
       region.setAttribute('aria-label', i18nText('t426', 'Notifications'));
-      document.body.appendChild(region);
     }
+    // An open <dialog> (a sheet or a Yes/No question) sits above the rest of
+    // the page and makes it inert, so a toast shown while one is open goes
+    // inside it — otherwise it would appear greyed out behind the backdrop.
+    const host = [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+    if (region.parentElement !== host) host.appendChild(region);
     return region;
+  }
+  // Toasts already on screen move into a dialog when it opens, and back out
+  // just before it's removed, so they stay visible and outlive it.
+  function adoptToasts(dlg) {
+    const region = document.getElementById('toast-region');
+    if (region && region.childElementCount) dlg.appendChild(region);
+  }
+  function rescueToasts(dlg) {
+    const region = document.getElementById('toast-region');
+    if (!region || !dlg.contains(region)) return;
+    const next = [...document.querySelectorAll('dialog[open]')].filter((d) => d !== dlg).pop();
+    (next || document.body).appendChild(region);
   }
 
   function toast(message, kind = 'info') {
@@ -152,11 +168,13 @@
       dlg.addEventListener('close', () => {
         const ok = dlg.returnValue === 'ok';
         const value = field ? (field.type === 'password' ? field.value : field.value.trim()) : null;
+        rescueToasts(dlg);
         dlg.remove();
         resolve(input ? (ok ? value : null) : ok);
       });
       document.body.appendChild(dlg);
       dlg.showModal();
+      adoptToasts(dlg);
       // Safer default: for a destructive question, focus starts on "No".
       (field || (danger ? cancelBtn : okBtn)).focus();
     });
@@ -447,6 +465,7 @@
   document.getElementById('logout-btn').onclick = () => {
     setToken(null);
     state.user = null;
+    clearWallpaper();
     if (state.pollHandle) clearInterval(state.pollHandle);
     appScreen.classList.add('hidden');
     authScreen.classList.remove('hidden');
@@ -457,7 +476,7 @@
   // in server.js for why there's no "everywhere but here" option without
   // tracking individual sessions.
   document.getElementById('logout-all-btn').onclick = async () => {
-    if (!(await confirmDialog('This will sign you out on every device, including this one. Continue?'))) return;
+    if (!(await confirmDialog(i18nText('t547', 'This will sign you out on every device, including this one, and turn off Face ID sign-in everywhere. Continue?')))) return;
     try {
       await api('/api/security/logout-all-sessions', 'POST');
     } catch (err) {
@@ -466,6 +485,7 @@
     }
     setToken(null);
     state.user = null;
+    clearWallpaper();
     if (state.pollHandle) clearInterval(state.pollHandle);
     appScreen.classList.add('hidden');
     authScreen.classList.remove('hidden');
@@ -692,6 +712,7 @@
     }
     setToken(null);
     state.user = null;
+    clearWallpaper();
     if (state.pollHandle) clearInterval(state.pollHandle);
     appScreen.classList.add('hidden');
     authScreen.classList.remove('hidden');
@@ -733,19 +754,9 @@
         switchTab(jump);
         return;
       }
-      switchTab('wallet');
-      // Add/Cash Out only ever act on the personal balance (see
-      // setWalletContext's comment) — jump back there first so the field
-      // being focused is actually visible, in case Business view was open.
-      setWalletContext('personal');
-      const focusId = btn.dataset.focus;
-      requestAnimationFrame(() => {
-        const el = document.getElementById(focusId);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.focus();
-        }
-      });
+      // Add / Cash Out open the same sheets as the home tab's buttons.
+      if (btn.dataset.action === 'add-money') openMoneySheet('deposit');
+      else if (btn.dataset.action === 'cash-out') openMoneySheet('cashout');
     };
   });
 
@@ -774,6 +785,8 @@
     if (tab !== 'business') stopCheckinCamera();
     if (tab === 'games') loadRounds();
     if (tab === 'business') {
+      // Always lands on the tile grid; a tile (or openBizSection) goes deeper.
+      closeBizSection();
       loadBusiness();
       loadDirectory();
       loadMyBusinessPage();
@@ -782,7 +795,15 @@
       loadMyPendingOrders();
     }
     if (tab === 'messages') loadThreads();
-    if (tab === 'wallet') loadTransactions();
+    if (tab === 'profile') renderProfilePanel();
+    // The home tab draws its own green header instead of the app-wide one.
+    document.body.classList.toggle('on-home', tab === 'wallet');
+    // My profile has its own title; the balance card and shortcuts above it would only crowd it.
+    document.body.classList.toggle('on-profile', tab === 'profile');
+    if (tab === 'wallet') {
+      loadTransactions();
+      loadChipIn();
+    }
     if (tab === 'remit') openRemitLobby();
     if (tab === 'ludo') enterLudoTab();
     if (tab === 'mytickets') loadMyTickets();
@@ -795,6 +816,34 @@
       loadPasskeys();
     }
   }
+
+  // ---------- Business tab: manage-your-business tiles ----------
+  // The owner's sections (wallet, page editor, photos, products, events,
+  // hiring, check-in, pickups, charge) each open as their own page: a tile
+  // shows that one section and hides the rest of the Business tab, and the
+  // Back button returns to the tiles. Nothing is removed — every section
+  // keeps its own fields and buttons; only which one is visible changes.
+  function closeBizSection() {
+    document.getElementById('panel-business').classList.remove('biz-in-section');
+    document.getElementById('business-owner-panel').classList.remove('in-section');
+    document.getElementById('biz-section-bar').classList.add('hidden');
+    document.querySelectorAll('.biz-section').forEach((el) => el.classList.add('hidden'));
+    stopCheckinCamera();
+  }
+  function openBizSection(key) {
+    const section = document.querySelector(`.biz-section[data-biz="${key}"]`);
+    if (!section) return;
+    document.querySelectorAll('.biz-section').forEach((el) => el.classList.toggle('hidden', el !== section));
+    document.getElementById('panel-business').classList.add('biz-in-section');
+    document.getElementById('business-owner-panel').classList.add('in-section');
+    document.getElementById('biz-section-bar').classList.remove('hidden');
+    const tile = document.querySelector(`[data-biz-open="${key}"] .bubble-label`);
+    document.getElementById('biz-section-title').textContent = tile ? tile.textContent : '';
+    const main = document.querySelector('.app-main');
+    if (main) main.scrollTop = 0;
+  }
+  document.querySelectorAll('[data-biz-open]').forEach((b) => (b.onclick = () => openBizSection(b.dataset.bizOpen)));
+  document.getElementById('biz-section-back').onclick = closeBizSection;
 
   document.getElementById('my-tickets-btn').onclick = () => switchTab('mytickets');
   document.getElementById('mytickets-back-btn').onclick = () => switchTab('business');
@@ -843,6 +892,7 @@
     const fallback = walletContext === 'business' ? 'Business balance' : 'Available balance';
     label.textContent = window.i18n ? window.i18n.t(walletContext === 'business' ? 't283' : 't281') : fallback;
     document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
+    renderHomeHeader();
 
     // The Business tab itself (search/browse other businesses, browse jobs,
     // "My tickets"/"My orders" as a customer) stays reachable no matter which
@@ -885,6 +935,7 @@
     document.getElementById('account-switcher-backdrop').classList.add('hidden');
   }
 
+  document.getElementById('home-acct-pill').onclick = () => document.getElementById('who-switcher-btn').onclick();
   document.getElementById('who-switcher-btn').onclick = () => {
     if (!state.user || !state.user.isBusiness) return;
     const menu = document.getElementById('account-switcher-menu');
@@ -908,7 +959,16 @@
 
   function renderWho() {
     document.getElementById('who-username').textContent = state.user.username;
-    document.getElementById('who-avatar').textContent = state.user.username.slice(0, 1).toUpperCase();
+    const whoAv = document.getElementById('who-avatar');
+    whoAv.textContent = state.user.username.slice(0, 1).toUpperCase();
+    if (state.user.avatarUrl) {
+      const im = document.createElement('img');
+      im.alt = '';
+      im.onerror = () => { whoAv.textContent = state.user.username.slice(0, 1).toUpperCase(); };
+      im.src = state.user.avatarUrl;
+      whoAv.textContent = '';
+      whoAv.appendChild(im);
+    }
     // who-tag's actual text (including whether it shows "· Business"), and
     // #business-owner-panel's visibility, are set by setWalletContext below,
     // since both depend on which mode is active, not just isBusiness.
@@ -930,7 +990,6 @@
     document.getElementById('upgrade-business-section').classList.toggle('hidden', !!state.user.isBusiness);
     if (state.user.isBusiness) {
       document.getElementById('biz-wallet-balance').textContent = fmt(state.user.businessGydBalance);
-      document.getElementById('wallet-view-biz-balance').textContent = fmt(state.user.businessGydBalance);
     } else if (walletContext === 'business') {
       // Shouldn't normally happen (a business account can't un-become one
       // from the UI), but if it ever did, don't strand the view on a
@@ -938,10 +997,39 @@
       walletContext = 'personal';
     }
     setWalletContext(walletContext);
-    const paytagInput = document.getElementById('paytag-input');
-    if (document.activeElement !== paytagInput) paytagInput.value = state.user.paytag || '';
-    document.getElementById('account-card-paytag').textContent = `$${state.user.paytag || ''}`;
-    document.getElementById('account-card-holder').textContent = state.user.username;
+    renderHomeHeader();
+  }
+
+  // The home tab's green header: who's signed in, and which account
+  // (personal/business) is showing. Tapping the pill opens the same
+  // account switcher as the app header — only for business accounts.
+  function renderHomeHeader() {
+    if (!state.user) return;
+    const business = walletContext === 'business';
+    const name = business ? state.user.businessName || state.user.username : state.user.username;
+    document.getElementById('home-name').textContent = name;
+    document.getElementById('home-tag').textContent = `$${state.user.paytag || state.user.username}`;
+    renderHomeAvatar();
+    applyWallpaper();
+    document.getElementById('home-acct-dot').textContent = business ? 'B' : 'P';
+    const label = document.getElementById('home-acct-label');
+    label.dataset.i18n = business ? 't335' : 't334';
+    label.textContent = i18nText(business ? 't335' : 't334', business ? 'Business' : 'Personal');
+    document.getElementById('home-acct-caret').classList.toggle('hidden', !state.user.isBusiness);
+    document.getElementById('home-acct-pill').classList.toggle('switchable', !!state.user.isBusiness);
+    renderHomeBalance();
+  }
+
+  function renderHomeBalance() {
+    if (!state.user) return;
+    const business = walletContext === 'business';
+    document.getElementById('home-balance-label').textContent = i18nText(business ? 't283' : 't281', business ? 'Business balance' : 'Available balance');
+    document.getElementById('home-balance-value').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
+    const eye = document.getElementById('home-balance-eye');
+    eye.textContent = balanceHidden ? '🙈' : '👁';
+    const label = i18nText(balanceHidden ? 't325' : 't320', balanceHidden ? 'Show balance' : 'Hide balance');
+    eye.title = label;
+    eye.setAttribute('aria-label', label);
   }
 
   // Title/aria-label text for this toggle is translated directly here (via
@@ -957,36 +1045,61 @@
     btn.setAttribute('aria-label', label);
   }
 
-  document.getElementById('balance-visibility-btn').onclick = () => {
+  function toggleBalanceVisibility() {
     balanceHidden = !balanceHidden;
     document.getElementById('balance-visibility-btn').textContent = balanceHidden ? '🙈' : '👁';
     updateBalanceVisibilityLabel();
     document.getElementById('balance-gyd').textContent = balanceHidden ? '••••••' : fmt(currentBalance());
-  };
+    renderHomeBalance();
+  }
+  document.getElementById('balance-visibility-btn').onclick = toggleBalanceVisibility;
+  document.getElementById('home-balance-eye').onclick = toggleBalanceVisibility;
 
   window.addEventListener('gyd-lang-changed', updateBalanceVisibilityLabel);
+  window.addEventListener('gyd-lang-changed', () => {
+    renderHomeHeader();
+    if (lastTransactions) renderTransactions(lastTransactions);
+    renderChipInPots();
+  });
   updateBalanceVisibilityLabel();
 
-  document.getElementById('paytag-save-btn').onclick = async () => {
-    const val = document.getElementById('paytag-input').value.trim();
-    const errBox = document.getElementById('paytag-error');
-    errBox.textContent = '';
-    try {
-      const data = await api('/api/me/paytag', 'POST', { paytag: val });
-      state.user = data.user;
-      renderWho();
-    } catch (err) {
-      errBox.textContent = err.message;
-    }
-  };
+  // $Paytag: the home tile opens this sheet (the old inline panel is gone).
+  function openPaytagSheet() {
+    openSheet(i18nText('t2', 'Your $Paytag'), (dlg) => {
+      dlg.appendChild(sheetText(i18nText('t240', 'Your $Paytag is your unique payment handle. Share it so people can pay or request money from you without needing your username.')));
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 20;
+      input.placeholder = i18nText('t284', 'yourname');
+      input.value = state.user.paytag || '';
+      dlg.appendChild(sheetField(i18nText('t62', '$Paytag'), input));
+      const err = document.createElement('div');
+      err.className = 'error-msg';
+      const go = sheetButton(i18nText('t164', 'Save'), 'full', async () => {
+        err.textContent = '';
+        go.disabled = true;
+        try {
+          const data = await api('/api/me/paytag', 'POST', { paytag: input.value.trim() });
+          state.user = data.user;
+          renderWho();
+          closeSheet();
+        } catch (e) {
+          err.textContent = e.message;
+        } finally {
+          go.disabled = false;
+        }
+      });
+      dlg.append(go, err);
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+  document.getElementById('home-tile-paytag').onclick = openPaytagSheet;
 
   // ---------- business wallet (separate balance for business accounts) ----------
   //
-  // Wired up twice with the same underlying logic — once for the original
-  // panel on the Business tab (#business-owner-panel), once for its mirror
-  // on the Wallet tab's Business view (#wallet-business-view) — since both
-  // show/move the same business_gyd_balance and should never drift out of
-  // sync with each other.
+  // The same move is offered twice — as a form on the Business tab
+  // (#business-owner-panel) and as the "To wallet" tile's sheet on the Home
+  // tab — both move the same business_gyd_balance.
   async function moveBusinessToPersonal(amountInputId, errId, successId) {
     const amountInput = document.getElementById(amountInputId);
     const errBox = document.getElementById(errId);
@@ -1010,10 +1123,46 @@
   document.getElementById('biz-wallet-move-btn').onclick = () =>
     moveBusinessToPersonal('biz-wallet-move-amount', 'biz-wallet-move-error', 'biz-wallet-move-success');
 
-  document.getElementById('wallet-view-biz-move-btn').onclick = () =>
-    moveBusinessToPersonal('wallet-view-biz-move-amount', 'wallet-view-biz-move-error', 'wallet-view-biz-move-success');
-
-  document.getElementById('wallet-view-manage-business-btn').onclick = () => switchTab('business');
+  function openBizMoveSheet() {
+    openSheet(i18nText('t81', 'Move to personal wallet'), (dlg) => {
+      dlg.appendChild(sheetText(i18nText('t255', 'Money customers pay you — checkout, payment requests, and transfers/QR pay — lands here, kept separate from your personal GYD balance so it never gets mixed into your own spending money.')));
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.inputMode = 'decimal';
+      input.min = '0.01';
+      input.step = '0.01';
+      input.placeholder = '1000';
+      dlg.appendChild(sheetField(i18nText('t497', 'Amount (GYD)'), input));
+      dlg.appendChild(sheetText(tr('t539', 'Business balance: GYD {amount}', { amount: fmt(state.user.businessGydBalance || 0) })));
+      const err = document.createElement('div');
+      err.className = 'error-msg';
+      const go = sheetButton(i18nText('t189', 'Move'), 'full', async () => {
+        err.textContent = '';
+        const amount = Number(input.value);
+        if (!positiveWager(amount)) return (err.textContent = 'Enter a positive amount.');
+        go.disabled = true;
+        try {
+          const data = await api('/api/business/wallet/move-to-personal', 'POST', { amount });
+          state.user = data.user;
+          renderWho();
+          loadTransactions();
+          closeSheet();
+          toast(tr('t538', 'Moved GYD {amount} to your personal wallet.', { amount: fmt(amount) }), 'success');
+        } catch (e) {
+          err.textContent = e.message;
+        } finally {
+          go.disabled = false;
+        }
+      });
+      dlg.append(go, err);
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+  document.getElementById('home-biz-move-btn').onclick = openBizMoveSheet;
+  document.getElementById('home-biz-page-btn').onclick = () => {
+    switchTab('business');
+    openBizSection('page');
+  };
 
   async function refreshMe() {
     const data = await api('/api/me');
@@ -1026,8 +1175,10 @@
     appScreen.classList.remove('hidden');
     renderWho();
     switchTab('wallet');
+    showHomeView('wallet');
     if (state.pollHandle) clearInterval(state.pollHandle);
     state.pollHandle = setInterval(pollMe, 15000);
+    openPendingPot();
   }
 
   // ---------- background refresh ----------
@@ -1075,45 +1226,835 @@
 
   // ---------- wallet ----------
 
-  document.getElementById('deposit-btn').onclick = () => runWalletAction('deposit-amount', 'deposit-error', '/api/wallet/deposit');
-  document.getElementById('cashout-btn').onclick = () => runWalletAction('cashout-amount', 'cashout-error', '/api/wallet/cashout');
 
-  async function runWalletAction(inputId, errId, path) {
-    const input = document.getElementById(inputId);
-    const errBox = document.getElementById(errId);
-    errBox.textContent = '';
-    const amount = Number(input.value);
+  // ---------- profile pictures + wallpaper ----------
+  // avatarEl(name, url): the small round picture shown next to a name. With
+  // no picture (or one that fails to load) it shows the name's initials on a
+  // colour picked from the name, so every person still has a stable "face".
+  function avatarEl(name, url, size) {
+    const el = document.createElement('span');
+    el.className = 'pfp' + (size ? ` ${size}` : '');
+    const label = String(name || '?').replace(/^\$/, '');
+    let hue = 0;
+    for (const ch of label) hue = (hue * 31 + ch.charCodeAt(0)) % 360;
+    const initials = () => {
+      el.textContent = label.slice(0, 2).toUpperCase();
+      el.style.background = `linear-gradient(135deg, hsl(${hue} 62% 52%), hsl(${(hue + 48) % 360} 58% 42%))`;
+    };
+    if (url) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.onerror = initials;
+      img.src = url;
+      el.appendChild(img);
+    } else {
+      initials();
+    }
+    return el;
+  }
+
+  // A picture + a name on one line (textContent only — names are user data).
+  function avatarName(name, url, size) {
+    const wrap = document.createElement('span');
+    wrap.className = 'avatar-name';
+    const text = document.createElement('span');
+    text.textContent = name;
+    wrap.append(avatarEl(name, url, size), text);
+    return wrap;
+  }
+
+  // Shrinks a chosen picture in the browser before it is uploaded: phone
+  // photos are several MB, and the server only accepts a small JPEG.
+  async function pictureToJpeg(file, { max, square }) {
+    if (!file || !String(file.type).startsWith('image/')) throw new Error(i18nText('t566', "That picture couldn't be read. Try a JPEG or PNG."));
+    let bmp;
     try {
-      const data = await api(path, 'POST', { amount });
-      state.user = data.user;
-      renderWho();
-      input.value = '';
-      loadTransactions();
-    } catch (err) {
-      errBox.textContent = err.message;
+      bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {
+      bmp = await new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(i18nText('t566', "That picture couldn't be read. Try a JPEG or PNG."))); };
+        img.src = url;
+      });
+    }
+    const sw = bmp.width, sh = bmp.height;
+    let sx = 0, sy = 0, cw = sw, ch = sh;
+    if (square) {
+      const side = Math.min(sw, sh);
+      sx = Math.floor((sw - side) / 2);
+      sy = Math.floor((sh - side) / 2);
+      cw = ch = side;
+    }
+    const scale = Math.min(1, max / Math.max(cw, ch));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(cw * scale));
+    canvas.height = Math.max(1, Math.round(ch * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bmp, sx, sy, cw, ch, 0, 0, canvas.width, canvas.height);
+    if (bmp.close) bmp.close();
+    for (const q of [0.86, 0.72, 0.58, 0.45]) {
+      const out = canvas.toDataURL('image/jpeg', q);
+      if (out.length < 1_800_000) return out;
+    }
+    throw new Error(i18nText('t566', "That picture couldn't be read. Try a JPEG or PNG."));
+  }
+
+  // --- wallpaper (the person's own background for the whole app) ---
+  // A preset is just a CSS class on #app-wall. A photo lives in a PRIVATE
+  // bucket, so it is fetched with the person's login and shown from a local
+  // blob: URL — it never has a public address.
+  const wall = { objectUrl: null, version: null, seq: 0 };
+
+  function clearWallpaper() {
+    wall.seq++;
+    document.body.classList.remove('has-wall');
+    const el = document.getElementById('app-wall');
+    el.className = '';
+    el.style.backgroundImage = '';
+    if (wall.objectUrl) URL.revokeObjectURL(wall.objectUrl);
+    wall.objectUrl = null;
+    wall.version = null;
+  }
+
+  async function applyWallpaper() {
+    const w = state.user && state.user.wallpaper;
+    if (!w || w.kind === 'none') return clearWallpaper();
+    const root = document.documentElement;
+    root.style.setProperty('--wall-dim', String(w.dim / 100));
+    root.style.setProperty('--wall-blur', `${w.blur}px`);
+    const el = document.getElementById('app-wall');
+    if (w.kind === 'preset') {
+      wall.seq++;
+      el.className = `wp-${w.preset}`;
+      el.style.backgroundImage = '';
+      wall.version = null;
+      document.body.classList.add('has-wall');
+      return;
+    }
+    if (wall.version === w.version && wall.objectUrl) {
+      document.body.classList.add('has-wall');
+      return;
+    }
+    const seq = ++wall.seq;
+    try {
+      const res = await fetch('/api/profile/wallpaper/image', { headers: { Authorization: `Bearer ${state.token}` } });
+      if (!res.ok) throw new Error('wallpaper');
+      const url = URL.createObjectURL(await res.blob());
+      if (seq !== wall.seq || !state.user) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      if (wall.objectUrl) URL.revokeObjectURL(wall.objectUrl);
+      wall.objectUrl = url;
+      wall.version = w.version;
+      el.className = '';
+      el.style.backgroundImage = `url("${url}")`;
+      document.body.classList.add('has-wall');
+    } catch {
+      if (seq === wall.seq) clearWallpaper();
     }
   }
 
+  function renderHomeAvatar() {
+    const u = state.user;
+    if (!u) return;
+    const name = walletContext === 'business' ? u.businessName || u.username : u.username;
+    const img = document.getElementById('home-avatar-img');
+    const initials = document.getElementById('home-avatar-initials');
+    initials.textContent = name.slice(0, 2).toUpperCase();
+    if (u.avatarUrl) {
+      img.onerror = () => img.classList.add('hidden');
+      img.src = u.avatarUrl;
+      img.classList.remove('hidden');
+    } else {
+      img.classList.add('hidden');
+      img.removeAttribute('src');
+    }
+  }
+
+  function renderProfilePanel() {
+    const u = state.user;
+    if (!u) return;
+    document.getElementById('profile-name').textContent = u.isBusiness && u.businessName ? u.businessName : u.username;
+    document.getElementById('profile-tag').textContent = `@${u.username} · $${u.paytag || u.username}`;
+    const slot = document.getElementById('profile-avatar-slot');
+    slot.innerHTML = '';
+    slot.appendChild(avatarEl(u.username, u.avatarUrl, ''));
+    document.getElementById('profile-avatar-remove').disabled = !u.avatarUrl;
+    const w = u.wallpaper || { kind: 'none', dim: 28, blur: 0 };
+    document.querySelectorAll('.wall-preset').forEach((b) => b.classList.toggle('on', w.kind === 'preset' && b.dataset.preset === w.preset));
+    document.getElementById('wall-remove').disabled = w.kind === 'none';
+    document.getElementById('wall-dim').value = w.dim;
+    document.getElementById('wall-dim-out').textContent = `${w.dim}%`;
+    document.getElementById('wall-blur').value = w.blur;
+    document.getElementById('wall-blur-out').textContent = String(w.blur);
+  }
+
+  function profileChanged(user) {
+    state.user = user;
+    renderHomeAvatar();
+    applyWallpaper();
+    renderProfilePanel();
+  }
+
+  async function profileCall(path, method, body, doneKey, doneText) {
+    try {
+      const data = await api(path, method, body);
+      profileChanged(data.user);
+      toast(i18nText(doneKey, doneText), 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function wirePictureInput(inputId, buttonIds, opts, upload) {
+    const input = document.getElementById(inputId);
+    buttonIds.forEach((id) => (document.getElementById(id).onclick = () => input.click()));
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      try {
+        await upload(await pictureToJpeg(file, opts));
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+  }
+  wirePictureInput('profile-avatar-file', ['profile-avatar-choose', 'profile-avatar-btn'], { max: 480, square: true }, (imageData) =>
+    profileCall('/api/profile/avatar', 'POST', { imageData }, 't562', 'Picture saved.')
+  );
+  wirePictureInput('wall-file', ['wall-choose'], { max: 1600, square: false }, (imageData) =>
+    profileCall('/api/profile/wallpaper/photo', 'POST', { imageData }, 't564', 'Wallpaper saved.')
+  );
+  document.getElementById('profile-avatar-remove').onclick = () => profileCall('/api/profile/avatar', 'DELETE', undefined, 't563', 'Picture removed.');
+  document.getElementById('wall-remove').onclick = () => profileCall('/api/profile/wallpaper', 'DELETE', undefined, 't565', 'Wallpaper removed.');
+  document.querySelectorAll('.wall-preset').forEach((b) => (b.onclick = () => profileCall('/api/profile/wallpaper/settings', 'POST', { preset: b.dataset.preset }, 't564', 'Wallpaper saved.')));
+  // Dim / blur: the wallpaper responds while the slider moves; the value is
+  // saved when the person lets go.
+  [['wall-dim', 'wall-dim-out', '--wall-dim', (v) => v / 100, (v) => `${v}%`, 'dim'],
+   ['wall-blur', 'wall-blur-out', '--wall-blur', (v) => `${v}px`, (v) => String(v), 'blur']].forEach(([id, outId, cssVar, css, label, field]) => {
+    const input = document.getElementById(id);
+    input.oninput = () => {
+      document.getElementById(outId).textContent = label(input.value);
+      document.documentElement.style.setProperty(cssVar, String(css(Number(input.value))));
+    };
+    input.onchange = async () => {
+      try {
+        const data = await api('/api/profile/wallpaper/settings', 'POST', { [field]: Number(input.value) });
+        state.user = data.user;
+      } catch (err) {
+        toast(err.message, 'error');
+        renderProfilePanel();
+        applyWallpaper();
+      }
+    };
+  });
+  document.getElementById('home-avatar-btn').onclick = () => switchTab('profile');
+  document.getElementById('profile-back').onclick = () => switchTab('wallet');
+
+  // ---------- activity (home tab) ----------
+  let lastTransactions = null;
+
   async function loadTransactions() {
     const data = await api('/api/wallet/transactions');
-    const tbody = document.getElementById('transactions-body');
-    tbody.innerHTML = '';
-    for (const tx of data.transactions) {
-      const isOut = tx.from_user === state.user.id;
-      const sign = tx.to_user === state.user.id && tx.from_user !== state.user.id ? '+' : isOut ? '−' : '';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${tx.type.replace(/_/g, ' ')}</td>
-        <td>${sign}${fmt(tx.amount)}</td>
-        <td>${tx.currency}</td>
-        <td><span class="pill ${tx.status}">${tx.status}</span></td>
-        <td class="muted">${timeAgo(tx.created_at)}</td>
-      `;
-      tbody.appendChild(tr);
+    lastTransactions = data.transactions;
+    renderTransactions(lastTransactions);
+  }
+
+  const TX_LABELS = {
+    deposit: ['t524', 'Added money'],
+    cashout_request: ['t525', 'Cash-out request'],
+    chip_in: ['t528', 'Chipped in'],
+    chip_in_collect: ['t529', 'Collected a pot'],
+    chip_in_refund: ['t530', 'Chip In refund'],
+  };
+
+  function txLabel(tx, incoming) {
+    const known = TX_LABELS[tx.type];
+    if (known) return i18nText(known[0], known[1]);
+    if (tx.type === 'p2p_transfer') return incoming ? i18nText('t527', 'Received') : i18nText('t526', 'Sent');
+    const plain = String(tx.type || '').replace(/_/g, ' ');
+    return plain.charAt(0).toUpperCase() + plain.slice(1);
+  }
+
+  // One list row: icon, title, small line underneath, amount. Built with
+  // textContent only — notes can contain names other people typed.
+  function homeRow({ icon, iconClass, title, sub, amount, amountClass, avatar }) {
+    const row = document.createElement('div');
+    row.className = 'home-row';
+    // `avatar` ({name, url}) puts that person's picture where the icon would be.
+    const ic = avatar ? avatarEl(avatar.name, avatar.url) : document.createElement('div');
+    if (!avatar) {
+      ic.className = `home-row-ic ${iconClass || ''}`;
+      ic.textContent = icon;
     }
-    if (data.transactions.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="muted">No activity yet.</td></tr>';
+    const main = document.createElement('div');
+    main.className = 'home-row-main';
+    const t = document.createElement('div');
+    t.className = 'home-row-title';
+    t.textContent = title;
+    const st = document.createElement('div');
+    st.className = 'home-row-sub';
+    st.textContent = sub;
+    main.append(t, st);
+    const amt = document.createElement('div');
+    amt.className = `home-row-amt ${amountClass || ''}`;
+    amt.textContent = amount;
+    row.append(ic, main, amt);
+    return row;
+  }
+
+  function renderTransactions(list) {
+    const fill = (container, items) => {
+      container.innerHTML = '';
+      if (!items.length) {
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = i18nText('t475', 'No activity yet.');
+        container.appendChild(p);
+        return;
+      }
+      for (const tx of items) {
+        const incoming = tx.to_user === state.user.id && tx.from_user !== state.user.id;
+        const outgoing = tx.from_user === state.user.id && !incoming;
+        const isPot = String(tx.type).startsWith('chip_in');
+        const extra = [tx.note, tx.status && tx.status !== 'completed' ? tx.status : '', timeAgo(tx.created_at)].filter(Boolean).join(' · ');
+        const person = !isPot && tx.other_username ? tx.other_username : null;
+        const withWho = person ? tr(incoming ? 't568' : 't569', incoming ? 'From {name}' : 'To {name}', { name: person }) : '';
+        container.appendChild(homeRow({
+          icon: isPot ? '🪙' : incoming ? '↓' : '↑',
+          iconClass: isPot ? 'pot' : incoming ? 'in' : '',
+          avatar: person ? { name: person, url: tx.other_avatar_url } : null,
+          title: txLabel(tx, incoming),
+          sub: [withWho, extra].filter(Boolean).join(' · '),
+          amount: `${incoming ? '+' : outgoing ? '−' : ''}${fmt(tx.amount)}`,
+          amountClass: incoming ? 'in' : '',
+        }));
+      }
+    };
+    fill(document.getElementById('home-activity-list'), list);
+  }
+
+  // ---------- home tab: views, tiles, header buttons ----------
+  function showHomeView(view) {
+    document.querySelectorAll('.home-tab').forEach((b) => b.classList.toggle('active', b.dataset.homeView === view));
+    document.querySelectorAll('.home-view').forEach((v) => v.classList.toggle('hidden', v.id !== `home-view-${view}`));
+    if (view === 'chipin') loadChipIn();
+  }
+  document.querySelectorAll('.home-tab').forEach((b) => (b.onclick = () => showHomeView(b.dataset.homeView)));
+  document.getElementById('home-tile-activity').onclick = () => showHomeView('activity');
+  document.getElementById('home-biz-activity-btn').onclick = () => showHomeView('activity');
+  document.getElementById('home-tile-chipin').onclick = () => showHomeView('chipin');
+  document.getElementById('home-tile-scan').onclick = () => switchTab('qr');
+  document.getElementById('home-qr-btn').onclick = () => switchTab('qr');
+  document.getElementById('home-support-btn').onclick = () => switchTab('support');
+  document.getElementById('home-logout-btn').onclick = () => document.getElementById('logout-btn').click();
+
+  // Share a link: the phone's own share sheet where there is one, otherwise copy it.
+  async function shareLink(url, text, copiedMsg) {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'GYD Wallet', text, url });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
     }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(copiedMsg, 'success');
+    } catch {
+      await promptDialog(url);
+    }
+  }
+  document.getElementById('home-tile-invite').onclick = () =>
+    shareLink(location.origin + '/', i18nText('t512', 'Join me on GYD Wallet'), i18nText('t513', 'Invite link copied.'));
+
+  // ---------- bottom sheets ----------
+  // A <dialog> styled as a sheet sliding up from the bottom: Escape, the
+  // back gesture and tapping outside all close it, and focus stays inside.
+  function openSheet(title, build) {
+    closeSheet();
+    const dlg = document.createElement('dialog');
+    dlg.className = 'sheet';
+    dlg.id = 'app-sheet';
+    const grab = document.createElement('div');
+    grab.className = 'sheet-grab';
+    const head = document.createElement('div');
+    head.className = 'sheet-head';
+    const h = document.createElement('h2');
+    h.textContent = title;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'sheet-x';
+    x.textContent = '×';
+    x.setAttribute('aria-label', i18nText('t419', 'Dismiss'));
+    x.onclick = closeSheet;
+    head.append(h, x);
+    dlg.append(grab, head);
+    build(dlg);
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) closeSheet(); });
+    dlg.addEventListener('close', () => { rescueToasts(dlg); dlg.remove(); });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    adoptToasts(dlg);
+    return dlg;
+  }
+  function closeSheet() {
+    const open = document.getElementById('app-sheet');
+    if (open) open.close();
+  }
+  function sheetField(labelText, input) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    const id = `sheet-f-${Math.random().toString(36).slice(2, 8)}`;
+    input.id = id;
+    label.htmlFor = id;
+    wrap.append(label, input);
+    return wrap;
+  }
+  function sheetText(text, cls = 'sheet-sub') {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    return p;
+  }
+  function sheetButton(text, cls, onclick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `btn ${cls || ''}`;
+    b.textContent = text;
+    if (onclick) b.onclick = onclick;
+    return b;
+  }
+
+  // Add money / Cash out. Both only act on the personal balance.
+  function openMoneySheet(kind) {
+    const deposit = kind === 'deposit';
+    switchTab('wallet');
+    setWalletContext('personal');
+    openSheet(deposit ? i18nText('t517', 'Add money (simulated)') : i18nText('t518', 'Request a cash-out'), (dlg) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.inputMode = 'decimal';
+      input.min = '0.01';
+      input.step = '0.01';
+      input.placeholder = deposit ? '5000.00' : '2000';
+      dlg.appendChild(sheetField(i18nText('t497', 'Amount (GYD)'), input));
+      if (!deposit) {
+        dlg.appendChild(sheetText(i18nText('t241', 'This deducts the GYD and files a pending request — it does not send real money in this prototype.')));
+      }
+      const err = document.createElement('div');
+      err.className = 'error-msg';
+      const go = sheetButton(deposit ? i18nText('t165', 'Deposit') : i18nText('t166', 'Request cash-out'), 'full', async () => {
+        err.textContent = '';
+        go.disabled = true;
+        try {
+          const data = await api(deposit ? '/api/wallet/deposit' : '/api/wallet/cashout', 'POST', { amount: Number(input.value) });
+          state.user = data.user;
+          renderWho();
+          loadTransactions();
+          closeSheet();
+        } catch (e) {
+          err.textContent = e.message;
+        } finally {
+          go.disabled = false;
+        }
+      });
+      dlg.append(go, err);
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+  document.getElementById('home-add-money-btn').onclick = () => openMoneySheet('deposit');
+  document.getElementById('home-cash-out-btn').onclick = () => openMoneySheet('cashout');
+
+  // ---------- Chip In ----------
+  // Group money pots — see the /api/chip-in routes in server.js. Money in a
+  // pot is locked until the goal is reached or the deadline passes; the
+  // organizer can also cancel and refund everyone at any time.
+  const CHIP_IN_EMOJIS = ['🎉', '✈️', '🎁', '⛪', '🏏', '🍛', '🎓', '🏥', '🏞️', '🎂', '🎭', '🏠'];
+  const POT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  let chipInPots = [];
+  let chipInTab = 'active';
+
+  // i18nText with {placeholders}.
+  function tr(key, fallback, vars = {}) {
+    return i18nText(key, fallback).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  }
+  function potDate(iso) {
+    const lang = (window.i18n && window.i18n.getLang && window.i18n.getLang()) || 'en';
+    const locale = { en: 'en-US', es: 'es', pt: 'pt-BR' }[lang] || 'en-US';
+    const d = new Date(`${iso}T12:00:00`);
+    return isNaN(d) ? iso : d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  }
+  // Where a pot stands: still collecting (locked), goal reached, deadline
+  // passed short of the goal, or closed.
+  function potState(p) {
+    if (p.status !== 'active') return 'closed';
+    if (p.balance >= p.goal) return 'ready';
+    if (p.deadlinePassed) return 'short';
+    return 'locked';
+  }
+  function potMetaText(p) {
+    const st = potState(p);
+    if (st === 'closed') return p.status === 'refunded' ? i18nText('t482', 'Refunded') : i18nText('t481', 'Collected');
+    if (st === 'ready') return i18nText('t479', '✓ Goal reached · ready to collect');
+    if (st === 'short') return tr('t480', 'Deadline passed · GYD {amount} short', { amount: fmt(p.goal - p.balance) });
+    return tr('t478', '🔒 Locked until the goal or {date}', { date: potDate(p.deadline) });
+  }
+  function potBar(p) {
+    const bar = document.createElement('div');
+    bar.className = 'chipin-bar';
+    const fill = document.createElement('i');
+    fill.style.width = `${Math.min(100, (p.balance / p.goal) * 100)}%`;
+    bar.appendChild(fill);
+    return bar;
+  }
+
+  async function loadChipIn() {
+    if (!state.user) return;
+    try {
+      const data = await api('/api/chip-in/pots');
+      chipInPots = data.pots;
+    } catch {
+      return;
+    }
+    renderChipInPots();
+  }
+
+  function renderChipInPots() {
+    if (!state.user) return;
+    // The wallet card's "money in your pots" line: open pots you run.
+    const held = chipInPots.filter((p) => p.isOrganizer && p.status === 'active').reduce((s, p) => s + p.balance, 0);
+    document.getElementById('home-held').classList.toggle('hidden', !(held > 0) || walletContext === 'business');
+    document.getElementById('home-held-amount').textContent = `GYD ${fmt(held)}`;
+
+    const wrap = document.getElementById('chipin-pots');
+    wrap.innerHTML = '';
+    const list = chipInPots.filter((p) => (chipInTab === 'active' ? p.status === 'active' : p.status !== 'active'));
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'chipin-empty';
+      empty.textContent = chipInTab === 'active'
+        ? i18nText('t476', 'No open pots. Tap “New pot” to start one.')
+        : i18nText('t477', 'No closed pots yet.');
+      wrap.appendChild(empty);
+      return;
+    }
+    for (const p of list) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `chipin-pot ${potState(p)}`;
+      const top = document.createElement('div');
+      top.className = 'chipin-pot-top';
+      const emoji = document.createElement('div');
+      emoji.className = 'chipin-emoji';
+      emoji.textContent = p.emoji;
+      const meta = document.createElement('div');
+      meta.style.minWidth = '0';
+      const name = document.createElement('div');
+      name.className = 'chipin-pot-name';
+      name.textContent = p.name;
+      const sub = document.createElement('div');
+      sub.className = 'chipin-pot-meta';
+      sub.textContent = potMetaText(p);
+      meta.append(name, sub);
+      top.append(emoji, meta);
+      const amt = document.createElement('div');
+      amt.className = 'chipin-amt';
+      amt.textContent = `GYD ${fmt(p.balance)} `;
+      const of = document.createElement('span');
+      of.textContent = tr('t483', 'of {goal}', { goal: fmt(p.goal) });
+      amt.appendChild(of);
+      card.append(top, amt, potBar(p));
+      card.onclick = () => openPot(p.id);
+      wrap.appendChild(card);
+    }
+  }
+  document.querySelectorAll('[data-pots]').forEach((b) => (b.onclick = () => {
+    chipInTab = b.dataset.pots;
+    document.querySelectorAll('[data-pots]').forEach((x) => x.classList.toggle('active', x === b));
+    renderChipInPots();
+  }));
+
+  function afterPotChange(data) {
+    if (data.user) {
+      state.user = data.user;
+      renderWho();
+    }
+    loadTransactions();
+    loadChipIn();
+  }
+
+  async function openPot(id) {
+    let data;
+    try {
+      data = await api(`/api/chip-in/pots/${encodeURIComponent(id)}`);
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
+    }
+    const p = data.pot;
+    const st = potState(p);
+    openSheet(`${p.emoji} ${p.name}`, (dlg) => {
+      const orgLine = sheetText(tr('t486', 'Organized by {name}', { name: p.isOrganizer ? i18nText('t521', 'You') : p.organizer }));
+      orgLine.style.display = 'flex';
+      orgLine.style.alignItems = 'center';
+      orgLine.style.gap = '8px';
+      orgLine.prepend(avatarEl(p.organizer, p.organizerAvatarUrl, 'sm'));
+      dlg.appendChild(orgLine);
+      const split = document.createElement('div');
+      split.className = 'chipin-split';
+      const mk = (cls, k, v) => {
+        const d = document.createElement('div');
+        if (cls) d.className = cls;
+        const kk = document.createElement('div');
+        kk.className = 'k';
+        kk.textContent = k;
+        const vv = document.createElement('div');
+        vv.className = 'v';
+        vv.textContent = v;
+        d.append(kk, vv);
+        return d;
+      };
+      split.append(mk('pot-side', i18nText('t484', 'This pot'), `GYD ${fmt(p.balance)}`), mk('', i18nText('t485', 'Goal'), `GYD ${fmt(p.goal)}`));
+      dlg.append(split, potBar(p), sheetText(i18nText('t514', 'Kept separate from everyone’s wallets.')));
+
+      if (st !== 'closed') {
+        const note = document.createElement('div');
+        note.className = `chipin-note ${st}`;
+        const ic = document.createElement('span');
+        ic.textContent = st === 'ready' ? '✓' : st === 'short' ? '⏰' : '🔒';
+        const txt = document.createElement('div');
+        txt.textContent = st === 'ready'
+          ? i18nText('t493', 'Goal reached. The organizer can now move this money to their wallet.')
+          : st === 'short'
+            ? tr('t494', "The deadline ({date}) passed GYD {amount} short of the goal. The organizer can collect what's here or give everyone their money back.", { date: potDate(p.deadline), amount: fmt(p.goal - p.balance) })
+            : tr('t495', 'Locked until the goal is reached or the deadline ({date}) passes. Nobody can take money out before then.', { date: potDate(p.deadline) });
+        note.append(ic, txt);
+        dlg.appendChild(note);
+      }
+
+      const h = document.createElement('h3');
+      h.className = 'section-title';
+      h.textContent = i18nText('t487', 'Who chipped in');
+      dlg.appendChild(h);
+      const list = document.createElement('div');
+      list.className = 'home-list';
+      if (!data.contributions.length) list.appendChild(sheetText(i18nText('t488', 'No one has chipped in yet. Share the link to get started.'), 'muted'));
+      for (const c of data.contributions) {
+        const who = c.mine ? i18nText('t521', 'You') : c.username;
+        list.appendChild(homeRow({
+          icon: who.slice(0, 2).toUpperCase(),
+          iconClass: c.mine ? 'in' : 'pot',
+          avatar: { name: c.username, url: c.avatarUrl },
+          title: who,
+          sub: [timeAgo(c.createdAt), c.refunded ? i18nText('t482', 'Refunded') : ''].filter(Boolean).join(' · '),
+          amount: `GYD ${fmt(c.amount)}`,
+          amountClass: c.refunded ? '' : 'in',
+        }));
+      }
+      dlg.appendChild(list);
+
+      if (st === 'closed') return;
+      const actions = document.createElement('div');
+      actions.className = 'chipin-actions';
+      const share = () => shareLink(`${location.origin}/#pot=${p.id}`, p.name, i18nText('t511', 'Link copied. Send it to people so they can chip in.'));
+      const collect = async () => {
+        if (!(await confirmDialog(tr('t510', 'Move GYD {amount} to your wallet and close this pot?', { amount: fmt(p.balance) })))) return;
+        try {
+          const r = await api(`/api/chip-in/pots/${p.id}/collect`, 'POST', {});
+          closeSheet();
+          toast(tr('t507', 'GYD {amount} moved to your wallet. The pot is now closed.', { amount: fmt(r.collected) }), 'success');
+          afterPotChange(r);
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+      const refund = async () => {
+        if (!(await confirmDialog(i18nText('t509', "Refund everyone and close this pot? This can't be undone."), { danger: true }))) return;
+        try {
+          const r = await api(`/api/chip-in/pots/${p.id}/refund`, 'POST', {});
+          closeSheet();
+          toast(i18nText('t508', 'Everyone got their money back. The pot is now closed.'), 'success');
+          afterPotChange(r);
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+      if (st === 'short') {
+        if (p.isOrganizer) {
+          actions.append(
+            sheetButton(tr('t515', 'Collect GYD {amount}', { amount: fmt(p.balance) }), 'gold', collect),
+            sheetButton(i18nText('t516', 'Refund everyone'), 'secondary', refund)
+          );
+        } else {
+          actions.append(sheetButton(i18nText('t491', 'Share'), 'secondary', share));
+        }
+      } else {
+        actions.appendChild(sheetButton(i18nText('t489', 'Chip in'), '', () => openChipInSheet(p)));
+        if (p.isOrganizer) {
+          const move = sheetButton(st === 'ready' ? i18nText('t490', 'Move to wallet') : `🔒 ${i18nText('t490', 'Move to wallet')}`, 'gold', st === 'ready' ? collect : null);
+          move.disabled = st !== 'ready';
+          actions.appendChild(move);
+        } else {
+          actions.appendChild(sheetButton(i18nText('t491', 'Share'), 'secondary', share));
+        }
+      }
+      dlg.appendChild(actions);
+      if (p.isOrganizer) {
+        if (st !== 'short') {
+          const shareBtn = sheetButton(i18nText('t491', 'Share'), 'secondary full', share);
+          dlg.appendChild(shareBtn);
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'link-btn chipin-cancel-link';
+          cancel.textContent = i18nText('t492', 'Cancel pot & refund everyone');
+          cancel.onclick = refund;
+          dlg.appendChild(cancel);
+        }
+      } else {
+        dlg.appendChild(sheetText(i18nText('t496', 'Only the organizer can move money out of this pot.')));
+      }
+    });
+  }
+
+  function openChipInSheet(p) {
+    openSheet(tr('t520', 'Chip in: {name}', { name: p.name }), (dlg) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.inputMode = 'decimal';
+      input.min = '0.01';
+      input.step = '0.01';
+      input.placeholder = '0';
+      dlg.appendChild(sheetField(i18nText('t497', 'Amount (GYD)'), input));
+      const quick = document.createElement('div');
+      quick.className = 'sheet-quick';
+      [1000, 2500, 5000, 10000].forEach((v) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = fmt(v).replace(/\.00$/, '');
+        b.onclick = () => { input.value = v; };
+        quick.appendChild(b);
+      });
+      dlg.append(quick, sheetText(tr('t498', 'From your wallet: GYD {amount} available.', { amount: fmt(state.user.gydBalance) })));
+      const err = document.createElement('div');
+      err.className = 'error-msg';
+      const go = sheetButton(i18nText('t489', 'Chip in'), 'full', async () => {
+        err.textContent = '';
+        go.disabled = true;
+        try {
+          const amount = Number(input.value);
+          const r = await api(`/api/chip-in/pots/${p.id}/contribute`, 'POST', { amount });
+          toast(tr('t506', 'You chipped in GYD {amount}.', { amount: fmt(amount) }), 'success');
+          afterPotChange(r);
+          openPot(p.id);
+        } catch (e) {
+          err.textContent = e.message;
+        } finally {
+          go.disabled = false;
+        }
+      });
+      dlg.append(go, err);
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+
+  document.getElementById('chipin-new-btn').onclick = () => openSheet(i18nText('t467', 'New pot'), (dlg) => {
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.maxLength = 40;
+    name.placeholder = 'e.g. Rupununi road trip';
+    dlg.appendChild(sheetField(i18nText('t499', 'What is it for?'), name));
+    const goal = document.createElement('input');
+    goal.type = 'number';
+    goal.inputMode = 'decimal';
+    goal.min = '1';
+    goal.step = '0.01';
+    goal.placeholder = '50000';
+    dlg.appendChild(sheetField(i18nText('t500', 'Goal (GYD)'), goal));
+    const due = document.createElement('input');
+    due.type = 'date';
+    // Tomorrow to one year ahead, in Guyana time (the server checks too).
+    const gyToday = new Date(Date.now() - 4 * 3600 * 1000);
+    const iso = (offset) => {
+      const d = new Date(gyToday);
+      d.setUTCDate(d.getUTCDate() + offset);
+      return d.toISOString().slice(0, 10);
+    };
+    due.min = iso(1);
+    due.max = iso(366);
+    dlg.appendChild(sheetField(i18nText('t501', 'Last day to chip in'), due));
+    dlg.appendChild(sheetText(i18nText('t502', 'Money stays locked until the goal is reached or this date passes.')));
+    const pickWrap = document.createElement('div');
+    pickWrap.className = 'field';
+    const pickLabel = document.createElement('label');
+    pickLabel.textContent = i18nText('t503', 'Pick an icon');
+    const pick = document.createElement('div');
+    pick.className = 'chipin-emoji-pick';
+    let chosen = CHIP_IN_EMOJIS[0];
+    CHIP_IN_EMOJIS.forEach((e, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = e;
+      b.setAttribute('aria-pressed', String(i === 0));
+      if (i === 0) b.classList.add('on');
+      b.onclick = () => {
+        chosen = e;
+        pick.querySelectorAll('button').forEach((x) => {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-pressed', String(x === b));
+        });
+      };
+      pick.appendChild(b);
+    });
+    pickWrap.append(pickLabel, pick);
+    dlg.appendChild(pickWrap);
+    const err = document.createElement('div');
+    err.className = 'error-msg';
+    const go = sheetButton(i18nText('t504', 'Create pot'), 'gold full', async () => {
+      err.textContent = '';
+      go.disabled = true;
+      try {
+        const r = await api('/api/chip-in/pots', 'POST', { name: name.value.trim(), goal: Number(goal.value), deadline: due.value, emoji: chosen });
+        closeSheet();
+        toast(tr('t505', '"{name}" is ready. Share it so people can chip in.', { name: r.pot.name }), 'success');
+        chipInTab = 'active';
+        document.querySelectorAll('[data-pots]').forEach((x) => x.classList.toggle('active', x.dataset.pots === 'active'));
+        await loadChipIn();
+        openPot(r.pot.id);
+      } catch (e) {
+        err.textContent = e.message;
+      } finally {
+        go.disabled = false;
+      }
+    });
+    dlg.append(go, err);
+    setTimeout(() => name.focus(), 50);
+  });
+
+  // A shared pot link (https://…/#pot=<id>) opens that pot once signed in.
+  let pendingPotId = (() => {
+    const id = new URLSearchParams(location.hash.slice(1)).get('pot');
+    return id && POT_ID_RE.test(id) ? id : null;
+  })();
+  function openPendingPot() {
+    if (!pendingPotId || !state.user) return;
+    const id = pendingPotId;
+    pendingPotId = null;
+    history.replaceState({}, '', location.pathname);
+    switchTab('wallet');
+    showHomeView('chipin');
+    openPot(id);
   }
 
   // ---------- pay / request (keypad) / users ----------
@@ -1198,7 +2139,8 @@
     tbody.innerHTML = '';
     for (const u of data.users) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>$${esc(u.paytag)}</td><td>${esc(u.username)}</td><td class="muted">${u.isBusiness ? `Business · ${esc(u.businessName)}` : 'Personal'}</td>`;
+      tr.innerHTML = `<td>$${esc(u.paytag)}</td><td></td><td class="muted">${u.isBusiness ? `Business · ${esc(u.businessName)}` : 'Personal'}</td>`;
+      tr.children[1].appendChild(avatarName(u.username, u.avatarUrl, 'sm'));
       tr.style.cursor = 'pointer';
       tr.onclick = () => {
         document.getElementById('pay-to').value = u.paytag ? `$${u.paytag}` : u.username;
@@ -1237,9 +2179,15 @@
         const row = document.createElement('div');
         row.className = 'remit-list-row';
         const label = document.createElement('div');
-        label.innerHTML = `<div><strong>$${r.fromPaytag}</strong> wants GYD ${fmt(r.amount)}</div>${
+        label.innerHTML = `<div><strong>$${esc(r.fromPaytag)}</strong> wants GYD ${fmt(r.amount)}</div>${
           r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${esc(r.note)}</div>` : ''
         }`;
+        label.style.display = 'flex';
+        label.style.alignItems = 'center';
+        label.style.gap = '10px';
+        const lt = document.createElement('div');
+        while (label.firstChild) lt.appendChild(label.firstChild);
+        label.append(avatarEl(r.fromUsername || r.fromPaytag, r.fromAvatarUrl, 'sm'), lt);
         row.appendChild(label);
         const btnGroup = document.createElement('div');
         btnGroup.style.display = 'flex';
@@ -1270,9 +2218,15 @@
         row.className = 'remit-list-row';
         const pillClass = r.status === 'paid' ? 'completed' : r.status === 'pending' ? 'pending' : 'declined';
         const label = document.createElement('div');
-        label.innerHTML = `<div><strong>$${r.toPaytag}</strong> · GYD ${fmt(r.amount)} <span class="pill ${pillClass}">${requestStatusLabel(r.status)}</span></div>${
+        label.innerHTML = `<div><strong>$${esc(r.toPaytag)}</strong> · GYD ${fmt(r.amount)} <span class="pill ${pillClass}">${requestStatusLabel(r.status)}</span></div>${
           r.note ? `<div class="muted" style="font-size:11.5px; margin-top:3px;">${esc(r.note)}</div>` : ''
         }`;
+        label.style.display = 'flex';
+        label.style.alignItems = 'center';
+        label.style.gap = '10px';
+        const lt = document.createElement('div');
+        while (label.firstChild) lt.appendChild(label.firstChild);
+        label.append(avatarEl(r.toUsername || r.toPaytag, r.toAvatarUrl, 'sm'), lt);
         row.appendChild(label);
         if (r.status === 'pending') {
           const cancelBtn = document.createElement('button');
@@ -2887,7 +3841,7 @@
         const card = document.createElement('div');
         card.className = 'directory-card';
         card.innerHTML = `
-          <div class="directory-logo" style="background:${b.coverPhotoUrl ? `url('${b.coverPhotoUrl}') center/cover` : hexToRgba(b.themeColor, 0.18)};">${b.coverPhotoUrl ? '' : (b.logoEmoji || '🏢')}</div>
+          <div class="directory-logo" style="background:${b.coverPhotoUrl ? `url('${b.coverPhotoUrl}') center/cover` : b.ownerAvatarUrl ? `url('${b.ownerAvatarUrl}') center/cover` : hexToRgba(b.themeColor, 0.18)};">${b.coverPhotoUrl || b.ownerAvatarUrl ? '' : (b.logoEmoji || '🏢')}</div>
           <div class="directory-info">
             <div class="biz-name">${esc(b.businessName)}</div>
             <div class="biz-tagline">${esc(b.tagline || '')}</div>
@@ -2965,8 +3919,8 @@
         coverBox.classList.add('hidden');
       }
       const logoEl = document.getElementById('bizpage-view-logo');
-      logoEl.textContent = b.logoEmoji || '🏢';
-      logoEl.style.background = hexToRgba(b.themeColor, 0.18);
+      logoEl.textContent = b.ownerAvatarUrl ? '' : b.logoEmoji || '🏢';
+      logoEl.style.background = b.ownerAvatarUrl ? `url('${b.ownerAvatarUrl}') center/cover` : hexToRgba(b.themeColor, 0.18);
       logoEl.style.border = `1px solid ${hexToRgba(b.themeColor, 0.4)}`;
       document.getElementById('bizpage-view-name').textContent = b.businessName;
       document.getElementById('bizpage-view-paytag').textContent = `$${b.paytag}`;
@@ -4051,9 +5005,13 @@
       const item = document.createElement('div');
       item.className = 'thread-item' + (t.username === state.activeThreadUsername ? ' active' : '');
       item.innerHTML = `
-        <div class="uname">${esc(t.username)}${t.isBusiness ? ' 🏢' : ''}</div>
-        <div class="preview">${t.fromMe ? 'You: ' : ''}${t.lastMessage}</div>
+        <div class="thread-text">
+          <div class="uname">${esc(t.username)}${t.isBusiness ? ' 🏢' : ''}</div>
+          <div class="preview">${t.fromMe ? 'You: ' : ''}${esc(t.lastMessage)}</div>
+        </div>
       `;
+      item.classList.add('with-avatar');
+      item.prepend(avatarEl(t.username, t.avatarUrl, 'sm'));
       item.onclick = () => openThread(t.username);
       list.appendChild(item);
     }
@@ -4062,11 +5020,17 @@
     }
   }
 
+  function setThreadTitle(username, avatarUrl) {
+    const title = document.getElementById('thread-title');
+    title.textContent = '';
+    title.appendChild(avatarName(username, avatarUrl, 'lg'));
+  }
+
   async function openThread(username, prefill) {
     state.activeThreadUsername = username;
     document.getElementById('thread-empty').classList.add('hidden');
     document.getElementById('thread-active').classList.remove('hidden');
-    document.getElementById('thread-title').textContent = username;
+    setThreadTitle(username, null);
     if (prefill) document.getElementById('compose-input').value = prefill;
     await loadThreads();
     await refreshThreadMessages();
@@ -4076,6 +5040,7 @@
     if (!state.activeThreadUsername) return;
     try {
       const data = await api(`/api/messages/thread/${encodeURIComponent(state.activeThreadUsername)}`);
+      if (data.other) setThreadTitle(data.other.username, data.other.avatarUrl);
       const box = document.getElementById('messages-scroll');
       box.innerHTML = '';
       for (const m of data.messages) {

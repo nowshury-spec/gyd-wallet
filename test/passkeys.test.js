@@ -237,3 +237,24 @@ test('deleting the account erases its Face ID keys', async () => {
   assert.equal(env.query(`SELECT 1 FROM passkeys WHERE user_id = '${u.id}'`).length, 0);
   assert.equal((await signIn(phone)).status, 401);
 });
+
+test('"Log out of all devices" also turns Face ID off, so nobody can sign straight back in', async () => {
+  const u = await env.makeUser();
+  const ownPhone = makeAuthenticator();
+  const intrudersPhone = makeAuthenticator();
+  await enroll(u, ownPhone);
+  await enroll(u, intrudersPhone); // someone who once had the password
+  assert.equal((await signIn(intrudersPhone)).status, 200);
+
+  const out = await env.api('POST', '/api/security/logout-all-sessions', { token: u.token });
+  assert.equal(out.status, 200);
+  assert.equal((await env.api('GET', '/api/me', { token: u.token })).status, 401, 'old session ended');
+  assert.equal((await signIn(intrudersPhone)).status, 401, 'Face ID no longer gets back in');
+  assert.equal((await signIn(ownPhone)).status, 401);
+  assert.equal(env.query(`SELECT 1 FROM passkeys WHERE user_id = '${u.id}'`).length, 0);
+
+  // The owner logs in with the password and can turn Face ID on again.
+  const login = await env.api('POST', '/api/login', { body: { username: u.username, password: PASSWORD } });
+  assert.equal(login.status, 200);
+  await enroll({ ...u, token: login.data.token }, makeAuthenticator());
+});

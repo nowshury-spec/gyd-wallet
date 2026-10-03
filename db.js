@@ -216,10 +216,30 @@ async function storageDelete(bucket, objectPath) {
   }
 }
 
+// Reads one object back through the secret key — how the app serves a file
+// from a PRIVATE bucket (a person's wallpaper) only to its owner. Returns
+// {body: Buffer, contentType} or null when the object doesn't exist.
+async function storageDownload(bucket, objectPath) {
+  let res;
+  try {
+    res = await fetch(objectUrl(bucket, objectPath), {
+      method: 'GET',
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(STORAGE_TIMEOUT_MS),
+    });
+  } catch (networkErr) {
+    throw new Error(`Could not reach storage: ${networkErr.message}`);
+  }
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`Storage download failed (HTTP ${res.status})`);
+  return { body: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get('content-type') || 'application/octet-stream' };
+}
+
 module.exports = {
   prepare,
   raw: rawQuery,
   atomicTransfer,
   storageUpload,
   storageDelete,
+  storageDownload,
 };

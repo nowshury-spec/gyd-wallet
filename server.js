@@ -215,6 +215,27 @@ function publicUser(u) {
     gydBalance: u.gyd_balance,
     businessGydBalance: u.business_gyd_balance || 0,
     createdAt: u.created_at,
+    avatarUrl: u.avatar_url || null,
+    // Only ever sent to the account's own owner (publicUser is used for the
+    // signed-in user's own data, never for someone else's profile).
+    wallpaper: wallpaperPublic(u),
+  };
+}
+
+const WALLPAPER_PRESETS = ['sunset', 'guyana', 'ocean', 'gold'];
+
+function wallpaperPublic(u) {
+  const dim = Number.isInteger(Number(u.wallpaper_dim)) ? Number(u.wallpaper_dim) : 28;
+  const blur = Number.isInteger(Number(u.wallpaper_blur)) ? Number(u.wallpaper_blur) : 0;
+  const hasPhoto = !!u.wallpaper_path;
+  const preset = !hasPhoto && WALLPAPER_PRESETS.includes(u.wallpaper_preset) ? u.wallpaper_preset : null;
+  return {
+    kind: hasPhoto ? 'photo' : preset ? 'preset' : 'none',
+    preset,
+    // Changes whenever the photo does, so the app knows when to re-download it.
+    version: hasPhoto ? u.wallpaper_updated_at || '1' : null,
+    dim,
+    blur,
   };
 }
 
@@ -915,11 +936,22 @@ on('POST', '/api/auth/forgot-username', async (req, res, params, query, body) =>
 // sessions there's no way to tell "this device" apart from any other, so
 // the safest, clearest behavior is "everywhere, including here" — the
 // person just logs back in on this device afterward.
+//
+// It also turns off Face ID sign-in on every device. Otherwise someone who
+// had set up Face ID on their own phone while in the account (they'd have
+// needed the password once) could sign straight back in afterwards, and
+// "log out everywhere" wouldn't actually lock them out. Same as a password
+// reset; the owner turns Face ID on again for their own devices. One
+// statement, so it's never half done.
 on(
   'POST',
   '/api/security/logout-all-sessions',
   requireAuth(async (req, res, params, query, body, user) => {
-    await db.prepare('UPDATE users SET sessions_invalidated_at = ? WHERE id = ?').run(now(), user.id);
+    await db.raw(
+      `WITH removed AS (DELETE FROM passkeys WHERE user_id = $2)
+       UPDATE users SET sessions_invalidated_at = $1 WHERE id = $2 RETURNING id`,
+      [now(), user.id]
+    );
     sendJson(res, 200, { ok: true });
   })
 );
@@ -937,6 +969,8 @@ const DELETE_ACCOUNT_BLOCKERS = {
   pickup_order_open: 'You have a pickup order that is still open. Complete or cancel it first.',
   shop_order_open: 'You have a shop order or delivery that isn\'t finished yet. Wait until it\'s delivered or picked up first.',
   event_tickets_sold: 'One of your events has tickets sold. Cancel the event (which refunds the buyers) first.',
+  chip_in_pot_open: 'You have a Chip In pot that is still open. Collect it or refund everyone first.',
+  chip_in_contribution_open: "Money you chipped in is still in someone's open Chip In pot. Wait until it's collected or refunded.",
 };
 on(
   'POST',
@@ -961,7 +995,265 @@ on(
         console.error('Photo cleanup after account deletion failed:', err.message);
       }
     }
+    await removeStoredFile('profile-pictures', result.avatar_path);
+    await removeStoredFile('wallpapers', result.wallpaper_path);
     sendJson(res, 200, { deleted: true });
+  })
+);
+
+// ---------- Chip In (group money pots) ----------
+//
+// See chip_in_pots / chip_in_contributions / chip_in_refund in
+// supabase/schema.sql. Every money move here is ONE statement (or the refund
+// function) with the pot row locked FOR UPDATE, for the same reason as the
+// money-request "pay" route: the pot's status and balance are checked on one
+// row while money moves on another, so without the lock two taps at once
+// could both get through. Transaction-log entries are written only after the
+// money has actually moved.
+//
+// Anyone logged in who has a pot's link can see it and chip in (pot ids are
+// random UUIDs, so a pot can't be found without being shared). "My pots"
+// lists the ones you run or have chipped in to.
+const CHIP_IN_EMOJIS = ['🎉', '✈️', '🎁', '⛪', '🏏', '🍛', '🎓', '🏥', '🏞️', '🎂', '🎭', '🏠'];
+const CHIP_IN_MAX_ACTIVE_POTS = 20;
+const CHIP_IN_MAX_DAYS = 366;
+// The moment a pot stops taking money: midnight at the end of its deadline
+// day, Guyana time.
+const CHIP_IN_CLOSES_AT = `((deadline::date + 1)::timestamp AT TIME ZONE 'America/Guyana')`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function guyanaToday() {
+  return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function addDays(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function chipInPotPublic(row, userId) {
+  return {
+    id: row.id,
+    name: row.name,
+    emoji: row.emoji,
+    goal: Number(row.goal),
+    balance: Number(row.balance),
+    deadline: row.deadline,
+    deadlinePassed: !!row.deadline_passed,
+    status: row.status,
+    organizer: row.organizer_username,
+    organizerAvatarUrl: row.organizer_avatar_url || null,
+    isOrganizer: row.organizer_id === userId,
+    contributors: Number(row.contributors || 0),
+    myTotal: Number(row.my_total || 0),
+    createdAt: row.created_at,
+    closedAt: row.closed_at,
+  };
+}
+
+// One pot with everything the screens need, as seen by `userId`.
+async function loadChipInPot(potId, userId) {
+  if (!UUID_RE.test(String(potId))) return null;
+  const [row] = await db.raw(
+    `SELECT p.*, u.username AS organizer_username, u.avatar_url AS organizer_avatar_url,
+            ($3::timestamptz >= ${CHIP_IN_CLOSES_AT}) AS deadline_passed,
+            (SELECT count(DISTINCT c.user_id) FROM chip_in_contributions c WHERE c.pot_id = p.id) AS contributors,
+            (SELECT COALESCE(sum(c.amount), 0) FROM chip_in_contributions c
+              WHERE c.pot_id = p.id AND c.user_id = $2 AND c.refunded_at IS NULL) AS my_total
+     FROM chip_in_pots p JOIN users u ON u.id = p.organizer_id
+     WHERE p.id = $1`,
+    [potId, userId, now()]
+  );
+  return row ? chipInPotPublic(row, userId) : null;
+}
+
+on(
+  'GET',
+  '/api/chip-in/pots',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const rows = await db.raw(
+      `SELECT p.*, u.username AS organizer_username, u.avatar_url AS organizer_avatar_url,
+              ($2::timestamptz >= ${CHIP_IN_CLOSES_AT}) AS deadline_passed,
+              (SELECT count(DISTINCT c.user_id) FROM chip_in_contributions c WHERE c.pot_id = p.id) AS contributors,
+              (SELECT COALESCE(sum(c.amount), 0) FROM chip_in_contributions c
+                WHERE c.pot_id = p.id AND c.user_id = $1 AND c.refunded_at IS NULL) AS my_total
+       FROM chip_in_pots p JOIN users u ON u.id = p.organizer_id
+       WHERE p.organizer_id = $1
+          OR EXISTS (SELECT 1 FROM chip_in_contributions c WHERE c.pot_id = p.id AND c.user_id = $1)
+       ORDER BY (p.status = 'active') DESC, p.created_at DESC
+       LIMIT 100`,
+      [user.id, now()]
+    );
+    sendJson(res, 200, { pots: rows.map((r) => chipInPotPublic(r, user.id)) });
+  })
+);
+
+on(
+  'POST',
+  '/api/chip-in/pots',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const name = String(body.name || '').replace(/[\u0000-\u001f]/g, '').trim();
+    const goal = Number(body.goal);
+    const deadline = String(body.deadline || '');
+    const emoji = CHIP_IN_EMOJIS.includes(body.emoji) ? body.emoji : CHIP_IN_EMOJIS[0];
+    if (!name || name.length > 40) return badRequest(res, 'Give the pot a name (up to 40 characters).');
+    if (!positiveAmount(goal)) return badRequest(res, 'Set a goal amount in GYD.');
+    const today = guyanaToday();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deadline) || deadline <= today || deadline > addDays(today, CHIP_IN_MAX_DAYS)) {
+      return badRequest(res, 'Pick a deadline between tomorrow and one year from now.');
+    }
+    const id = crypto.randomUUID();
+    // Locking the organizer's row ties this to "Delete my account": a pot
+    // can't be created for an account in the middle of being deleted.
+    const rows = await db.raw(
+      `INSERT INTO chip_in_pots (id, organizer_id, name, emoji, goal, deadline, created_at)
+       SELECT $1, u.id, $3, $4, $5, $6, $7 FROM (
+         SELECT id FROM users WHERE id = $2 AND deleted_at IS NULL FOR UPDATE
+       ) u
+       WHERE (SELECT count(*) FROM chip_in_pots WHERE organizer_id = $2 AND status = 'active') < $8
+       RETURNING id`,
+      [id, user.id, name, emoji, goal, deadline, now(), CHIP_IN_MAX_ACTIVE_POTS]
+    );
+    if (rows.length === 0) {
+      return badRequest(res, `You can run up to ${CHIP_IN_MAX_ACTIVE_POTS} open pots at once. Collect or close one first.`);
+    }
+    sendJson(res, 201, { pot: await loadChipInPot(id, user.id) });
+  })
+);
+
+on(
+  'GET',
+  '/api/chip-in/pots/:id',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const pot = await loadChipInPot(params.id, user.id);
+    if (!pot) return sendJson(res, 404, { error: 'That pot was not found.' });
+    const rows = await db.raw(
+      `SELECT c.amount, c.created_at, c.refunded_at, u.username, u.avatar_url, (c.user_id = $2) AS mine
+       FROM chip_in_contributions c JOIN users u ON u.id = c.user_id
+       WHERE c.pot_id = $1 ORDER BY c.created_at DESC LIMIT 200`,
+      [pot.id, user.id]
+    );
+    sendJson(res, 200, {
+      pot,
+      contributions: rows.map((r) => ({
+        username: r.username,
+        avatarUrl: r.avatar_url || null,
+        amount: Number(r.amount),
+        createdAt: r.created_at,
+        refunded: !!r.refunded_at,
+        mine: !!r.mine,
+      })),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/chip-in/pots/:id/contribute',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const amount = Number(body.amount);
+    if (!positiveAmount(amount)) return badRequest(res, 'Enter an amount in GYD.');
+    const pot = await loadChipInPot(params.id, user.id);
+    if (!pot) return sendJson(res, 404, { error: 'That pot was not found.' });
+    if (pot.status !== 'active') return badRequest(res, 'This pot is closed.');
+    if (pot.deadlinePassed) return badRequest(res, "This pot's deadline has passed, so it isn't taking money any more.");
+    if (user.gyd_balance < amount) return badRequest(res, 'Not enough GYD in your wallet.');
+
+    const at = now();
+    const rows = await db.raw(
+      `WITH pot AS (
+         SELECT id FROM chip_in_pots
+         WHERE id = $1 AND status = 'active' AND $4::timestamptz < ${CHIP_IN_CLOSES_AT}
+         FOR UPDATE
+       ), debit AS (
+         UPDATE users SET gyd_balance = gyd_balance - $2
+         WHERE id = $3 AND gyd_balance >= $2 AND EXISTS (SELECT 1 FROM pot)
+         RETURNING gyd_balance
+       ), credit AS (
+         UPDATE chip_in_pots SET balance = balance + $2
+         WHERE id = $1 AND EXISTS (SELECT 1 FROM debit)
+         RETURNING balance
+       ), ins AS (
+         INSERT INTO chip_in_contributions (id, pot_id, user_id, amount, created_at)
+         SELECT $5, $1, $3, $2, $4 WHERE EXISTS (SELECT 1 FROM debit)
+         RETURNING id
+       )
+       SELECT gyd_balance FROM debit`,
+      [pot.id, amount, user.id, at, crypto.randomUUID()]
+    );
+    if (rows.length === 0) {
+      return badRequest(res, 'That didn’t go through — the pot may have just closed, or your balance changed. Please check and try again.');
+    }
+    await logTx({ type: 'chip_in', fromUser: user.id, amount, currency: 'GYD', note: `Chip In: ${pot.name}` });
+    sendJson(res, 200, {
+      user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance }),
+      pot: await loadChipInPot(pot.id, user.id),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/chip-in/pots/:id/collect',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const pot = await loadChipInPot(params.id, user.id);
+    if (!pot) return sendJson(res, 404, { error: 'That pot was not found.' });
+    if (!pot.isOrganizer) return sendJson(res, 403, { error: 'Only the person who started this pot can collect it.' });
+    if (pot.status !== 'active') return badRequest(res, 'This pot is already closed.');
+    if (pot.balance < pot.goal && !pot.deadlinePassed) {
+      return badRequest(res, "This pot is locked until it reaches its goal or its deadline passes.");
+    }
+    const at = now();
+    // The lock and the goal-or-deadline rule are re-checked inside the
+    // statement itself; the checks above are only for a clear message.
+    const rows = await db.raw(
+      `WITH p AS (
+         SELECT id, balance FROM chip_in_pots
+         WHERE id = $1 AND organizer_id = $2 AND status = 'active'
+           AND (balance >= goal OR $3::timestamptz >= ${CHIP_IN_CLOSES_AT})
+         FOR UPDATE
+       ), upd AS (
+         UPDATE chip_in_pots SET status = 'collected', balance = 0, closed_at = $3
+         WHERE id = $1 AND EXISTS (SELECT 1 FROM p)
+         RETURNING id
+       ), credit AS (
+         UPDATE users SET gyd_balance = gyd_balance + (SELECT balance FROM p)
+         WHERE id = $2 AND EXISTS (SELECT 1 FROM upd)
+         RETURNING gyd_balance
+       )
+       SELECT (SELECT balance FROM p) AS collected, (SELECT gyd_balance FROM credit) AS gyd_balance FROM upd`,
+      [pot.id, user.id, at]
+    );
+    if (rows.length === 0) return badRequest(res, 'This pot could not be collected — it may have just been closed.');
+    const collected = Number(rows[0].collected);
+    if (collected > 0) {
+      await logTx({ type: 'chip_in_collect', toUser: user.id, amount: collected, currency: 'GYD', note: `Collected Chip In pot: ${pot.name}` });
+    }
+    sendJson(res, 200, {
+      collected,
+      user: publicUser({ ...user, gyd_balance: rows[0].gyd_balance }),
+      pot: await loadChipInPot(pot.id, user.id),
+    });
+  })
+);
+
+on(
+  'POST',
+  '/api/chip-in/pots/:id/refund',
+  requireAuth(async (req, res, params, query, body, user) => {
+    if (!UUID_RE.test(String(params.id))) return sendJson(res, 404, { error: 'That pot was not found.' });
+    const [{ result }] = await db.raw('SELECT public.chip_in_refund($1, $2, $3) AS result', [params.id, user.id, now()]);
+    if (result.error === 'not_found') return sendJson(res, 404, { error: 'That pot was not found.' });
+    if (result.error === 'forbidden') return sendJson(res, 403, { error: 'Only the person who started this pot can refund it.' });
+    if (result.error === 'closed') return badRequest(res, 'This pot is already closed.');
+    if (result.error) return badRequest(res, 'This pot could not be refunded. Contact Help & Support.');
+    const updated = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    sendJson(res, 200, {
+      refundedTotal: Number(result.refunded_total),
+      people: Number(result.people),
+      user: publicUser(updated),
+      pot: await loadChipInPot(params.id, user.id),
+    });
   })
 );
 
@@ -970,8 +1262,8 @@ on(
 // See webauthn.js for how the check itself works. Turning it on happens from
 // Help & Support → Account security while logged in, and asks for the
 // password first: otherwise someone holding a stolen session could add their
-// own Face ID and keep getting back in after "Log out of all devices". A
-// password reset removes every passkey for the same reason.
+// own Face ID and keep getting back in. "Log out of all devices" and a
+// password reset both remove every passkey, for the same reason.
 //
 // Each sign-in or set-up gets a random challenge, carried in a short-lived
 // signed token so the server keeps no state between the two requests; the
@@ -1256,6 +1548,197 @@ on(
   })
 );
 
+// ---------- profile picture + app wallpaper ----------
+//
+// The profile picture is PUBLIC on purpose (everyone a person pays, chats
+// with, chips in with or buys from sees it next to their name): it goes in
+// the public 'profile-pictures' bucket under a random file name. The
+// wallpaper is PRIVATE: it goes in the 'wallpapers' bucket, which the public
+// key cannot read at all, and only its owner can fetch it back through
+// GET /api/profile/wallpaper/image below. The browser resizes both before
+// uploading, but nothing here trusts that — type, size and the file's own
+// first bytes are checked.
+
+const MAX_PROFILE_IMAGE_CHARS = 2_200_000; // base64 text; ~1.6 MB of image, under the 3MB body cap
+
+function imageBytesLookRight(buf, mime) {
+  if (mime === 'image/png') return buf.length > 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mime === 'image/jpeg') return buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  if (mime === 'image/webp') return buf.length > 12 && buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
+  return false;
+}
+
+function validateProfileImage(raw, what) {
+  if (typeof raw !== 'string' || !raw.startsWith('data:image/')) {
+    return { ok: false, error: `Choose a picture for your ${what}.` };
+  }
+  if (raw.length > MAX_PROFILE_IMAGE_CHARS) {
+    return { ok: false, error: 'That picture is too large — try a smaller one.' };
+  }
+  const match = /^data:image\/(jpeg|jpg|png|webp);base64,([a-zA-Z0-9+/=]+)$/.exec(raw);
+  if (!match) return { ok: false, error: `Your ${what} must be a JPEG, PNG, or WEBP picture.` };
+  const mime = match[1] === 'jpg' ? 'image/jpeg' : `image/${match[1]}`;
+  const bytes = Buffer.from(match[2], 'base64');
+  if (!imageBytesLookRight(bytes, mime)) return { ok: false, error: `That file isn't a real ${mime.slice(6).toUpperCase()} picture.` };
+  return { ok: true, mime, ext: mime === 'image/jpeg' ? 'jpg' : mime.slice(6), bytes };
+}
+
+async function removeStoredFile(bucket, path) {
+  if (!path) return;
+  try {
+    await db.storageDelete(bucket, path);
+  } catch (err) {
+    // The row already points elsewhere; a leftover file is only logged.
+    console.error(`Cleanup of ${bucket}/${path} failed:`, err.message);
+  }
+}
+
+async function freshUser(id) {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+}
+
+on(
+  'POST',
+  '/api/profile/avatar',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const v = validateProfileImage(body.imageData, 'profile picture');
+    if (!v.ok) return badRequest(res, v.error);
+    const path = `${user.id}/${crypto.randomUUID()}.${v.ext}`;
+    let url;
+    try {
+      url = await db.storageUpload('profile-pictures', path, v.bytes, v.mime);
+    } catch (err) {
+      console.error('Profile picture upload failed:', err.message);
+      return sendJson(res, 502, { error: 'Could not upload that picture right now — please try again.' });
+    }
+    const [row] = await db.raw(
+      'WITH old AS (SELECT avatar_path FROM users WHERE id = $3) UPDATE users SET avatar_url = $1, avatar_path = $2 WHERE id = $3 RETURNING (SELECT avatar_path FROM old) AS old_path',
+      [url, path, user.id]
+    );
+    await removeStoredFile('profile-pictures', row && row.old_path);
+    sendJson(res, 200, { user: publicUser(await freshUser(user.id)) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/profile/avatar',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const [row] = await db.raw(
+      'WITH old AS (SELECT avatar_path FROM users WHERE id = $1) UPDATE users SET avatar_url = NULL, avatar_path = NULL WHERE id = $1 RETURNING (SELECT avatar_path FROM old) AS old_path',
+      [user.id]
+    );
+    await removeStoredFile('profile-pictures', row && row.old_path);
+    sendJson(res, 200, { user: publicUser(await freshUser(user.id)) });
+  })
+);
+
+function parseWallpaperLevel(value, min, max, name) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min || n > max) return { error: `${name} must be a whole number from ${min} to ${max}.` };
+  return { n };
+}
+
+// Upload the person's own photo as their wallpaper (replaces a preset or an
+// earlier photo). Dim/blur are left as they were.
+on(
+  'POST',
+  '/api/profile/wallpaper/photo',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const v = validateProfileImage(body.imageData, 'wallpaper');
+    if (!v.ok) return badRequest(res, v.error);
+    const path = `${user.id}/${crypto.randomUUID()}.${v.ext}`;
+    try {
+      await db.storageUpload('wallpapers', path, v.bytes, v.mime);
+    } catch (err) {
+      console.error('Wallpaper upload failed:', err.message);
+      return sendJson(res, 502, { error: 'Could not upload that picture right now — please try again.' });
+    }
+    const [row] = await db.raw(
+      'WITH old AS (SELECT wallpaper_path FROM users WHERE id = $3) UPDATE users SET wallpaper_path = $1, wallpaper_preset = NULL, wallpaper_updated_at = $2 WHERE id = $3 RETURNING (SELECT wallpaper_path FROM old) AS old_path',
+      [path, now(), user.id]
+    );
+    await removeStoredFile('wallpapers', row && row.old_path);
+    sendJson(res, 200, { user: publicUser(await freshUser(user.id)) });
+  })
+);
+
+// Pick a built-in wallpaper and/or change dim and blur. Any field may be
+// left out; `preset: null` with no photo turns the wallpaper off.
+on(
+  'POST',
+  '/api/profile/wallpaper/settings',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const sets = [];
+    const vals = [];
+    let removedPhoto = null;
+    if (body.dim !== undefined) {
+      const r = parseWallpaperLevel(body.dim, 0, 70, 'Dim');
+      if (r.error) return badRequest(res, r.error);
+      vals.push(r.n);
+      sets.push(`wallpaper_dim = $${vals.length}`);
+    }
+    if (body.blur !== undefined) {
+      const r = parseWallpaperLevel(body.blur, 0, 14, 'Blur');
+      if (r.error) return badRequest(res, r.error);
+      vals.push(r.n);
+      sets.push(`wallpaper_blur = $${vals.length}`);
+    }
+    if (body.preset !== undefined) {
+      if (body.preset !== null && !WALLPAPER_PRESETS.includes(body.preset)) return badRequest(res, 'Unknown wallpaper.');
+      // Choosing a preset replaces a photo (and turning it off removes one).
+      removedPhoto = user.wallpaper_path || null;
+      vals.push(body.preset);
+      sets.push(`wallpaper_preset = $${vals.length}`);
+      sets.push('wallpaper_path = NULL');
+    }
+    if (!sets.length) return badRequest(res, 'Nothing to change.');
+    vals.push(user.id);
+    await db.raw(`UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING id`, vals);
+    await removeStoredFile('wallpapers', removedPhoto);
+    sendJson(res, 200, { user: publicUser(await freshUser(user.id)) });
+  })
+);
+
+on(
+  'DELETE',
+  '/api/profile/wallpaper',
+  requireAuth(async (req, res, params, query, body, user) => {
+    const [row] = await db.raw(
+      'WITH old AS (SELECT wallpaper_path FROM users WHERE id = $1) UPDATE users SET wallpaper_path = NULL, wallpaper_preset = NULL WHERE id = $1 RETURNING (SELECT wallpaper_path FROM old) AS old_path',
+      [user.id]
+    );
+    await removeStoredFile('wallpapers', row && row.old_path);
+    sendJson(res, 200, { user: publicUser(await freshUser(user.id)) });
+  })
+);
+
+// The owner's own wallpaper photo, streamed back through the secret key (the
+// bucket itself is private). Never cached by shared caches.
+on(
+  'GET',
+  '/api/profile/wallpaper/image',
+  requireAuth(async (req, res, params, query, body, user) => {
+    if (!user.wallpaper_path) return sendJson(res, 404, { error: 'No wallpaper photo.' });
+    let file;
+    try {
+      file = await db.storageDownload('wallpapers', user.wallpaper_path);
+    } catch (err) {
+      console.error('Wallpaper download failed:', err.message);
+      return sendJson(res, 502, { error: 'Could not load your wallpaper right now.' });
+    }
+    if (!file) return sendJson(res, 404, { error: 'No wallpaper photo.' });
+    const type = ['image/jpeg', 'image/png', 'image/webp'].includes(file.contentType) ? file.contentType : 'application/octet-stream';
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Content-Length': file.body.length,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(file.body);
+  })
+);
+
 on(
   'GET',
   '/api/users',
@@ -1264,15 +1747,15 @@ on(
     let rows;
     if (q) {
       rows = await db
-        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE (username LIKE ? OR paytag LIKE ?) AND id != ? AND deleted_at IS NULL LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name, avatar_url FROM users WHERE (username LIKE ? OR paytag LIKE ?) AND id != ? AND deleted_at IS NULL LIMIT 20')
         .all(`%${q}%`, `%${q}%`, user.id);
     } else {
       rows = await db
-        .prepare('SELECT id, username, paytag, is_business, business_name FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 20')
+        .prepare('SELECT id, username, paytag, is_business, business_name, avatar_url FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 20')
         .all(user.id);
     }
     sendJson(res, 200, {
-      users: rows.map((r) => ({ id: r.id, username: r.username, paytag: r.paytag, isBusiness: !!r.is_business, businessName: r.business_name })),
+      users: rows.map((r) => ({ id: r.id, username: r.username, paytag: r.paytag, isBusiness: !!r.is_business, businessName: r.business_name, avatarUrl: r.avatar_url || null })),
     });
   })
 );
@@ -1286,7 +1769,7 @@ on(
     const { user: other, ambiguous } = await resolveHandle(params.username);
     if (ambiguous) return sendJson(res, 409, { error: AMBIGUOUS_HANDLE_MSG });
     if (!other) return sendJson(res, 404, { error: 'No user with that username or $paytag.' });
-    sendJson(res, 200, { id: other.id, username: other.username, paytag: other.paytag, isBusiness: !!other.is_business, businessName: other.business_name });
+    sendJson(res, 200, { id: other.id, username: other.username, paytag: other.paytag, isBusiness: !!other.is_business, businessName: other.business_name, avatarUrl: other.avatar_url || null });
   })
 );
 
@@ -1363,9 +1846,17 @@ on(
   'GET',
   '/api/wallet/transactions',
   requireAuth(async (req, res, params, query, body, user) => {
+    // Each row also names the OTHER person (and their profile picture) so
+    // the activity list can show who a payment was with.
     const rows = await db
-      .prepare('SELECT * FROM transactions WHERE from_user = ? OR to_user = ? ORDER BY created_at DESC LIMIT 100')
-      .all(user.id, user.id);
+      .prepare(
+        `SELECT t.*, o.username AS other_username, o.avatar_url AS other_avatar_url
+         FROM transactions t
+         LEFT JOIN users o ON o.id = CASE WHEN t.from_user = ? THEN t.to_user ELSE t.from_user END AND o.deleted_at IS NULL
+         WHERE t.from_user = ? OR t.to_user = ?
+         ORDER BY t.created_at DESC LIMIT 100`
+      )
+      .all(user.id, user.id, user.id);
     sendJson(res, 200, { transactions: rows });
   })
 );
@@ -1692,6 +2183,7 @@ function moneyRequestPublicIncoming(r) {
     id: r.id,
     fromUsername: r.from_username,
     fromPaytag: r.from_paytag,
+    fromAvatarUrl: r.from_avatar_url || null,
     amount: r.amount,
     note: r.note,
     status: r.status,
@@ -1705,6 +2197,7 @@ function moneyRequestPublicOutgoing(r) {
     id: r.id,
     toUsername: r.to_username,
     toPaytag: r.to_paytag,
+    toAvatarUrl: r.to_avatar_url || null,
     amount: r.amount,
     note: r.note,
     status: r.status,
@@ -1742,14 +2235,14 @@ on(
   requireAuth(async (req, res, params, query, body, user) => {
     const incoming = await db
       .prepare(
-        `SELECT r.*, u.username AS from_username, u.paytag AS from_paytag
+        `SELECT r.*, u.username AS from_username, u.paytag AS from_paytag, u.avatar_url AS from_avatar_url
          FROM money_requests r JOIN users u ON u.id = r.from_user
          WHERE r.to_user = ? ORDER BY r.created_at DESC LIMIT 50`
       )
       .all(user.id);
     const outgoing = await db
       .prepare(
-        `SELECT r.*, u.username AS to_username, u.paytag AS to_paytag
+        `SELECT r.*, u.username AS to_username, u.paytag AS to_paytag, u.avatar_url AS to_avatar_url
          FROM money_requests r JOIN users u ON u.id = r.to_user
          WHERE r.from_user = ? ORDER BY r.created_at DESC LIMIT 50`
       )
@@ -2303,6 +2796,7 @@ function businessProfilePublic(row) {
     // cheap to include everywhere via a correlated subquery so directory
     // cards get a cover image without a second round trip per business.
     coverPhotoUrl: row.cover_photo_url || null,
+    ownerAvatarUrl: row.owner_avatar_url || null,
     updatedAt: row.updated_at,
     // Always 'approved' now — the staff review gate this used to reflect
     // was removed, but the field stays for compatibility with anything
@@ -2322,7 +2816,7 @@ on(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
            (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
-           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
+           u.avatar_url AS owner_avatar_url, (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(user.id);
@@ -2392,7 +2886,7 @@ on(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
            (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
-           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
+           u.avatar_url AS owner_avatar_url, (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(user.id);
@@ -2410,7 +2904,7 @@ on(
     let sql = `SELECT u.*, bp.*,
       (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
       (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
-      (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
+      u.avatar_url AS owner_avatar_url, (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
       FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.review_status = 'approved'`;
     const args = [];
     if (category) {
@@ -2453,7 +2947,7 @@ on(
         `SELECT u.*, bp.*,
            (SELECT AVG(rating) FROM business_reviews br WHERE br.business_id = u.id) AS avg_rating,
            (SELECT COUNT(*) FROM business_reviews br WHERE br.business_id = u.id) AS review_count,
-           (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
+           u.avatar_url AS owner_avatar_url, (SELECT url FROM business_photos bph WHERE bph.business_id = u.id ORDER BY bph.created_at ASC LIMIT 1) AS cover_photo_url
          FROM business_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.user_id = ?`
       )
       .get(bizUser.id);
@@ -4423,10 +4917,11 @@ on(
     }
     const threads = [];
     for (const [otherId, lastMsg] of seen.entries()) {
-      const other = await db.prepare('SELECT username, business_name, is_business FROM users WHERE id = ?').get(otherId);
+      const other = await db.prepare('SELECT username, business_name, is_business, avatar_url FROM users WHERE id = ?').get(otherId);
       threads.push({
         username: other ? other.username : '(deleted user)',
         isBusiness: other ? !!other.is_business : false,
+        avatarUrl: other ? other.avatar_url || null : null,
         lastMessage: lastMsg.body,
         lastAt: lastMsg.created_at,
         fromMe: lastMsg.from_user === user.id,
@@ -4454,6 +4949,7 @@ on(
     await db.prepare('UPDATE messages SET is_read = 1 WHERE from_user = ? AND to_user = ?').run(other.id, user.id);
 
     sendJson(res, 200, {
+      other: { username: other.username, avatarUrl: other.avatar_url || null },
       messages: rows.map((m) => ({ body: m.body, fromMe: m.from_user === user.id, createdAt: m.created_at })),
     });
   })
@@ -4512,7 +5008,7 @@ const CSP =
   "script-src 'self'; " +
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
   "font-src https://fonts.gstatic.com; " +
-  `img-src 'self' data: https://api.qrserver.com${SUPABASE_ORIGIN ? ` ${SUPABASE_ORIGIN}` : ''}; ` +
+  `img-src 'self' data: blob: https://api.qrserver.com${SUPABASE_ORIGIN ? ` ${SUPABASE_ORIGIN}` : ''}; ` +
   "connect-src 'self'; " +
   // No plugins/embeds and no nested frames: an injected <object>, <embed>,
   // or <iframe> can't load anything, closing those off as HTML-injection

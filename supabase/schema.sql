@@ -1018,6 +1018,96 @@ $$;
 REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC;
 
 -- ---------------------------------------------------------------------
+-- Chip In: group money pots (the /api/chip-in routes in server.js).
+-- Someone starts a pot with a goal and a deadline; other users chip in from
+-- their GYD balance. Each pot keeps its OWN balance (chip_in_pots.balance):
+-- money in a pot is nobody's wallet money until it leaves the pot. It
+-- leaves in exactly one of two ways, both as one transaction:
+--   * collected by the organizer — only once the goal is reached or the
+--     deadline has passed (server.js, POST .../collect);
+--   * refunded to everyone who chipped in — the organizer can cancel any
+--     time (chip_in_refund below).
+-- The deadline is the last day to chip in, in Guyana time: the pot stops
+-- taking money at midnight at the end of that day.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS chip_in_pots (
+  id TEXT PRIMARY KEY,
+  organizer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  goal NUMERIC(14,2) NOT NULL CHECK (goal > 0),
+  balance NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  deadline TEXT NOT NULL,                -- 'YYYY-MM-DD', last day to chip in
+  status TEXT NOT NULL DEFAULT 'active', -- 'active' | 'collected' | 'refunded'
+  created_at TEXT NOT NULL,
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS chip_in_pots_organizer_idx ON chip_in_pots (organizer_id);
+
+CREATE TABLE IF NOT EXISTS chip_in_contributions (
+  id TEXT PRIMARY KEY,
+  pot_id TEXT NOT NULL REFERENCES chip_in_pots(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  created_at TEXT NOT NULL,
+  refunded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS chip_in_contributions_pot_idx ON chip_in_contributions (pot_id);
+CREATE INDEX IF NOT EXISTS chip_in_contributions_user_idx ON chip_in_contributions (user_id);
+
+-- chip_in_refund: cancel a pot and give every person back exactly what they
+-- put in. A function rather than one statement, like
+-- cancel_event_with_refunds above: the pot row is locked FIRST, and only
+-- then are the contributions read — so a chip-in that committed while we
+-- waited for the lock is included, and one that arrives after waits, then
+-- sees the pot is closed and fails. (Inside a single statement, that late
+-- contribution could be missed and its money lost.)
+-- Returns {ok, refunded_total, people} or {error: 'not_found' | 'forbidden'
+-- | 'closed' | 'balance_mismatch'}.
+CREATE OR REPLACE FUNCTION public.chip_in_refund(p_pot_id text, p_organizer_id text, p_now text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  pot chip_in_pots%ROWTYPE;
+  total numeric;
+  people int;
+BEGIN
+  SELECT * INTO pot FROM chip_in_pots WHERE id = p_pot_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'not_found'); END IF;
+  IF pot.organizer_id <> p_organizer_id THEN RETURN jsonb_build_object('error', 'forbidden'); END IF;
+  IF pot.status <> 'active' THEN RETURN jsonb_build_object('error', 'closed'); END IF;
+
+  SELECT COALESCE(sum(amount), 0), count(DISTINCT user_id) INTO total, people
+  FROM chip_in_contributions WHERE pot_id = p_pot_id AND refunded_at IS NULL;
+  -- The pot's balance is always the sum of what's in it; if those ever
+  -- disagreed, refuse rather than pay out the wrong amounts.
+  IF total <> pot.balance THEN RETURN jsonb_build_object('error', 'balance_mismatch'); END IF;
+
+  WITH per_user AS (
+    SELECT user_id, sum(amount) AS refund
+    FROM chip_in_contributions WHERE pot_id = p_pot_id AND refunded_at IS NULL
+    GROUP BY user_id
+  ), credited AS (
+    UPDATE users u SET gyd_balance = u.gyd_balance + pu.refund
+    FROM per_user pu WHERE u.id = pu.user_id
+    RETURNING u.id
+  )
+  INSERT INTO transactions (id, type, from_user, to_user, amount, currency, status, note, created_at)
+  SELECT gen_random_uuid()::text, 'chip_in_refund', NULL, pu.user_id, pu.refund, 'GYD', 'completed',
+         'Refund — Chip In pot "' || pot.name || '" was cancelled', p_now
+  FROM per_user pu;
+
+  UPDATE chip_in_contributions SET refunded_at = p_now WHERE pot_id = p_pot_id AND refunded_at IS NULL;
+  UPDATE chip_in_pots SET status = 'refunded', balance = 0, closed_at = p_now WHERE id = p_pot_id;
+
+  RETURN jsonb_build_object('ok', true, 'refunded_total', total, 'people', people);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.chip_in_refund(text, text, text) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------
 -- close_user_account: "Delete my account" (POST /api/account/delete).
 -- A wallet can't simply DELETE the users row: other people's transaction
 -- history, tickets and orders point at it, and payment records have to be
@@ -1025,7 +1115,9 @@ REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC
 --   * refuses while any money is still in motion — a non-zero balance in
 --     any of the three wallets, a pending cash-out, a GYD Direct send not
 --     yet claimed, an open pickup order (either side), an unfinished shop
---     order or claimed delivery, or an active event with tickets sold;
+--     order or claimed delivery, an active event with tickets sold, a
+--     Chip In pot they run that's still open, or money they chipped in to
+--     someone's open pot;
 --   * closes the loose ends that hold no money: pending money/charge
 --     requests, waiting Ludo tables, active events with no tickets;
 --   * erases personal details — email, $paytag, business page, products,
@@ -1037,7 +1129,7 @@ REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM PUBLIC
 -- users.deleted_at then blocks sign-in, every existing session, and every
 -- lookup by name, and the CHECK constraint below refuses any credit that
 -- races in after this commits (that payment fails instead of vanishing).
--- Returns {ok: true, photo_paths: [...]} (storage files for the server to
+-- Returns {ok: true, photo_paths: [...], avatar_path, wallpaper_path} (storage files for the server to
 -- remove) or {error: '<reason>'}.
 -- ---------------------------------------------------------------------
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;
@@ -1045,6 +1137,75 @@ DO $$ BEGIN
   ALTER TABLE users ADD CONSTRAINT users_deleted_accounts_hold_no_money
     CHECK (deleted_at IS NULL OR (gyd_balance = 0 AND business_gyd_balance = 0 AND courier_gyd_balance = 0));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------
+-- Profile picture + app wallpaper.
+--   * avatar_url / avatar_path: the profile picture. It sits in the PUBLIC
+--     'profile-pictures' bucket (random file names) because everyone a person
+--     deals with sees it next to their name.
+--   * wallpaper_*: the person's own background for the whole app. Either a
+--     built-in preset (wallpaper_preset) or their own photo in the PRIVATE
+--     'wallpapers' bucket (wallpaper_path) — never public: the app serves it
+--     back only to its owner (GET /api/profile/wallpaper/image).
+--     wallpaper_dim (0-70 %) and wallpaper_blur (0-14 px) keep text readable.
+-- ---------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_preset TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_path TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_dim INTEGER NOT NULL DEFAULT 28;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_blur INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_updated_at TEXT;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_wallpaper_dim_range CHECK (wallpaper_dim BETWEEN 0 AND 70);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_wallpaper_blur_range CHECK (wallpaper_blur BETWEEN 0 AND 14);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_wallpaper_one_source CHECK (wallpaper_preset IS NULL OR wallpaper_path IS NULL);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('profile-pictures', 'profile-pictures', true)
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('wallpapers', 'wallpapers', false)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "gyd_wallet_profile_pictures_read" ON storage.objects;
+CREATE POLICY "gyd_wallet_profile_pictures_read"
+  ON storage.objects FOR SELECT
+  TO anon
+  USING (bucket_id = 'profile-pictures');
+DROP POLICY IF EXISTS "gyd_wallet_profile_pictures_write" ON storage.objects;
+CREATE POLICY "gyd_wallet_profile_pictures_write"
+  ON storage.objects FOR INSERT
+  TO service_role
+  WITH CHECK (bucket_id = 'profile-pictures');
+DROP POLICY IF EXISTS "gyd_wallet_profile_pictures_delete" ON storage.objects;
+CREATE POLICY "gyd_wallet_profile_pictures_delete"
+  ON storage.objects FOR DELETE
+  TO service_role
+  USING (bucket_id = 'profile-pictures');
+
+-- The wallpapers bucket has NO anon policy at all: the public key can read
+-- nothing from it. Only the server (secret key) reads, writes and deletes.
+DROP POLICY IF EXISTS "gyd_wallet_wallpapers_read" ON storage.objects;
+CREATE POLICY "gyd_wallet_wallpapers_read"
+  ON storage.objects FOR SELECT
+  TO service_role
+  USING (bucket_id = 'wallpapers');
+DROP POLICY IF EXISTS "gyd_wallet_wallpapers_write" ON storage.objects;
+CREATE POLICY "gyd_wallet_wallpapers_write"
+  ON storage.objects FOR INSERT
+  TO service_role
+  WITH CHECK (bucket_id = 'wallpapers');
+DROP POLICY IF EXISTS "gyd_wallet_wallpapers_delete" ON storage.objects;
+CREATE POLICY "gyd_wallet_wallpapers_delete"
+  ON storage.objects FOR DELETE
+  TO service_role
+  USING (bucket_id = 'wallpapers');
 
 CREATE OR REPLACE FUNCTION public.close_user_account(p_user_id text, p_now text)
 RETURNS jsonb
@@ -1079,6 +1240,16 @@ BEGIN
              AND EXISTS (SELECT 1 FROM event_tickets t WHERE t.event_id = e.id AND t.status = 'valid')) THEN
     RETURN jsonb_build_object('error', 'event_tickets_sold');
   END IF;
+  -- Chip In: a pot this person runs still holds other people's money, or
+  -- money they chipped in is still sitting in someone's open pot (a refund
+  -- could no longer reach a deleted account).
+  IF EXISTS (SELECT 1 FROM chip_in_pots WHERE organizer_id = p_user_id AND status = 'active') THEN
+    RETURN jsonb_build_object('error', 'chip_in_pot_open');
+  END IF;
+  IF EXISTS (SELECT 1 FROM chip_in_contributions c JOIN chip_in_pots p ON p.id = c.pot_id
+             WHERE c.user_id = p_user_id AND c.refunded_at IS NULL AND p.status = 'active') THEN
+    RETURN jsonb_build_object('error', 'chip_in_contribution_open');
+  END IF;
 
   -- Loose ends that hold no money.
   UPDATE business_events SET status = 'cancelled' WHERE business_id = p_user_id AND status = 'active';
@@ -1112,10 +1283,13 @@ BEGIN
     paytag = NULL, cashtag = NULL, email = NULL, email_verified = false,
     password_hash = 'deleted', password_salt = 'deleted',
     is_business = 0, business_name = NULL, is_courier = false,
+    avatar_url = NULL, avatar_path = NULL, wallpaper_preset = NULL, wallpaper_path = NULL,
     sessions_invalidated_at = p_now, deleted_at = p_now
   WHERE id = p_user_id;
 
-  RETURN jsonb_build_object('ok', true, 'photo_paths', paths);
+  -- Profile picture and wallpaper files, for the server to remove.
+  RETURN jsonb_build_object('ok', true, 'photo_paths', paths,
+                            'avatar_path', u.avatar_path, 'wallpaper_path', u.wallpaper_path);
 END;
 $$;
 REVOKE ALL ON FUNCTION public.close_user_account(text, text) FROM PUBLIC;
@@ -1259,3 +1433,4 @@ REVOKE ALL ON FUNCTION public.purchase_event_tickets(text, text, int, jsonb, num
 REVOKE ALL ON FUNCTION public.cancel_event_with_refunds(text, text, text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.revoke_courier(text, text, text, text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.close_user_account(text, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.chip_in_refund(text, text, text) FROM anon, authenticated;
