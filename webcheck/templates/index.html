@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebCheck — Professional Security Scanner</title>
+<style>
+:root {
+  --bg:#0a0f1e; --card:#111827; --border:#1e293b;
+  --accent:#6366f1; --accent2:#22d3ee;
+  --red:#ef4444; --orange:#f97316;
+  --text:#e2e8f0; --muted:#64748b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:2rem 1rem 4rem}
+
+.logo{font-size:2rem;font-weight:800;letter-spacing:-1px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  margin-bottom:.3rem;text-align:center}
+.tagline{color:var(--muted);font-size:.95rem;margin-bottom:2rem;text-align:center}
+
+/* Tabs */
+.tabs{display:flex;width:100%;max-width:600px;background:var(--card);
+  border:1px solid var(--border);border-radius:12px 12px 0 0;overflow:hidden;margin-bottom:-1px}
+.tab{flex:1;padding:.7rem .5rem;text-align:center;cursor:pointer;
+  font-size:.8rem;font-weight:700;color:var(--muted);
+  border-bottom:2px solid transparent;background:none;
+  border-top:none;border-left:none;border-right:none;transition:all .2s;letter-spacing:.02em}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+
+/* Card */
+.card{background:var(--card);border:1px solid var(--border);
+  border-radius:0 0 16px 16px;padding:1.8rem;width:100%;max-width:600px}
+
+/* Form fields */
+label{display:block;font-size:.78rem;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.08em;margin-bottom:.4rem}
+input[type=text],input[type=email],select,textarea{
+  width:100%;background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-size:.92rem;
+  padding:.65rem .9rem;margin-bottom:1rem;outline:none;transition:border-color .2s;
+  font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--card)}
+textarea{resize:vertical;min-height:60px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+
+/* Auth gate */
+.auth-gate{background:#1a0a0a;border:1px solid #7f1d1d;border-radius:10px;
+  padding:.9rem 1.1rem;margin-bottom:1rem}
+.auth-gate .warn{font-size:.75rem;font-weight:800;color:var(--red);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem}
+.check-row{display:flex;align-items:flex-start;gap:.55rem;font-size:.85rem;
+  color:#fca5a5;line-height:1.5;cursor:pointer}
+.check-row input{margin-top:3px;accent-color:var(--red);flex-shrink:0}
+
+/* Deep auth gate (signed form) */
+.deep-gate{background:#0d1a0d;border:1px solid #166534;border-radius:10px;
+  padding:.9rem 1.1rem;margin-bottom:1rem}
+.deep-gate .warn{font-size:.75rem;font-weight:800;color:#4ade80;
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:.8rem}
+
+/* Buttons */
+.btn{width:100%;padding:.8rem;border:none;border-radius:8px;
+  color:#fff;font-size:.95rem;font-weight:700;cursor:pointer;transition:opacity .2s}
+.btn:hover{opacity:.88}.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-passive{background:linear-gradient(135deg,var(--accent),#818cf8)}
+.btn-active {background:linear-gradient(135deg,#dc2626,#b91c1c)}
+.btn-deep   {background:linear-gradient(135deg,#d97706,#b45309)}
+.btn-sign   {background:linear-gradient(135deg,#166534,#15803d);margin-bottom:.8rem}
+
+/* Panel */
+.panel{display:none}.panel.active{display:block}
+
+/* Step indicators for deep scan */
+.steps{display:flex;gap:.4rem;margin-bottom:1.2rem;align-items:center}
+.step{flex:1;text-align:center;font-size:.72rem;font-weight:700;
+  padding:.4rem .2rem;border-radius:6px;background:var(--bg);
+  border:1px solid var(--border);color:var(--muted);transition:all .2s}
+.step.done{background:#166534;border-color:#4ade80;color:#fff}
+.step.active-step{background:#1e3a5f;border-color:var(--accent2);color:var(--accent2)}
+.step-arrow{color:var(--muted);font-size:.8rem;flex-shrink:0}
+
+/* Auth confirmed badge */
+.auth-confirmed{background:#0d1a0d;border:1px solid #4ade80;border-radius:8px;
+  padding:.7rem 1rem;margin-bottom:1rem;font-size:.85rem;color:#86efac;display:none}
+.auth-confirmed.show{display:block}
+
+/* Features list */
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;
+  margin-top:1.3rem;font-size:.82rem;color:var(--muted)}
+.ci::before{content:"✓ ";color:var(--accent2)}
+.ci.r::before{content:"⚡ ";color:var(--red)}
+.ci.o::before{content:"🔍 ";color:var(--orange)}
+
+/* Status */
+.status-box{display:none;margin-top:1rem;padding:.9rem;border-radius:10px;
+  border:1px solid var(--border);background:var(--bg);text-align:center;color:var(--muted)}
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid var(--border);
+  border-top-color:var(--accent2);border-radius:50%;
+  animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+footer{margin-top:1.8rem;color:var(--muted);font-size:.76rem;text-align:center;max-width:600px}
+</style>
+</head>
+<body>
+
+<div class="logo">🔍 WebCheck</div>
+<p class="tagline">Professional website security scanning &amp; penetration testing</p>
+
+<!-- Tab bar -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('passive',this)">🔍 Passive Scan</button>
+  <button class="tab"        onclick="switchTab('active',this)" >⚡ Pentest</button>
+  <button class="tab"        onclick="switchTab('deep',this)"   >🛡 Deep Scan</button>
+</div>
+
+<div class="card">
+
+  <!-- ══ PASSIVE ══ -->
+  <div id="panel-passive" class="panel active">
+    <form id="form-passive">
+      <label>Website to scan</label>
+      <input type="text" name="url" placeholder="example.com" required>
+      <label>Platform / CMS (optional)</label>
+      <select name="platform">
+        <option value="">— Auto-detect —</option>
+        <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+        <option>Django (Python)</option><option>Node.js / Express</option>
+        <option>ASP.NET</option><option>Joomla</option><option>Drupal</option>
+        <option>Custom / Unknown</option>
+      </select>
+      <button class="btn btn-passive" type="submit">Start Passive Scan</button>
+    </form>
+    <div class="status-box" id="sb-passive"><span class="spinner"></span><span id="sm-passive"></span></div>
+    <div class="checks">
+      <span class="ci">HTTPS &amp; TLS</span><span class="ci">Security headers</span>
+      <span class="ci">Cookie flags</span><span class="ci">CORS policy</span>
+      <span class="ci">Exposed files</span><span class="ci">Admin panel leaks</span>
+      <span class="ci">Outdated JS libs</span><span class="ci">Mixed content</span>
+    </div>
+    <p style="margin-top:.9rem;font-size:.78rem;color:var(--muted)">✅ No permission needed — reads only publicly visible data.</p>
+  </div>
+
+  <!-- ══ ACTIVE PENTEST ══ -->
+  <div id="panel-active" class="panel">
+    <form id="form-active">
+      <label>Website to pentest</label>
+      <input type="text" name="url" placeholder="https://client-site.com" required>
+      <label>Platform / CMS (optional)</label>
+      <select name="platform">
+        <option value="">— Auto-detect —</option>
+        <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+        <option>Django (Python)</option><option>Node.js / Express</option>
+        <option>ASP.NET</option><option>Joomla</option><option>Custom / Unknown</option>
+      </select>
+      <div class="auth-gate">
+        <div class="warn">⚠ Authorization Required</div>
+        <label class="check-row">
+          <input type="checkbox" name="authorized" value="yes" required>
+          I confirm I own this domain OR have written permission from the owner to perform security testing.
+        </label>
+      </div>
+      <button class="btn btn-active" type="submit">Run Penetration Test</button>
+    </form>
+    <div class="status-box" id="sb-active"><span class="spinner"></span><span id="sm-active"></span></div>
+    <div class="checks">
+      <span class="ci r">SQL injection</span><span class="ci r">XSS probes</span>
+      <span class="ci r">Auth bypass</span><span class="ci r">Open redirects</span>
+      <span class="ci r">Weak credentials</span><span class="ci r">Port scanning</span>
+      <span class="ci">All passive checks</span><span class="ci">AI patch guide</span>
+    </div>
+    <p style="margin-top:.9rem;font-size:.78rem;color:#fca5a5">⚠ Sends real attack payloads. Only run against authorized targets.</p>
+  </div>
+
+  <!-- ══ DEEP SCAN ══ -->
+  <div id="panel-deep" class="panel">
+
+    <!-- Step indicators -->
+    <div class="steps">
+      <div class="step active-step" id="ds1">① Sign Authorization</div>
+      <div class="step-arrow">→</div>
+      <div class="step" id="ds2">② Run Deep Scan</div>
+    </div>
+
+    <!-- Step 1: Authorization form -->
+    <div id="deep-step1">
+      <div class="deep-gate">
+        <div class="warn">📋 Signed Authorization Required</div>
+        <p style="font-size:.83rem;color:#86efac;line-height:1.6;margin-bottom:.9rem">
+          A deep scan probes for file traversal, auth bypass, subdomain exposure, API secrets,
+          file upload bypass, SSRF, SMTP relay, and more. The person signing below confirms
+          they have authority to authorize this testing.
+        </p>
+        <label>Company / Organization Name</label>
+        <input type="text" id="d-company" placeholder="Acme Corporation" required>
+        <div class="row">
+          <div>
+            <label>Authorized By (Full Name)</label>
+            <input type="text" id="d-name" placeholder="Jane Smith" required>
+          </div>
+          <div>
+            <label>Job Title</label>
+            <input type="text" id="d-title" placeholder="CTO / IT Manager / Owner" required>
+          </div>
+        </div>
+        <label>Email Address</label>
+        <input type="email" id="d-email" placeholder="jane@company.com" required>
+        <label>Domain to authorize</label>
+        <input type="text" id="d-domain" placeholder="company.com" required>
+        <label>Scope notes (optional)</label>
+        <textarea id="d-scope" placeholder="e.g. All subdomains, exclude payment.company.com"></textarea>
+        <label class="check-row" style="margin-bottom:1rem">
+          <input type="checkbox" id="d-agree" required>
+          <span style="font-size:.83rem;color:#86efac">
+            I declare that I am authorized to grant permission for security testing of the domain above,
+            including all its subdomains, and I accept full legal responsibility for this authorization.
+          </span>
+        </label>
+        <button class="btn btn-sign" id="btn-sign" type="button" onclick="signAuth()">
+          ✍ Sign &amp; Authorize
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: Run scan (unlocked after signing) -->
+    <div id="deep-step2" style="display:none">
+      <div class="auth-confirmed show" id="auth-confirmed-box"></div>
+      <form id="form-deep">
+        <input type="hidden" name="auth_id" id="deep-auth-id">
+        <label>URL to scan (within authorized domain)</label>
+        <input type="text" name="url" id="deep-url" placeholder="https://company.com" required>
+        <label>Platform / CMS (optional)</label>
+        <select name="platform">
+          <option value="">— Auto-detect —</option>
+          <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+          <option>Django (Python)</option><option>Node.js / Express</option>
+          <option>ASP.NET</option><option>Joomla</option><option>Custom / Unknown</option>
+        </select>
+        <button class="btn btn-deep" type="submit">🛡 Launch Deep Scan</button>
+      </form>
+      <div class="status-box" id="sb-deep"><span class="spinner"></span><span id="sm-deep"></span></div>
+    </div>
+
+    <div class="checks">
+      <span class="ci o">Subdomain enumeration</span><span class="ci o">File traversal (LFI)</span>
+      <span class="ci o">Auth bypass probes</span><span class="ci o">API endpoint discovery</span>
+      <span class="ci o">File upload bypass</span><span class="ci o">SSRF testing</span>
+      <span class="ci o">SMTP / open relay</span><span class="ci o">Session token analysis</span>
+      <span class="ci r">All active pentest checks</span><span class="ci">All passive checks</span>
+    </div>
+    <p style="margin-top:.9rem;font-size:.78rem;color:#fbbf24">🔍 Most comprehensive scan. Signed authorization stored on record.</p>
+  </div>
+
+</div><!-- /card -->
+
+<footer>
+  WebCheck passive scans are legal on any public site. Active and deep scans require authorization.<br>
+  Unauthorized scanning of systems you do not own may violate computer crime laws.
+</footer>
+
+<script>
+// ── Tab switching ──────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-'+name).classList.add('active');
+}
+
+// ── Passive scan ──────────────────────────────────────────
+bindForm('form-passive','/scan','sb-passive','sm-passive',[
+  'Connecting to target…','Checking HTTPS & certificates…',
+  'Analysing security headers…','Testing cookies & CORS…',
+  'Probing for exposed files…','Checking methods & content…','Almost done…'
+]);
+
+// ── Active pentest ────────────────────────────────────────
+bindForm('form-active','/pentest','sb-active','sm-active',[
+  'Verifying authorization…','Running passive checks…',
+  'Scanning open ports…','Probing for SQL injection…',
+  'Testing XSS vectors…','Checking admin credentials…',
+  'Analysing findings…','Building report…'
+]);
+
+// ── Deep scan ─────────────────────────────────────────────
+bindForm('form-deep','/deepscan','sb-deep','sm-deep',[
+  'Verifying signed authorization…','Running passive scan…',
+  'Enumerating subdomains…','Probing for file traversal…',
+  'Testing authentication bypass…','Discovering API endpoints…',
+  'Testing file upload bypass…','Probing for SSRF…',
+  'Testing SMTP relay…','Running active pentest probes…',
+  'Compiling full report…'
+], 6000);
+
+// ── Sign authorization ────────────────────────────────────
+async function signAuth() {
+  const company = document.getElementById('d-company').value.trim();
+  const name    = document.getElementById('d-name').value.trim();
+  const title   = document.getElementById('d-title').value.trim();
+  const email   = document.getElementById('d-email').value.trim();
+  const domain  = document.getElementById('d-domain').value.trim();
+  const scope   = document.getElementById('d-scope').value.trim();
+  const agree   = document.getElementById('d-agree').checked;
+
+  if (!company||!name||!title||!email||!domain||!agree) {
+    alert('Please fill in all required fields and check the agreement box.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-sign');
+  btn.disabled = true;
+  btn.textContent = 'Signing…';
+
+  try {
+    const r = await fetch('/authorize', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({domain,company_name:company,authorized_by:name,
+        authorized_by_email:email,authorized_by_title:title,scope_notes:scope})
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+
+    // Unlock step 2
+    document.getElementById('deep-auth-id').value = d.auth_id;
+    document.getElementById('deep-url').value = 'https://' + domain;
+    document.getElementById('auth-confirmed-box').innerHTML =
+      `✅ Authorization signed by ${name} (${company}) at ${new Date(d.signed_at).toLocaleString()}<br>`+
+      `Auth ID: <code style="font-size:.8rem">${d.auth_id}</code>`;
+
+    document.getElementById('deep-step1').style.display='none';
+    document.getElementById('deep-step2').style.display='block';
+    document.getElementById('ds1').className='step done';
+    document.getElementById('ds2').className='step active-step';
+
+  } catch(err) {
+    alert('Error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '✍ Sign & Authorize';
+  }
+}
+
+// ── Generic form handler ──────────────────────────────────
+function bindForm(formId, endpoint, sbId, smId, phases, interval=4500) {
+  const form  = document.getElementById(formId);
+  if (!form) return;
+  const btn   = form.querySelector('button[type=submit]');
+  const box   = document.getElementById(sbId);
+  const msgEl = document.getElementById(smId);
+  let pi=0, pt;
+
+  form.addEventListener('submit', async e=>{
+    e.preventDefault();
+
+    const chk = form.querySelector('input[type=checkbox][name=authorized]');
+    if (chk && !chk.checked) { alert('You must confirm authorization first.'); return; }
+
+    btn.disabled=true; box.style.display='block';
+    pi=0; msgEl.textContent=phases[0];
+    pt=setInterval(()=>{ if(pi<phases.length-1) pi++; msgEl.textContent=phases[pi]; }, interval);
+
+    const fd=new FormData(form);
+    let jobId;
+    try {
+      const r=await fetch(endpoint,{method:'POST',body:fd});
+      const d=await r.json();
+      if(d.error) throw new Error(d.error);
+      jobId=d.job_id;
+    } catch(err) {
+      clearInterval(pt); msgEl.textContent='⚠ '+err.message;
+      btn.disabled=false; return;
+    }
+
+    const poll=setInterval(async()=>{
+      try {
+        const r=await fetch('/status/'+jobId);
+        const d=await r.json();
+        if(d.status==='done') {
+          clearInterval(poll); clearInterval(pt);
+          window.location.href='/report/'+jobId;
+        } else if(d.status==='error') {
+          clearInterval(poll); clearInterval(pt);
+          msgEl.textContent='⚠ '+(d.error||'Scan failed');
+          btn.disabled=false;
+        }
+      } catch{}
+    }, 3000);
+  });
+}
+</script>
+</body>
+</html>

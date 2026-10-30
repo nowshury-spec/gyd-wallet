@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: webcheck
+    runtime: python
+    rootDir: webcheck
+    buildCommand: pip install -r requirements.txt
+    # Single process with threads: the in-memory job store (app.jobs) is
+    # per-process, so multiple workers would 404 on /status and /report for
+    # jobs created in another worker. Scale concurrency via threads instead.
+    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11"
+    healthCheckPath: /
