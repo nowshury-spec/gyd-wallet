@@ -176,6 +176,45 @@
   .check-text { font-size: .86rem; color: #cbd5e1; line-height: 1.5; }
   .check-text strong { color: var(--text); }
 
+  /* ── Threat intel tags ── */
+  .kev-tag {
+    font-size: .65rem; font-weight: 800; background: #7f1d1d; color: #fca5a5;
+    border: 1px solid #dc2626; padding: .15rem .5rem; border-radius: 4px;
+    flex-shrink: 0; animation: kev-pulse 2s infinite;
+  }
+  @keyframes kev-pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+  .epss-tag {
+    font-size: .65rem; font-weight: 700; background: #1a0d2e; color: #c084fc;
+    border: 1px solid #7c3aed; padding: .15rem .5rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .intel-box {
+    background: #110d1a; border: 1px solid #4c1d95; border-radius: 8px;
+    padding: .75rem 1rem; margin-top: .4rem;
+  }
+  .intel-box .intel-row {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    font-size: .84rem; color: #d8b4fe; line-height: 1.6;
+  }
+  .intel-box .intel-label { font-size: .7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: #a78bfa; }
+  .kev-warn {
+    background: #1a0a0a; border: 1px solid #dc2626; border-radius: 8px;
+    padding: .75rem 1rem; margin-top: .4rem; color: #fca5a5; font-size: .86rem; line-height: 1.6;
+  }
+  .kev-warn strong { color: #f87171; }
+  .matched-cves { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+  .matched-cve-chip {
+    font-size: .72rem; font-family: monospace; background: #1e0a1a; color: #f0abfc;
+    border: 1px solid #a855f7; border-radius: 5px; padding: .15rem .5rem;
+  }
+  .intel-stats {
+    max-width: 900px; margin: 0 auto 1rem;
+    background: #110d1a; border: 1px solid #4c1d95;
+    border-radius: 12px; padding: .7rem 1.2rem;
+    font-size: .8rem; color: #a78bfa; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  }
+  .intel-stats strong { color: #c084fc; }
+
   .no-findings { max-width: 900px; margin: 0 auto; text-align: center; padding: 3rem; color: var(--low); font-size: 1.1rem; }
 
   .print-btn { max-width: 900px; margin: 1.5rem auto 0; display: flex; justify-content: flex-end; }
@@ -229,6 +268,16 @@
   ({{ job.auth_record.authorized_by_title }}, {{ job.auth_record.company_name }})
   on {{ job.auth_record.signed_at[:10] }} ·
   Auth ID: <code style="font-size:.8rem">{{ job.auth_record.auth_id }}</code>
+</div>
+{% endif %}
+
+<!-- Threat intelligence stats -->
+{% if job.intel_stats %}
+<div class="intel-stats">
+  <strong>Threat Intel:</strong>
+  CISA KEV catalog: {{ job.intel_stats.total }} known exploited vulnerabilities tracked
+  · {{ job.intel_stats.ransomware_related }} ransomware-linked
+  · Findings enriched with NVD + EPSS data
 </div>
 {% endif %}
 
@@ -298,6 +347,8 @@
       {% elif f.get('active') or f.get('tier') == 'active' %}<span class="active-tag">⚡ ACTIVE TEST</span>{% endif %}
       {% if f.get('cvss') %}<span class="cvss-tag" title="{{ f.get('cvss_vector','') }}">CVSS {{ f.cvss }}</span>{% endif %}
       {% if f.get('cve') %}<span class="cve-tag">{{ f.cve }}</span>{% endif %}
+      {% if f.get('in_kev') %}<span class="kev-tag">CISA KEV</span>{% endif %}
+      {% if f.get('epss_score') %}<span class="epss-tag">EPSS {{ f.epss_score }}%</span>{% endif %}
       {% if f.get('category') %}<span style="font-size:.7rem;color:var(--muted);flex-shrink:0">{{ f.category }}</span>{% endif %}
       <span class="finding-title">{{ f.title }}</span>
       <span class="chevron">›</span>
@@ -324,6 +375,48 @@
       {% if f.get('impact') %}
       <div class="detail-label">Business impact</div>
       <div class="impact-box">{{ f.impact }}</div>
+      {% endif %}
+      {% if f.get('in_kev') %}
+      <div class="detail-label">CISA Known Exploited Vulnerability</div>
+      <div class="kev-warn">
+        <strong>This vulnerability is actively exploited in the wild.</strong>
+        CISA added it to the KEV catalog on {{ f.kev_entry.date_added }}.
+        {% if f.kev_entry.due_date %}Remediation due by <strong>{{ f.kev_entry.due_date }}</strong>.{% endif %}
+        {% if f.get('ransomware_use') %}<br>Known ransomware campaign use: <strong>{{ f.ransomware_use }}</strong>.{% endif %}
+        {% if f.kev_entry.action %}<br>Required action: {{ f.kev_entry.action }}{% endif %}
+      </div>
+      {% endif %}
+      {% if f.get('epss_entry') or f.get('nvd_entry') or f.get('matched_cves') %}
+      <div class="detail-label">Threat Intelligence</div>
+      <div class="intel-box">
+        {% if f.get('epss_entry') %}
+        <div class="intel-row">
+          <span class="intel-label">EPSS:</span>
+          {{ f.epss_score }}% probability of exploitation in next 30 days
+          ({{ f.epss_percentile }}th percentile)
+        </div>
+        {% endif %}
+        {% if f.get('nvd_entry') %}
+        <div class="intel-row">
+          <span class="intel-label">NVD:</span>
+          {{ f.nvd_entry.description[:200] }}{% if f.nvd_entry.description|length > 200 %}...{% endif %}
+        </div>
+        {% if f.nvd_entry.cwes %}
+        <div class="intel-row">
+          <span class="intel-label">CWE:</span>
+          {{ f.nvd_entry.cwes | join(', ') }}
+        </div>
+        {% endif %}
+        {% endif %}
+        {% if f.get('matched_cves') %}
+        <div class="intel-row"><span class="intel-label">Related CVEs:</span></div>
+        <div class="matched-cves">
+          {% for mc in f.matched_cves %}
+          <span class="matched-cve-chip" title="{{ mc.description }}">{{ mc.cve }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
       {% endif %}
       <div class="detail-label">How to fix it</div>
       <div class="fix-box">{{ f.fix }}</div>

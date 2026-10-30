@@ -19,6 +19,7 @@ from deep_scan import run_deep_scan, DeepFinding
 from passive_checks import run_passive_checks
 from explain import enrich
 from report_utils import summarize, access_path, checklist
+from threat_intel import enrich_with_intel, kev_stats
 from auth_store import create_authorization, find_authorization_for_domain
 
 app = Flask(__name__)
@@ -32,6 +33,7 @@ MAX_JOBS = 500
 jobs = OrderedDict()   # {job_id: {...}}
 _jobs_lock = threading.Lock()
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+NVD_API_KEY = os.environ.get('NVD_API_KEY', '')
 
 
 # ─────────────────────────────────────────────────────────────
@@ -81,11 +83,13 @@ def _passive_worker(job_id, url, platform):
         extra = run_passive_checks(url)
         findings = [_finding_dict(f) for f in sc.findings] + \
                    [_finding_dict(f) for f in extra]
+        findings = enrich_with_intel(findings, nvd_api_key=NVD_API_KEY)
         ai_report = _get_ai(url, sc.findings, platform)
         jobs[job_id].update({
             'status': 'done', 'target': sc.target,
             'findings': findings, 'ai_report': ai_report,
             'scanned_at': _now(), 'counts': _count(findings),
+            'intel_stats': kev_stats(),
         })
     except Exception as e:
         jobs[job_id].update({'status': 'error', 'error': str(e)})
@@ -100,12 +104,14 @@ def _active_worker(job_id, url, platform):
         active_raw = run_active_scan(url, authorized=True)
         active = [{**_finding_dict(f), 'tier': 'active'} for f in active_raw]
         findings = active + passive
+        findings = enrich_with_intel(findings, nvd_api_key=NVD_API_KEY)
         ai_report = _get_ai(url, sc.findings, platform)
         jobs[job_id].update({
             'status': 'done', 'target': url,
             'findings': findings, 'ai_report': ai_report,
             'scanned_at': _now(), 'counts': _count(findings),
             'active_count': len(active), 'passive_count': len(passive),
+            'intel_stats': kev_stats(),
         })
     except Exception as e:
         jobs[job_id].update({'status': 'error', 'error': str(e)})
@@ -130,6 +136,7 @@ def _deep_worker(job_id, url, platform, auth_record):
                   [_finding_dict(f) for f in run_passive_checks(url)]
 
         findings = deep + active + passive
+        findings = enrich_with_intel(findings, nvd_api_key=NVD_API_KEY)
         ai_report = _get_ai(url, sc.findings, platform)
 
         jobs[job_id].update({
@@ -139,6 +146,7 @@ def _deep_worker(job_id, url, platform, auth_record):
             'deep_count': len(deep),
             'active_count': len(active),
             'passive_count': len(passive),
+            'intel_stats': kev_stats(),
             # report.html renders the signed-authorization banner from this.
             'auth_record': auth_record,
             'authorized_by': auth_record.get('authorized_by'),
