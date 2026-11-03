@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebCheck — Cybersecurity Assessment Platform</title>
+<style>
+:root {
+  --bg: #0a0f1e; --bg2: #060b18; --card: #111827; --border: #1e293b;
+  --accent: #6366f1; --accent2: #22d3ee; --accent3: #a78bfa;
+  --red: #ef4444; --orange: #f97316; --green: #22c55e; --amber: #f59e0b;
+  --text: #e2e8f0; --muted: #64748b; --dim: #475569;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; line-height: 1.6; }
+a { color: var(--accent2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Nav ── */
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,15,30,.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+}
+.nav-inner {
+  max-width: 1100px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 56px;
+}
+.nav-brand {
+  font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.nav-links { display: flex; gap: 1.8rem; }
+.nav-links a { color: var(--muted); font-size: .85rem; font-weight: 600; text-decoration: none; transition: color .2s; }
+.nav-links a:hover { color: var(--text); }
+.nav-cta {
+  background: var(--accent); color: #fff; padding: .4rem 1rem;
+  border-radius: 6px; font-size: .82rem; font-weight: 700;
+  border: none; cursor: pointer; transition: opacity .2s;
+}
+.nav-cta:hover { opacity: .85; text-decoration: none; }
+
+/* ── Hero ── */
+.hero {
+  text-align: center; padding: 5rem 1.5rem 3.5rem;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+  position: relative; overflow: hidden;
+}
+.hero::before {
+  content: ''; position: absolute; top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+.hero h1 {
+  font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 800;
+  letter-spacing: -1px; line-height: 1.15; margin-bottom: 1rem;
+  position: relative;
+}
+.hero h1 span {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.hero p { color: var(--muted); font-size: 1.1rem; max-width: 640px; margin: 0 auto 2rem; position: relative; }
+.hero-btns { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; position: relative; }
+.hero-btns a {
+  padding: .65rem 1.6rem; border-radius: 8px; font-weight: 700; font-size: .9rem;
+  transition: all .2s; text-decoration: none;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: .85; }
+.btn-outline { border: 1px solid var(--border); color: var(--text); background: transparent; }
+.btn-outline:hover { border-color: var(--accent); }
+
+/* ── Trust bar ── */
+.trust-bar {
+  display: flex; justify-content: center; gap: 2.5rem; flex-wrap: wrap;
+  padding: 1.5rem 1.5rem 2.5rem; border-bottom: 1px solid var(--border);
+}
+.trust-item { text-align: center; }
+.trust-num { font-size: 1.6rem; font-weight: 800; color: var(--accent2); }
+.trust-label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+
+/* ── Section base ── */
+.section { max-width: 1100px; margin: 0 auto; padding: 4rem 1.5rem; }
+.section-label {
+  font-size: .72rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--accent); margin-bottom: .5rem;
+}
+.section h2 { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: .6rem; }
+.section .sub { color: var(--muted); font-size: 1rem; max-width: 600px; margin-bottom: 2.5rem; }
+
+/* ── Service tiers ── */
+.tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.2rem; }
+.tier {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 1.8rem; transition: border-color .2s; position: relative; overflow: hidden;
+}
+.tier:hover { border-color: var(--accent); }
+.tier-icon { font-size: 2rem; margin-bottom: .8rem; }
+.tier h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: .3rem; }
+.tier .tier-desc { color: var(--muted); font-size: .88rem; margin-bottom: 1rem; line-height: 1.6; }
+.tier-tag {
+  display: inline-block; font-size: .68rem; font-weight: 800;
+  padding: .15rem .6rem; border-radius: 4px; margin-bottom: .8rem;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.tag-free { background: #0d2818; color: #4ade80; }
+.tag-auth { background: #1a0a0a; color: #fca5a5; }
+.tag-signed { background: #1a1100; color: #fbbf24; }
+.tier-checks { list-style: none; font-size: .83rem; color: var(--dim); }
+.tier-checks li { padding: .25rem 0; }
+.tier-checks li::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: .6rem; vertical-align: middle; }
+.tier-checks.t-passive li::before { background: var(--accent2); }
+.tier-checks.t-active li::before { background: var(--red); }
+.tier-checks.t-deep li::before { background: var(--amber); }
+.tier-btn {
+  display: block; width: 100%; margin-top: 1.2rem; padding: .65rem;
+  border: none; border-radius: 8px; font-size: .88rem; font-weight: 700;
+  color: #fff; cursor: pointer; text-align: center; transition: opacity .2s;
+  text-decoration: none;
+}
+.tier-btn:hover { opacity: .85; text-decoration: none; }
+.tier-btn.bp { background: linear-gradient(135deg, var(--accent), #818cf8); }
+.tier-btn.ba { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+.tier-btn.bd { background: linear-gradient(135deg, #d97706, #b45309); }
+
+/* ── How it works ── */
+.steps-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+.hw-step {
+  text-align: center; padding: 1.5rem;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+}
+.hw-num {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: .9rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: .8rem;
+}
+.hw-step h4 { font-size: .95rem; margin-bottom: .3rem; }
+.hw-step p { font-size: .82rem; color: var(--muted); }
+
+/* ── Methodology ── */
+.method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.method-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1.2rem 1.3rem;
+}
+.method-card h4 { font-size: .9rem; font-weight: 700; margin-bottom: .3rem; }
+.method-card p { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+.method-ref { font-size: .72rem; color: var(--dim); margin-top: .4rem; }
+
+/* ── Report features ── */
+.report-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+.rf {
+  display: flex; gap: .9rem; align-items: flex-start;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.1rem;
+}
+.rf-icon { font-size: 1.5rem; flex-shrink: 0; margin-top: .1rem; }
+.rf h4 { font-size: .9rem; font-weight: 700; margin-bottom: .2rem; }
+.rf p { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+
+/* ── Scanner section ── */
+.scanner-section { background: var(--bg2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+/* Tabs */
+.tabs { display: flex; width: 100%; max-width: 640px; margin: 0 auto -1px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0; overflow: hidden; }
+.tab { flex: 1; padding: .7rem .5rem; text-align: center; cursor: pointer;
+  font-size: .8rem; font-weight: 700; color: var(--muted);
+  border-bottom: 2px solid transparent; background: none;
+  border-top: none; border-left: none; border-right: none;
+  transition: all .2s; letter-spacing: .02em; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab:hover:not(.active) { color: var(--text); }
+
+/* Scanner card */
+.scan-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 0 0 16px 16px; padding: 1.8rem;
+  width: 100%; max-width: 640px; margin: 0 auto;
+}
+
+/* Form fields */
+.scan-card label { display: block; font-size: .78rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .08em; margin-bottom: .4rem; }
+.scan-card input[type=text], .scan-card input[type=email],
+.scan-card select, .scan-card textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: .92rem;
+  padding: .65rem .9rem; margin-bottom: 1rem; outline: none;
+  transition: border-color .2s; font-family: inherit;
+}
+.scan-card input:focus, .scan-card select:focus, .scan-card textarea:focus { border-color: var(--accent); }
+.scan-card select option { background: var(--card); }
+.scan-card textarea { resize: vertical; min-height: 60px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+
+/* Auth gates */
+.auth-gate { background: #1a0a0a; border: 1px solid #7f1d1d; border-radius: 10px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
+.auth-gate .warn { font-size: .75rem; font-weight: 800; color: var(--red); text-transform: uppercase; letter-spacing: .08em; margin-bottom: .6rem; }
+.check-row { display: flex; align-items: flex-start; gap: .55rem; font-size: .85rem; color: #fca5a5; line-height: 1.5; cursor: pointer; }
+.check-row input { margin-top: 3px; accent-color: var(--red); flex-shrink: 0; }
+
+.deep-gate { background: #0d1a0d; border: 1px solid #166534; border-radius: 10px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
+.deep-gate .warn { font-size: .75rem; font-weight: 800; color: #4ade80; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .8rem; }
+
+/* Buttons */
+.btn { width: 100%; padding: .8rem; border: none; border-radius: 8px; color: #fff; font-size: .95rem; font-weight: 700; cursor: pointer; transition: opacity .2s; }
+.btn:hover { opacity: .88; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-passive { background: linear-gradient(135deg, var(--accent), #818cf8); }
+.btn-active  { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+.btn-deep    { background: linear-gradient(135deg, #d97706, #b45309); }
+.btn-sign    { background: linear-gradient(135deg, #166534, #15803d); margin-bottom: .8rem; }
+
+.panel { display: none; } .panel.active { display: block; }
+
+/* Deep scan steps */
+.ds-steps { display: flex; gap: .4rem; margin-bottom: 1.2rem; align-items: center; }
+.ds-step { flex: 1; text-align: center; font-size: .72rem; font-weight: 700;
+  padding: .4rem .2rem; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--border); color: var(--muted); transition: all .2s; }
+.ds-step.done { background: #166534; border-color: #4ade80; color: #fff; }
+.ds-step.active-step { background: #1e3a5f; border-color: var(--accent2); color: var(--accent2); }
+.step-arrow { color: var(--muted); font-size: .8rem; flex-shrink: 0; }
+
+.auth-confirmed { background: #0d1a0d; border: 1px solid #4ade80; border-radius: 8px;
+  padding: .7rem 1rem; margin-bottom: 1rem; font-size: .85rem; color: #86efac; display: none; }
+.auth-confirmed.show { display: block; }
+
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; margin-top: 1.3rem; font-size: .82rem; color: var(--muted); }
+.ci::before { content: "\2713  "; color: var(--accent2); }
+.ci.r::before { content: "\26A1  "; color: var(--red); }
+.ci.o::before { content: "\1F50D  "; }
+
+.status-box { display: none; margin-top: 1rem; padding: .9rem; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg); text-align: center; color: var(--muted); }
+.spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--border);
+  border-top-color: var(--accent2); border-radius: 50%;
+  animation: spin .8s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Footer ── */
+.site-footer {
+  text-align: center; padding: 2.5rem 1.5rem;
+  border-top: 1px solid var(--border); color: var(--muted); font-size: .78rem;
+}
+.footer-links { display: flex; gap: 1.5rem; justify-content: center; margin-bottom: .6rem; flex-wrap: wrap; }
+.footer-links a { color: var(--dim); font-size: .78rem; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .tiers { grid-template-columns: 1fr; }
+  .hero { padding: 3rem 1rem 2rem; }
+  .hero h1 { font-size: 1.8rem; }
+  .section { padding: 2.5rem 1rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ Navigation ═══ -->
+<nav>
+  <div class="nav-inner">
+    <span class="nav-brand">WebCheck</span>
+    <div class="nav-links">
+      <a href="#services">Services</a>
+      <a href="#methodology">Methodology</a>
+      <a href="#reports">Reports</a>
+      <a href="#scanner">Scanner</a>
+    </div>
+    <a class="nav-cta" href="#scanner">Start Scan</a>
+  </div>
+</nav>
+
+<!-- ═══ Hero ═══ -->
+<section class="hero">
+  <h1>Find vulnerabilities<br>before <span>attackers</span> do</h1>
+  <p>Professional-grade security assessments aligned with OWASP and CISA guidelines.
+     Scan, test, and get actionable remediation reports — from passive recon to full-scope penetration testing.</p>
+  <div class="hero-btns">
+    <a class="btn-primary" href="#scanner" style="text-decoration:none">Run Free Scan</a>
+    <a class="btn-outline" href="#services" style="text-decoration:none">View Services</a>
+  </div>
+</section>
+
+<!-- ═══ Trust bar ═══ -->
+<div class="trust-bar">
+  <div class="trust-item"><div class="trust-num">40+</div><div class="trust-label">Security Checks</div></div>
+  <div class="trust-item"><div class="trust-num">OWASP</div><div class="trust-label">Top 10 Coverage</div></div>
+  <div class="trust-item"><div class="trust-num">CVSS 3.1</div><div class="trust-label">Risk Scoring</div></div>
+  <div class="trust-item"><div class="trust-num">3</div><div class="trust-label">Scan Tiers</div></div>
+</div>
+
+<!-- ═══ Service Tiers ═══ -->
+<section class="section" id="services">
+  <div class="section-label">Services</div>
+  <h2>Security Assessment Tiers</h2>
+  <p class="sub">Choose the level of testing appropriate for your needs — from a quick health check to a full-scope engagement with signed authorization.</p>
+
+  <div class="tiers">
+    <!-- Passive -->
+    <div class="tier">
+      <div class="tier-icon">&#x1F50D;</div>
+      <span class="tier-tag tag-free">No Permission Needed</span>
+      <h3>Passive Scan</h3>
+      <p class="tier-desc">Non-intrusive analysis of publicly visible security posture. Examines headers, TLS configuration, exposed files, and cookie policies without sending any attack payloads.</p>
+      <ul class="tier-checks t-passive">
+        <li>HTTPS &amp; TLS certificate analysis</li>
+        <li>Security header audit (CSP, HSTS, X-Frame-Options)</li>
+        <li>Cookie security flags (Secure, HttpOnly, SameSite)</li>
+        <li>CORS misconfiguration detection</li>
+        <li>Sensitive file exposure (.env, .git, backups)</li>
+        <li>Admin panel discovery</li>
+        <li>Technology fingerprinting</li>
+        <li>Directory listing detection</li>
+      </ul>
+      <a class="tier-btn bp" href="#scanner" onclick="setTimeout(()=>switchTab('passive',document.querySelector('[data-tab=passive]')),100)">Start Free Scan</a>
+    </div>
+
+    <!-- Active -->
+    <div class="tier">
+      <div class="tier-icon">&#x26A1;</div>
+      <span class="tier-tag tag-auth">Authorization Required</span>
+      <h3>Penetration Test</h3>
+      <p class="tier-desc">Active vulnerability testing that sends real-world attack payloads against the target. Discovers injection flaws, authentication weaknesses, and exploitable misconfigurations.</p>
+      <ul class="tier-checks t-active">
+        <li>SQL injection testing (error &amp; blind)</li>
+        <li>Cross-site scripting (reflected &amp; stored)</li>
+        <li>Authentication bypass probes</li>
+        <li>Open redirect detection</li>
+        <li>Default/weak credential testing</li>
+        <li>Open port &amp; service scanning</li>
+        <li>All passive scan checks included</li>
+        <li>AI-powered remediation guidance</li>
+      </ul>
+      <a class="tier-btn ba" href="#scanner" onclick="setTimeout(()=>switchTab('active',document.querySelector('[data-tab=active]')),100)">Run Pentest</a>
+    </div>
+
+    <!-- Deep -->
+    <div class="tier">
+      <div class="tier-icon">&#x1F6E1;&#xFE0F;</div>
+      <span class="tier-tag tag-signed">Signed Authorization</span>
+      <h3>Deep Scan</h3>
+      <p class="tier-desc">Full-scope security engagement with signed authorization on record. Covers advanced attack vectors including subdomain enumeration, SSRF, file upload bypass, and session analysis.</p>
+      <ul class="tier-checks t-deep">
+        <li>Subdomain enumeration</li>
+        <li>Local file inclusion / directory traversal</li>
+        <li>Server-side request forgery (SSRF)</li>
+        <li>Unrestricted file upload bypass</li>
+        <li>API endpoint &amp; secret discovery</li>
+        <li>SMTP open relay testing</li>
+        <li>Session token analysis</li>
+        <li>All pentest + passive checks included</li>
+      </ul>
+      <a class="tier-btn bd" href="#scanner" onclick="setTimeout(()=>switchTab('deep',document.querySelector('[data-tab=deep]')),100)">Launch Deep Scan</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ How It Works ═══ -->
+<section class="section" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);max-width:100%;padding-left:0;padding-right:0;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 1.5rem;">
+    <div class="section-label">Process</div>
+    <h2>How It Works</h2>
+    <p class="sub">From scan to remediation in four steps.</p>
+    <div class="steps-row">
+      <div class="hw-step">
+        <div class="hw-num">1</div>
+        <h4>Enter Target</h4>
+        <p>Provide the URL and select the scan tier. Active and deep scans require authorization confirmation.</p>
+      </div>
+      <div class="hw-step">
+        <div class="hw-num">2</div>
+        <h4>Automated Testing</h4>
+        <p>WebCheck runs 40+ checks across headers, TLS, injections, authentication, file exposure, and more.</p>
+      </div>
+      <div class="hw-step">
+        <div class="hw-num">3</div>
+        <h4>Analysis &amp; Scoring</h4>
+        <p>Each finding is scored with CVSS 3.1, mapped to OWASP/CWE categories, and enriched with root-cause analysis.</p>
+      </div>
+      <div class="hw-step">
+        <div class="hw-num">4</div>
+        <h4>Actionable Report</h4>
+        <p>Get an executive summary, attacker access path, per-finding remediation, and a prioritized fix checklist.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Methodology ═══ -->
+<section class="section" id="methodology">
+  <div class="section-label">Methodology</div>
+  <h2>Standards-Aligned Testing</h2>
+  <p class="sub">Our checks map to industry frameworks so findings translate directly into compliance and remediation actions.</p>
+  <div class="method-grid">
+    <div class="method-card">
+      <h4>OWASP Top 10</h4>
+      <p>Covers injection, broken authentication, sensitive data exposure, XXE, broken access control, misconfigurations, XSS, insecure deserialization, and more.</p>
+      <div class="method-ref">Ref: OWASP Top 10:2021</div>
+    </div>
+    <div class="method-card">
+      <h4>CWE / CVE Mapping</h4>
+      <p>Findings are mapped to Common Weakness Enumeration identifiers so developers know the exact class of vulnerability and can look up known CVEs.</p>
+      <div class="method-ref">Ref: MITRE CWE</div>
+    </div>
+    <div class="method-card">
+      <h4>CVSS 3.1 Scoring</h4>
+      <p>Each finding carries an indicative CVSS base score with the full vector string, giving a standardized measure of severity and exploitability.</p>
+      <div class="method-ref">Ref: FIRST CVSS v3.1</div>
+    </div>
+    <div class="method-card">
+      <h4>CISA Best Practices</h4>
+      <p>Remediation recommendations align with CISA's cybersecurity guidance — defense in depth, least privilege, secure defaults, and continuous monitoring.</p>
+      <div class="method-ref">Ref: CISA Cybersecurity Resources</div>
+    </div>
+    <div class="method-card">
+      <h4>NIST Cybersecurity Framework</h4>
+      <p>Assessment workflow follows Identify, Protect, Detect, Respond, Recover — from asset discovery through remediation tracking.</p>
+      <div class="method-ref">Ref: NIST CSF 2.0</div>
+    </div>
+    <div class="method-card">
+      <h4>Responsible Disclosure</h4>
+      <p>Active and deep scans use non-destructive probes only. No data is exfiltrated, no services are disrupted, and all testing requires documented authorization.</p>
+      <div class="method-ref">Ref: ISO 27001 / PTES</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Report Features ═══ -->
+<section class="section" id="reports" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);max-width:100%;padding-left:0;padding-right:0;">
+  <div style="max-width:1100px;margin:0 auto;padding:0 1.5rem;">
+    <div class="section-label">Deliverables</div>
+    <h2>What You Get</h2>
+    <p class="sub">Every scan produces a comprehensive report designed for both executives and technical teams.</p>
+    <div class="report-features">
+      <div class="rf">
+        <div class="rf-icon">&#x1F4CA;</div>
+        <div><h4>Executive Summary</h4><p>Overall risk rating, finding counts by severity, peak CVSS score, and the top three ways an attacker could get in.</p></div>
+      </div>
+      <div class="rf">
+        <div class="rf-icon">&#x1F3AF;</div>
+        <div><h4>Attack Access Path</h4><p>A step-by-step narrative showing how an attacker would chain the discovered weaknesses — from recon to data access.</p></div>
+      </div>
+      <div class="rf">
+        <div class="rf-icon">&#x1F50D;</div>
+        <div><h4>Root Cause Analysis</h4><p>Each finding explains what the vulnerability is, why it exists in the code, how it would be exploited, and its business impact.</p></div>
+      </div>
+      <div class="rf">
+        <div class="rf-icon">&#x1F527;</div>
+        <div><h4>Remediation Checklist</h4><p>Prioritized, deduplicated fix list with checkboxes. Work through it top-to-bottom to close the highest-risk gaps first.</p></div>
+      </div>
+      <div class="rf">
+        <div class="rf-icon">&#x1F916;</div>
+        <div><h4>AI Patch Guide</h4><p>When an API key is configured, an AI model generates a plain-English analysis and specific code-level fix recommendations.</p></div>
+      </div>
+      <div class="rf">
+        <div class="rf-icon">&#x1F4C1;</div>
+        <div><h4>Source Code Locator</h4><p>Optional offline module maps findings to candidate source-code locations (file:line) so developers know exactly where to look.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Scanner ═══ -->
+<section class="scanner-section" id="scanner">
+  <div class="section" style="padding-bottom:3rem;">
+    <div class="section-label" style="text-align:center">Scanner</div>
+    <h2 style="text-align:center">Run a Security Assessment</h2>
+    <p class="sub" style="text-align:center;margin-left:auto;margin-right:auto;">Choose your scan tier and enter the target URL. Results are delivered as a full report.</p>
+
+    <!-- Tab bar -->
+    <div class="tabs">
+      <button class="tab active" data-tab="passive" onclick="switchTab('passive',this)">Passive Scan</button>
+      <button class="tab" data-tab="active" onclick="switchTab('active',this)">Pentest</button>
+      <button class="tab" data-tab="deep" onclick="switchTab('deep',this)">Deep Scan</button>
+    </div>
+
+    <div class="scan-card">
+
+      <!-- ══ PASSIVE ══ -->
+      <div id="panel-passive" class="panel active">
+        <form id="form-passive">
+          <label>Website to scan</label>
+          <input type="text" name="url" placeholder="example.com" required>
+          <label>Platform / CMS (optional)</label>
+          <select name="platform">
+            <option value="">-- Auto-detect --</option>
+            <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+            <option>Django (Python)</option><option>Node.js / Express</option>
+            <option>ASP.NET</option><option>Joomla</option><option>Drupal</option>
+            <option>Custom / Unknown</option>
+          </select>
+          <button class="btn btn-passive" type="submit">Start Passive Scan</button>
+        </form>
+        <div class="status-box" id="sb-passive"><span class="spinner"></span><span id="sm-passive"></span></div>
+        <p style="margin-top:1rem;font-size:.78rem;color:var(--muted)">No permission needed — reads only publicly visible data.</p>
+      </div>
+
+      <!-- ══ ACTIVE PENTEST ══ -->
+      <div id="panel-active" class="panel">
+        <form id="form-active">
+          <label>Website to pentest</label>
+          <input type="text" name="url" placeholder="https://client-site.com" required>
+          <label>Platform / CMS (optional)</label>
+          <select name="platform">
+            <option value="">-- Auto-detect --</option>
+            <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+            <option>Django (Python)</option><option>Node.js / Express</option>
+            <option>ASP.NET</option><option>Joomla</option><option>Custom / Unknown</option>
+          </select>
+          <div class="auth-gate">
+            <div class="warn">Authorization Required</div>
+            <label class="check-row">
+              <input type="checkbox" name="authorized" value="yes" required>
+              I confirm I own this domain OR have written permission from the owner to perform security testing.
+            </label>
+          </div>
+          <button class="btn btn-active" type="submit">Run Penetration Test</button>
+        </form>
+        <div class="status-box" id="sb-active"><span class="spinner"></span><span id="sm-active"></span></div>
+        <p style="margin-top:1rem;font-size:.78rem;color:#fca5a5">Sends real attack payloads. Only run against authorized targets.</p>
+      </div>
+
+      <!-- ══ DEEP SCAN ══ -->
+      <div id="panel-deep" class="panel">
+        <div class="ds-steps">
+          <div class="ds-step active-step" id="ds1">1. Sign Authorization</div>
+          <div class="step-arrow">&rarr;</div>
+          <div class="ds-step" id="ds2">2. Run Deep Scan</div>
+        </div>
+
+        <!-- Step 1: Authorization form -->
+        <div id="deep-step1">
+          <div class="deep-gate">
+            <div class="warn">Signed Authorization Required</div>
+            <p style="font-size:.83rem;color:#86efac;line-height:1.6;margin-bottom:.9rem">
+              A deep scan probes for file traversal, auth bypass, subdomain exposure, API secrets,
+              file upload bypass, SSRF, SMTP relay, and more. The person signing below confirms
+              they have authority to authorize this testing.
+            </p>
+            <label>Company / Organization Name</label>
+            <input type="text" id="d-company" placeholder="Acme Corporation" required>
+            <div class="row">
+              <div>
+                <label>Authorized By (Full Name)</label>
+                <input type="text" id="d-name" placeholder="Jane Smith" required>
+              </div>
+              <div>
+                <label>Job Title</label>
+                <input type="text" id="d-title" placeholder="CTO / IT Manager / Owner" required>
+              </div>
+            </div>
+            <label>Email Address</label>
+            <input type="email" id="d-email" placeholder="jane@company.com" required>
+            <label>Domain to authorize</label>
+            <input type="text" id="d-domain" placeholder="company.com" required>
+            <label>Scope notes (optional)</label>
+            <textarea id="d-scope" placeholder="e.g. All subdomains, exclude payment.company.com"></textarea>
+            <label class="check-row" style="margin-bottom:1rem">
+              <input type="checkbox" id="d-agree" required>
+              <span style="font-size:.83rem;color:#86efac">
+                I declare that I am authorized to grant permission for security testing of the domain above,
+                including all its subdomains, and I accept full legal responsibility for this authorization.
+              </span>
+            </label>
+            <button class="btn btn-sign" id="btn-sign" type="button" onclick="signAuth()">Sign &amp; Authorize</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Run scan (unlocked after signing) -->
+        <div id="deep-step2" style="display:none">
+          <div class="auth-confirmed show" id="auth-confirmed-box"></div>
+          <form id="form-deep">
+            <input type="hidden" name="auth_id" id="deep-auth-id">
+            <label>URL to scan (within authorized domain)</label>
+            <input type="text" name="url" id="deep-url" placeholder="https://company.com" required>
+            <label>Platform / CMS (optional)</label>
+            <select name="platform">
+              <option value="">-- Auto-detect --</option>
+              <option>WordPress</option><option>Shopify</option><option>Laravel (PHP)</option>
+              <option>Django (Python)</option><option>Node.js / Express</option>
+              <option>ASP.NET</option><option>Joomla</option><option>Custom / Unknown</option>
+            </select>
+            <button class="btn btn-deep" type="submit">Launch Deep Scan</button>
+          </form>
+          <div class="status-box" id="sb-deep"><span class="spinner"></span><span id="sm-deep"></span></div>
+        </div>
+
+        <p style="margin-top:1rem;font-size:.78rem;color:#fbbf24">Most comprehensive scan. Signed authorization stored on record.</p>
+      </div>
+
+    </div><!-- /scan-card -->
+  </div>
+</section>
+
+<!-- ═══ Footer ═══ -->
+<footer class="site-footer">
+  <div class="footer-links">
+    <a href="#services">Services</a>
+    <a href="#methodology">Methodology</a>
+    <a href="#reports">Reports</a>
+    <a href="#scanner">Scanner</a>
+  </div>
+  <p>WebCheck passive scans are legal on any public site. Active and deep scans require authorization.<br>
+  Unauthorized scanning of systems you do not own may violate computer crime laws.</p>
+  <p style="margin-top:.6rem;color:var(--dim);">&copy; 2024 WebCheck. Built on OWASP, CISA, and NIST best practices.</p>
+</footer>
+
+<script>
+// ── Tab switching ──────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  else document.querySelector(`[data-tab="${name}"]`)?.classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ── Smooth scroll for nav links ──────────────────────────
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  });
+});
+
+// ── Passive scan ──────────────────────────────────────────
+bindForm('form-passive', '/scan', 'sb-passive', 'sm-passive', [
+  'Connecting to target…', 'Checking HTTPS & certificates…',
+  'Analysing security headers…', 'Testing cookies & CORS…',
+  'Probing for exposed files…', 'Checking methods & content…', 'Almost done…'
+]);
+
+// ── Active pentest ────────────────────────────────────────
+bindForm('form-active', '/pentest', 'sb-active', 'sm-active', [
+  'Verifying authorization…', 'Running passive checks…',
+  'Scanning open ports…', 'Probing for SQL injection…',
+  'Testing XSS vectors…', 'Checking admin credentials…',
+  'Analysing findings…', 'Building report…'
+]);
+
+// ── Deep scan ─────────────────────────────────────────────
+bindForm('form-deep', '/deepscan', 'sb-deep', 'sm-deep', [
+  'Verifying signed authorization…', 'Running passive scan…',
+  'Enumerating subdomains…', 'Probing for file traversal…',
+  'Testing authentication bypass…', 'Discovering API endpoints…',
+  'Testing file upload bypass…', 'Probing for SSRF…',
+  'Testing SMTP relay…', 'Running active pentest probes…',
+  'Compiling full report…'
+], 6000);
+
+// ── Sign authorization ────────────────────────────────────
+async function signAuth() {
+  const company = document.getElementById('d-company').value.trim();
+  const name    = document.getElementById('d-name').value.trim();
+  const title   = document.getElementById('d-title').value.trim();
+  const email   = document.getElementById('d-email').value.trim();
+  const domain  = document.getElementById('d-domain').value.trim();
+  const scope   = document.getElementById('d-scope').value.trim();
+  const agree   = document.getElementById('d-agree').checked;
+
+  if (!company || !name || !title || !email || !domain || !agree) {
+    alert('Please fill in all required fields and check the agreement box.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-sign');
+  btn.disabled = true;
+  btn.textContent = 'Signing…';
+
+  try {
+    const r = await fetch('/authorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, company_name: company, authorized_by: name,
+        authorized_by_email: email, authorized_by_title: title, scope_notes: scope })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+
+    document.getElementById('deep-auth-id').value = d.auth_id;
+    document.getElementById('deep-url').value = 'https://' + domain;
+    document.getElementById('auth-confirmed-box').innerHTML =
+      `Authorization signed by ${name} (${company}) at ${new Date(d.signed_at).toLocaleString()}<br>` +
+      `Auth ID: <code style="font-size:.8rem">${d.auth_id}</code>`;
+
+    document.getElementById('deep-step1').style.display = 'none';
+    document.getElementById('deep-step2').style.display = 'block';
+    document.getElementById('ds1').className = 'ds-step done';
+    document.getElementById('ds2').className = 'ds-step active-step';
+  } catch(err) {
+    alert('Error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Sign & Authorize';
+  }
+}
+
+// ── Generic form handler ──────────────────────────────────
+function bindForm(formId, endpoint, sbId, smId, phases, interval = 4500) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  const btn   = form.querySelector('button[type=submit]');
+  const box   = document.getElementById(sbId);
+  const msgEl = document.getElementById(smId);
+  let pi = 0, pt;
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+
+    const chk = form.querySelector('input[type=checkbox][name=authorized]');
+    if (chk && !chk.checked) { alert('You must confirm authorization first.'); return; }
+
+    btn.disabled = true;
+    box.style.display = 'block';
+    pi = 0;
+    msgEl.textContent = phases[0];
+    pt = setInterval(() => { if (pi < phases.length - 1) pi++; msgEl.textContent = phases[pi]; }, interval);
+
+    const fd = new FormData(form);
+    let jobId;
+    try {
+      const r = await fetch(endpoint, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      jobId = d.job_id;
+    } catch(err) {
+      clearInterval(pt);
+      msgEl.textContent = '⚠ ' + err.message;
+      btn.disabled = false;
+      return;
+    }
+
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch('/status/' + jobId);
+        const d = await r.json();
+        if (d.status === 'done') {
+          clearInterval(poll); clearInterval(pt);
+          window.location.href = '/report/' + jobId;
+        } else if (d.status === 'error') {
+          clearInterval(poll); clearInterval(pt);
+          msgEl.textContent = '⚠ ' + (d.error || 'Scan failed');
+          btn.disabled = false;
+        }
+      } catch(e) {}
+    }, 3000);
+  });
+}
+</script>
+</body>
+</html>

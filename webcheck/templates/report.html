@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report — {{ job.target }}</title>
+<style>
+  :root {
+    --bg: #0a0f1e; --card: #111827; --border: #1e293b;
+    --accent: #6366f1; --accent2: #22d3ee; --text: #e2e8f0; --muted: #64748b;
+    --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #16a34a; --info: #2563eb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; padding: 2rem 1rem 4rem; }
+  a { color: var(--accent2); text-decoration: none; }
+
+  .top-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 900px; margin: 0 auto 2rem; flex-wrap: wrap; gap: 1rem;
+  }
+  .logo { font-size: 1.4rem; font-weight: 800; background: linear-gradient(135deg, #6366f1,#22d3ee); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .back-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: .45rem 1rem; border-radius: 7px; font-size: .85rem; text-decoration: none; }
+  .back-btn:hover { border-color: var(--accent); }
+
+  /* ── Scan type badge ── */
+  .scan-type-badge {
+    display: inline-block; font-size: .72rem; font-weight: 800;
+    letter-spacing: .08em; padding: .2rem .65rem; border-radius: 5px; margin-left: .6rem;
+    vertical-align: middle;
+  }
+  .badge-passive { background: #1e3a5f; color: #7dd3fc; }
+  .badge-active  { background: #7f1d1d; color: #fca5a5; }
+
+  /* ── Summary ── */
+  .summary {
+    max-width: 900px; margin: 0 auto 1.5rem;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.4rem 1.8rem;
+  }
+  .target { font-size: 1.15rem; font-weight: 700; margin-bottom: .3rem; word-break: break-all; }
+  .scanned-at { color: var(--muted); font-size: .82rem; margin-bottom: 1.1rem; }
+  .badges { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .badge { font-size: .78rem; font-weight: 700; padding: .25rem .7rem; border-radius: 99px; border: 1px solid; }
+  .badge-critical { color: var(--critical); border-color: var(--critical); background: #dc262615; }
+  .badge-high     { color: var(--high);     border-color: var(--high);     background: #ea580c15; }
+  .badge-medium   { color: var(--medium);   border-color: var(--medium);   background: #ca8a0415; }
+  .badge-low      { color: var(--low);      border-color: var(--low);      background: #16a34a15; }
+  .badge-info     { color: var(--info);     border-color: var(--info);     background: #2563eb15; }
+
+  /* ── AI section ── */
+  .ai-box {
+    max-width: 900px; margin: 0 auto 1.5rem;
+    background: #0d1b2a; border: 1px solid #1e3a5f;
+    border-radius: 14px; padding: 1.4rem 1.8rem;
+  }
+  .ai-box h2 { font-size: .85rem; color: var(--accent2); text-transform: uppercase; letter-spacing: .08em; margin-bottom: .8rem; }
+  .ai-body { color: #cbd5e1; line-height: 1.7; font-size: .95rem; white-space: pre-wrap; }
+
+  /* ── Findings ── */
+  .section-title { max-width: 900px; margin: 0 auto .8rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .findings { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: .7rem; }
+  .finding { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .finding-header { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.2rem; cursor: pointer; user-select: none; }
+  .finding-header:hover { background: #ffffff07; }
+
+  .sev { font-size: .7rem; font-weight: 800; letter-spacing: .06em; padding: .22rem .6rem; border-radius: 5px; min-width: 70px; text-align: center; flex-shrink: 0; }
+  .sev-CRITICAL { background: var(--critical); color: #fff; }
+  .sev-HIGH     { background: var(--high);     color: #fff; }
+  .sev-MEDIUM   { background: var(--medium);   color: #000; }
+  .sev-LOW      { background: var(--low);      color: #fff; }
+  .sev-INFO     { background: var(--info);     color: #fff; }
+
+  /* Active / deep finding left borders */
+  .finding.is-active { border-left: 3px solid var(--critical); }
+  .finding.is-deep   { border-left: 3px solid #d97706; }
+
+  .active-tag {
+    font-size: .65rem; font-weight: 700; background: #7f1d1d; color: #fca5a5;
+    padding: .15rem .5rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .deep-tag {
+    font-size: .65rem; font-weight: 700; background: #1a1100; color: #fbbf24;
+    border: 1px solid #d97706; padding: .15rem .5rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .cve-tag {
+    font-size: .65rem; font-weight: 700; background: #1e0a0a; color: #f87171;
+    border: 1px solid #dc2626; padding: .15rem .5rem; border-radius: 4px; flex-shrink: 0;
+    font-family: monospace;
+  }
+  /* Auth banner for deep scans */
+  .auth-banner {
+    max-width: 900px; margin: 0 auto 1rem;
+    background: #0d1a0d; border: 1px solid #166534;
+    border-radius: 12px; padding: .85rem 1.4rem;
+    font-size: .83rem; color: #86efac; line-height: 1.6;
+  }
+  .auth-banner strong { color: #4ade80; }
+
+  .finding-title { font-weight: 600; flex: 1; }
+  .chevron { color: var(--muted); transition: transform .2s; margin-left: auto; }
+  .finding.open .chevron { transform: rotate(90deg); }
+
+  .finding-body { display: none; padding: 0 1.2rem 1.2rem; border-top: 1px solid var(--border); }
+  .finding.open .finding-body { display: block; }
+
+  .detail-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: .9rem 0 .3rem; }
+  .detail-text  { font-size: .88rem; color: #cbd5e1; line-height: 1.6; }
+
+  .evidence-box {
+    background: #0a0a0a; border: 1px solid #374151; border-radius: 8px;
+    padding: .65rem 1rem; font-size: .82rem; color: #9ca3af;
+    font-family: 'Courier New', monospace; line-height: 1.5; margin-top: .4rem;
+    word-break: break-all;
+  }
+  .fix-box {
+    background: #0d1a0d; border: 1px solid #166534; border-radius: 8px;
+    padding: .75rem 1rem; font-size: .88rem; color: #86efac;
+    line-height: 1.6; margin-top: .4rem; white-space: pre-wrap;
+  }
+  .location-box {
+    background: #0a0f1a; border: 1px solid #1d4ed8; border-radius: 8px;
+    padding: .65rem 1rem; font-size: .84rem; color: #93c5fd;
+    font-family: 'Courier New', monospace; line-height: 1.5; margin-top: .4rem;
+    word-break: break-all;
+  }
+  .cause-box {
+    background: #1a160a; border: 1px solid #7c5e10; border-radius: 8px;
+    padding: .75rem 1rem; font-size: .88rem; color: #fcd77f;
+    line-height: 1.6; margin-top: .4rem;
+  }
+  .attack-box {
+    background: #1a0d0d; border: 1px solid #7f1d1d; border-radius: 8px;
+    padding: .75rem 1rem; font-size: .88rem; color: #fca5a5;
+    line-height: 1.7; margin-top: .4rem; white-space: pre-line;
+  }
+  .impact-box {
+    background: #15121f; border: 1px solid #5b21b6; border-radius: 8px;
+    padding: .75rem 1rem; font-size: .88rem; color: #d8b4fe;
+    line-height: 1.6; margin-top: .4rem;
+  }
+
+  /* Executive summary */
+  .exec-box, .path-box {
+    max-width: 900px; margin: 1.2rem auto 0; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 1.5rem;
+  }
+  .exec-box h2, .path-box h2 { font-size: 1.1rem; margin: 0 0 .7rem; }
+  .exec-rating { font-size: 1rem; margin-bottom: .5rem; }
+  .exec-rating.rating-CRITICAL strong { color: var(--critical); }
+  .exec-rating.rating-HIGH strong { color: var(--high); }
+  .exec-rating.rating-MEDIUM strong { color: var(--medium); }
+  .exec-rating.rating-LOW strong { color: var(--low); }
+  .exec-cvss { font-size: .78rem; color: var(--muted); margin-left: .6rem;
+    border: 1px solid var(--border); border-radius: 6px; padding: .1rem .5rem; }
+  .exec-headline { color: #cbd5e1; line-height: 1.6; font-size: .92rem; margin: .4rem 0; }
+  .exec-counts { color: var(--muted); font-size: .85rem; margin: .4rem 0 .8rem; }
+  .exec-top-label, .path-note { font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); margin: .6rem 0 .3rem; }
+  .exec-top { margin: 0; padding-left: 1.2rem; }
+  .exec-top li { margin: .35rem 0; font-size: .9rem; color: #cbd5e1; line-height: 1.5; }
+  .exec-loc { display: block; font-family: 'Courier New', monospace;
+    font-size: .78rem; color: #93c5fd; margin-top: .15rem; word-break: break-all; }
+  .path-note { text-transform: none; letter-spacing: 0; font-size: .82rem; }
+  .path-steps { margin: .3rem 0 0; padding-left: 1.3rem; }
+  .path-steps li { margin: .5rem 0; color: #cbd5e1; line-height: 1.6; font-size: .9rem; }
+  .cvss-tag { font-size: .68rem; background: #1e293b; color: #cbd5e1;
+    border: 1px solid #475569; border-radius: 5px; padding: .1rem .4rem;
+    flex-shrink: 0; cursor: help; }
+
+  /* Remediation checklist */
+  .checklist { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: .5rem; }
+  .check-item { display: flex; gap: .6rem; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--border); border-radius: 9px;
+    padding: .7rem .9rem; cursor: pointer; }
+  .check-item input { margin-top: .25rem; flex-shrink: 0; width: 1.1rem; height: 1.1rem; }
+  .check-text { font-size: .86rem; color: #cbd5e1; line-height: 1.5; }
+  .check-text strong { color: var(--text); }
+
+  /* ── Threat intel tags ── */
+  .kev-tag {
+    font-size: .65rem; font-weight: 800; background: #7f1d1d; color: #fca5a5;
+    border: 1px solid #dc2626; padding: .15rem .5rem; border-radius: 4px;
+    flex-shrink: 0; animation: kev-pulse 2s infinite;
+  }
+  @keyframes kev-pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+  .epss-tag {
+    font-size: .65rem; font-weight: 700; background: #1a0d2e; color: #c084fc;
+    border: 1px solid #7c3aed; padding: .15rem .5rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .intel-box {
+    background: #110d1a; border: 1px solid #4c1d95; border-radius: 8px;
+    padding: .75rem 1rem; margin-top: .4rem;
+  }
+  .intel-box .intel-row {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    font-size: .84rem; color: #d8b4fe; line-height: 1.6;
+  }
+  .intel-box .intel-label { font-size: .7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: #a78bfa; }
+  .kev-warn {
+    background: #1a0a0a; border: 1px solid #dc2626; border-radius: 8px;
+    padding: .75rem 1rem; margin-top: .4rem; color: #fca5a5; font-size: .86rem; line-height: 1.6;
+  }
+  .kev-warn strong { color: #f87171; }
+  .matched-cves { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+  .matched-cve-chip {
+    font-size: .72rem; font-family: monospace; background: #1e0a1a; color: #f0abfc;
+    border: 1px solid #a855f7; border-radius: 5px; padding: .15rem .5rem;
+  }
+  .intel-stats {
+    max-width: 900px; margin: 0 auto 1rem;
+    background: #110d1a; border: 1px solid #4c1d95;
+    border-radius: 12px; padding: .7rem 1.2rem;
+    font-size: .8rem; color: #a78bfa; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  }
+  .intel-stats strong { color: #c084fc; }
+
+  .no-findings { max-width: 900px; margin: 0 auto; text-align: center; padding: 3rem; color: var(--low); font-size: 1.1rem; }
+
+  .print-btn { max-width: 900px; margin: 1.5rem auto 0; display: flex; justify-content: flex-end; }
+  .print-btn button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: .5rem 1.2rem; border-radius: 7px; cursor: pointer; font-size: .85rem; }
+  .print-btn button:hover { border-color: var(--accent); }
+
+  @media print { .back-btn, .print-btn { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <span class="logo">
+    🔍 WebCheck
+    {% if job.scan_type == 'deep' %}
+    <span class="scan-type-badge" style="background:#1a1100;color:#fbbf24;border:1px solid #d97706">🛡 DEEP SCAN</span>
+    {% elif job.scan_type == 'active' %}
+    <span class="scan-type-badge badge-active">⚡ PENTEST</span>
+    {% else %}
+    <span class="scan-type-badge badge-passive">PASSIVE</span>
+    {% endif %}
+  </span>
+  <a class="back-btn" href="/">← New Scan</a>
+</div>
+
+<!-- Summary bar -->
+<div class="summary">
+  <div class="target">{{ job.target }}</div>
+  <div class="scanned-at">Scanned {{ job.scanned_at }}
+    {% if job.scan_type == 'active' %}
+    · {{ job.active_count }} active findings + {{ job.passive_count }} passive findings
+    {% endif %}
+  </div>
+  <div class="badges">
+    {% if job.counts.critical %}<span class="badge badge-critical">● {{ job.counts.critical }} Critical</span>{% endif %}
+    {% if job.counts.high     %}<span class="badge badge-high">● {{ job.counts.high }} High</span>{% endif %}
+    {% if job.counts.medium   %}<span class="badge badge-medium">● {{ job.counts.medium }} Medium</span>{% endif %}
+    {% if job.counts.low      %}<span class="badge badge-low">● {{ job.counts.low }} Low</span>{% endif %}
+    {% if job.counts.info     %}<span class="badge badge-info">● {{ job.counts.info }} Info</span>{% endif %}
+    {% if not (job.counts.critical or job.counts.high or job.counts.medium or job.counts.low) %}
+    <span class="badge badge-low">✓ No issues found</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Auth banner for deep scans -->
+{% if job.scan_type == 'deep' and job.auth_record %}
+<div class="auth-banner">
+  🛡 <strong>Authorized Deep Scan</strong> — signed by
+  <strong>{{ job.auth_record.authorized_by }}</strong>
+  ({{ job.auth_record.authorized_by_title }}, {{ job.auth_record.company_name }})
+  on {{ job.auth_record.signed_at[:10] }} ·
+  Auth ID: <code style="font-size:.8rem">{{ job.auth_record.auth_id }}</code>
+</div>
+{% endif %}
+
+<!-- Threat intelligence stats -->
+{% if job.intel_stats %}
+<div class="intel-stats">
+  <strong>Threat Intel:</strong>
+  CISA KEV catalog: {{ job.intel_stats.total }} known exploited vulnerabilities tracked
+  · {{ job.intel_stats.ransomware_related }} ransomware-linked
+  · Findings enriched with NVD + EPSS data
+</div>
+{% endif %}
+
+<!-- Executive summary -->
+{% if summary %}
+<div class="exec-box">
+  <h2>Executive Summary</h2>
+  <div class="exec-rating rating-{{ summary.rating }}">
+    Overall risk: <strong>{{ summary.rating }}</strong>
+    {% if summary.max_cvss %}<span class="exec-cvss">peak CVSS {{ summary.max_cvss }}</span>{% endif %}
+  </div>
+  <p class="exec-headline">{{ summary.headline }}</p>
+  <div class="exec-counts">
+    {{ summary.total }} findings —
+    {{ summary.counts.CRITICAL }} critical,
+    {{ summary.counts.HIGH }} high,
+    {{ summary.counts.MEDIUM }} medium,
+    {{ summary.counts.LOW }} low,
+    {{ summary.counts.INFO }} info.
+  </div>
+  {% if summary.top_ways_in %}
+  <div class="exec-top-label">Top ways in</div>
+  <ol class="exec-top">
+    {% for t in summary.top_ways_in %}
+    <li>
+      <span class="sev sev-{{ t.severity }}">{{ t.severity }}</span>
+      {{ t.title }}
+      {% if t.location %}<span class="exec-loc">{{ t.location }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Access-path narrative -->
+{% if access_path %}
+<div class="path-box">
+  <h2>How an attacker would get in (access path)</h2>
+  <p class="path-note">A realistic route chaining the weaknesses found below.
+    Each step maps to a documented finding.</p>
+  <ol class="path-steps">
+    {% for step in access_path %}
+    <li>{{ step }}</li>
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+
+<!-- AI Analysis -->
+{% if job.ai_report %}
+<div class="ai-box">
+  <h2>🤖 AI Analysis &amp; Patch Guide</h2>
+  <div class="ai-body">{{ job.ai_report }}</div>
+</div>
+{% endif %}
+
+<!-- Findings list -->
+{% if job.findings %}
+<div class="section-title">All Findings ({{ job.findings | length }})</div>
+<div class="findings">
+  {% for f in job.findings %}
+  <div class="finding{% if f.get('tier') == 'deep' %} is-deep{% elif f.get('active') or f.get('tier') == 'active' %} is-active{% endif %}">
+    <div class="finding-header" onclick="toggle(this)">
+      <span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+      {% if f.get('tier') == 'deep' %}<span class="deep-tag">🛡 DEEP SCAN</span>
+      {% elif f.get('active') or f.get('tier') == 'active' %}<span class="active-tag">⚡ ACTIVE TEST</span>{% endif %}
+      {% if f.get('cvss') %}<span class="cvss-tag" title="{{ f.get('cvss_vector','') }}">CVSS {{ f.cvss }}</span>{% endif %}
+      {% if f.get('cve') %}<span class="cve-tag">{{ f.cve }}</span>{% endif %}
+      {% if f.get('in_kev') %}<span class="kev-tag">CISA KEV</span>{% endif %}
+      {% if f.get('epss_score') %}<span class="epss-tag">EPSS {{ f.epss_score }}%</span>{% endif %}
+      {% if f.get('category') %}<span style="font-size:.7rem;color:var(--muted);flex-shrink:0">{{ f.category }}</span>{% endif %}
+      <span class="finding-title">{{ f.title }}</span>
+      <span class="chevron">›</span>
+    </div>
+    <div class="finding-body">
+      {% if f.get('location') %}
+      <div class="detail-label">Location — where it is exposed</div>
+      <div class="location-box">{{ f.location }}</div>
+      {% endif %}
+      <div class="detail-label">What was found</div>
+      <div class="detail-text">{{ f.detail }}</div>
+      {% if f.get('evidence') %}
+      <div class="detail-label">Evidence / Proof</div>
+      <div class="evidence-box">{{ f.evidence }}</div>
+      {% endif %}
+      {% if f.get('cause') %}
+      <div class="detail-label">Root cause — why this exists</div>
+      <div class="cause-box">{{ f.cause }}</div>
+      {% endif %}
+      {% if f.get('attack') %}
+      <div class="detail-label">How an attacker gets in</div>
+      <div class="attack-box">{{ f.attack }}</div>
+      {% endif %}
+      {% if f.get('impact') %}
+      <div class="detail-label">Business impact</div>
+      <div class="impact-box">{{ f.impact }}</div>
+      {% endif %}
+      {% if f.get('in_kev') %}
+      <div class="detail-label">CISA Known Exploited Vulnerability</div>
+      <div class="kev-warn">
+        <strong>This vulnerability is actively exploited in the wild.</strong>
+        CISA added it to the KEV catalog on {{ f.kev_entry.date_added }}.
+        {% if f.kev_entry.due_date %}Remediation due by <strong>{{ f.kev_entry.due_date }}</strong>.{% endif %}
+        {% if f.get('ransomware_use') %}<br>Known ransomware campaign use: <strong>{{ f.ransomware_use }}</strong>.{% endif %}
+        {% if f.kev_entry.action %}<br>Required action: {{ f.kev_entry.action }}{% endif %}
+      </div>
+      {% endif %}
+      {% if f.get('epss_entry') or f.get('nvd_entry') or f.get('matched_cves') %}
+      <div class="detail-label">Threat Intelligence</div>
+      <div class="intel-box">
+        {% if f.get('epss_entry') %}
+        <div class="intel-row">
+          <span class="intel-label">EPSS:</span>
+          {{ f.epss_score }}% probability of exploitation in next 30 days
+          ({{ f.epss_percentile }}th percentile)
+        </div>
+        {% endif %}
+        {% if f.get('nvd_entry') %}
+        <div class="intel-row">
+          <span class="intel-label">NVD:</span>
+          {{ f.nvd_entry.description[:200] }}{% if f.nvd_entry.description|length > 200 %}...{% endif %}
+        </div>
+        {% if f.nvd_entry.cwes %}
+        <div class="intel-row">
+          <span class="intel-label">CWE:</span>
+          {{ f.nvd_entry.cwes | join(', ') }}
+        </div>
+        {% endif %}
+        {% endif %}
+        {% if f.get('matched_cves') %}
+        <div class="intel-row"><span class="intel-label">Related CVEs:</span></div>
+        <div class="matched-cves">
+          {% for mc in f.matched_cves %}
+          <span class="matched-cve-chip" title="{{ mc.description }}">{{ mc.cve }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="detail-label">How to fix it</div>
+      <div class="fix-box">{{ f.fix }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="no-findings">✓ No vulnerabilities detected.</div>
+{% endif %}
+
+<!-- Remediation checklist -->
+{% if checklist %}
+<div class="section-title">Remediation Checklist ({{ checklist | length }})</div>
+<div class="checklist">
+  {% for item in checklist %}
+  <label class="check-item">
+    <input type="checkbox">
+    <span class="sev sev-{{ item.severity }}">{{ item.severity }}</span>
+    <span class="check-text"><strong>{{ item.title }}</strong><br>{{ item.fix }}</span>
+  </label>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="print-btn"><button onclick="window.print()">🖨 Print / Save PDF</button></div>
+
+<script>
+function toggle(header) {
+  header.parentElement.classList.toggle('open');
+}
+// Auto-open critical + high
+document.querySelectorAll('.sev-CRITICAL, .sev-HIGH').forEach(el => {
+  el.closest('.finding').classList.add('open');
+});
+</script>
+</body>
+</html>
